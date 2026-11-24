@@ -3,6 +3,7 @@ package list
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -83,6 +84,18 @@ type MouseClickable interface {
 	// HandleMouseClick processes a mouse click event at the given coordinates.
 	// It returns true if the event was handled, false otherwise.
 	HandleMouseClick(btn ansi.MouseButton, x, y int) bool
+}
+
+// MouseClickCommandable represents an item that can handle mouse click
+// events and produce a command, such as opening a hyperlink in the
+// browser. When the returned command is non-nil, the chat click dispatcher
+// suppresses the generic expansion toggle, so acting on a discrete
+// clickable region never also toggles the item.
+type MouseClickCommandable interface {
+	// HandleMouseClickCmd processes a mouse click event at the given
+	// coordinates. It returns whether the event was handled and an
+	// optional command to execute.
+	HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd)
 }
 
 // SpacerItem is a spacer item that adds vertical space in the list.

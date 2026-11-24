@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // skillInvocation represents the XML structure for a loaded skill.
@@ -31,6 +32,12 @@ type UserMessageItem struct {
 	attachments *attachments.Renderer
 	message     *message.Message
 	sty         *styles.Styles
+
+	// links indexes the OSC 8 hyperlink spans in the last rendered
+	// content, so a plain click on a link opens it in the browser
+	// (terminals defer link clicks to the app under mouse reporting;
+	// see parseHyperlinkSpans).
+	links hyperlinkIndex
 }
 
 // newAttachmentRenderer builds the renderer user messages use to draw their
@@ -65,6 +72,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 	content, height, ok := m.getCachedRender(cappedWidth)
 	// cache hit
 	if ok {
+		m.links.index(content)
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
@@ -75,6 +83,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 		content = m.renderSkillInvocation(msgContent, cappedWidth)
 		height = lipgloss.Height(content)
 		m.setCachedRender(content, cappedWidth, height)
+		m.links.index(content)
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
@@ -102,6 +111,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 
 	height = lipgloss.Height(content)
 	m.setCachedRender(content, cappedWidth, height)
+	m.links.index(content)
 	return m.renderHighlighted(content, cappedWidth, height)
 }
 
@@ -124,6 +134,19 @@ func (m *UserMessageItem) renderSkillInvocation(content string, width int) strin
 	}
 
 	return toolOutputSkillContent(m.sty, skill.Name, skill.Description)
+}
+
+// HandleMouseClickCmd implements [list.MouseClickCommandable]. A plain
+// click on a hyperlink span opens the URL in the system browser; all
+// other clicks fall through unhandled.
+func (m *UserMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd) {
+	if btn != ansi.MouseLeft {
+		return false, nil
+	}
+	if url := spanAt(m.links.spans, y, x-MessageLeftPaddingTotal); url != "" {
+		return true, openURL(url)
+	}
+	return false, nil
 }
 
 // Render implements MessageItem.

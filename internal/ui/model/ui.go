@@ -1278,8 +1278,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
 	case DelayedClickMsg:
-		// Handle delayed single-click action (e.g., expansion).
-		m.chat.HandleDelayedClick(msg)
+		// Handle delayed single-click action (e.g., expansion) and run
+		// any command the click produced (e.g. opening a hyperlink).
+		if _, cmd := m.chat.HandleDelayedClick(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {

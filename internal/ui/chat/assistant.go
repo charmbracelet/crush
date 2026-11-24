@@ -197,6 +197,13 @@ type AssistantMessageItem struct {
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
+	// links indexes the OSC 8 hyperlink spans in the last rendered
+	// content, so a plain click on a link can open it in the browser.
+	// Terminals defer link handling to the application while mouse
+	// reporting is active, so terminal-level modifier-click never fires
+	// while Crush holds the mouse.
+	links hyperlinkIndex
+
 	// planAgent marks this item as plan-agent output. While the plan
 	// streams (the message is not finished) and the plan-start marker
 	// has arrived, the content renders as an open plan card: top and
@@ -479,6 +486,11 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	}
 
 	out := strings.Join(messageParts, "\n")
+	// Index hyperlink spans for click-to-open. Reparsing the joined
+	// output (rather than tracking spans through each section cache)
+	// keeps the index consistent with what is actually on screen
+	// regardless of which section caches hit.
+	a.links.index(out)
 	return out, lipgloss.Height(out)
 }
 
@@ -1042,12 +1054,24 @@ func (a *AssistantMessageItem) tailWindowWouldTruncate() bool {
 // path. Toggling here directly would double-toggle because the caller always
 // runs the generic path after a handled click.
 func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
+	handled, _ := a.HandleMouseClickCmd(btn, x, y)
+	return handled
+}
+
+// HandleMouseClickCmd implements [list.MouseClickCommandable]. A plain
+// click on a hyperlink span opens the URL in the browser; producing a
+// command suppresses the generic expansion toggle. A click on the
+// thinking box falls through to the expansion path as before.
+func (a *AssistantMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd) {
 	if btn != ansi.MouseLeft {
-		return false
+		return false, nil
+	}
+	if url := spanAt(a.links.spans, y, x-MessageLeftPaddingTotal); url != "" {
+		return true, openURL(url)
 	}
 	// Only the thinking box is clickable; other regions of the assistant
 	// message should not trigger expansion.
-	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight
+	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight, nil
 }
 
 // HandleKeyEvent implements KeyEventHandler.

@@ -1010,20 +1010,37 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 // HandleDelayedClick handles a delayed single-click action (like expansion).
 // It only executes if the click ID matches (i.e., no double-click occurred)
-// and no text selection was made (drag to select).
-func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
+// and no text selection was made (drag to select). A non-nil returned
+// command (e.g. opening a hyperlink) must be run by the caller.
+func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (bool, tea.Cmd) {
 	// Ignore if this click was superseded by a newer click (double/triple).
 	if msg.ClickID != m.pendingClickID {
-		return false
+		return false, nil
 	}
 
 	// Don't expand if user dragged to select text.
 	if m.HasHighlight() {
-		return false
+		return false, nil
 	}
 
 	// Execute the click action (e.g., expansion).
 	selectedItem := m.list.SelectedItem()
+	if cmdable, ok := selectedItem.(list.MouseClickCommandable); ok {
+		handled, cmd := cmdable.HandleMouseClickCmd(ansi.MouseButton1, msg.X, msg.Y)
+		// Toggle expansion only when the item signalled it handled the
+		// click and produced no command of its own, so a discrete action
+		// like opening a link never also toggles the item.
+		if handled && cmd == nil {
+			if expandable, ok := selectedItem.(chat.Expandable); ok {
+				wasFollowing := m.follow
+				expandable.ToggleExpanded()
+				if wasFollowing {
+					m.ScrollToBottom()
+				}
+			}
+		}
+		return handled, cmd
+	}
 	if clickable, ok := selectedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		// Toggle expansion only when the item signalled it handled the
@@ -1039,10 +1056,10 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 				}
 			}
 		}
-		return handled
+		return handled, nil
 	}
 
-	return false
+	return false, nil
 }
 
 // HandleMouseUp handles mouse up events for the chat component.

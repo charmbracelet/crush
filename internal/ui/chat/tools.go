@@ -171,6 +171,11 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+
+	// links indexes the OSC 8 hyperlink spans in the last rendered
+	// output so a plain click on a URL opens it in the browser (see
+	// parseHyperlinkSpans for why the app must handle this itself).
+	links hyperlinkIndex
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -369,6 +374,10 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 		t.setCachedRender(content, toolItemWidth, height)
 	}
 
+	// Index hyperlink spans only when the rendered content changed; the
+	// index self-invalidates so cached renders skip the scan entirely.
+	t.links.index(content)
+
 	return t.renderHighlighted(content, toolItemWidth, height)
 }
 
@@ -558,7 +567,23 @@ func (t *baseToolMessageItem) ToggleExpanded() bool {
 
 // HandleMouseClick implements MouseClickable.
 func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
-	return btn == ansi.MouseLeft
+	handled, _ := t.HandleMouseClickCmd(btn, x, y)
+	return handled
+}
+
+// HandleMouseClickCmd implements [list.MouseClickCommandable]. A plain
+// click on a hyperlink span in the tool output opens the URL in the
+// browser (producing a command, which suppresses the expansion toggle);
+// any other left click reports handled with a nil command so the generic
+// Expandable path toggles the item as before.
+func (t *baseToolMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd) {
+	if btn != ansi.MouseLeft {
+		return false, nil
+	}
+	if url := spanAt(t.links.spans, y, x-MessageLeftPaddingTotal); url != "" {
+		return true, openURL(url)
+	}
+	return true, nil
 }
 
 // HandleKeyEvent implements KeyEventHandler.
@@ -855,6 +880,7 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
 	content = common.RemapANSI16(content, sty.ANSI)
+	content = hyperlinkizeURLs(content)
 	lines := strings.Split(content, "\n")
 
 	maxLines := collapsedMaxLines(len(lines))

@@ -557,7 +557,7 @@ func createWorkspaceOnLiveServer(
 			return ws, nil
 		}
 		if !errors.Is(err, client.ErrServerShuttingDown) || attempt == maxStaleServerRetries-1 {
-			return nil, fmt.Errorf("failed to create workspace: %v", err)
+			return nil, err
 		}
 		slog.Warn("Server is shutting down; retrying against a replacement",
 			"attempt", attempt+1, "error", err)

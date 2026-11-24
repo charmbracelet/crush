@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -312,4 +313,6 @@ func TestCreateWorkspaceOnLiveServer_GivesUpOnOtherFailures(t *testing.T) {
 			return nil
 		})
 	require.Error(t, err)
+	require.Equal(t, 1, strings.Count(err.Error(), "failed to create workspace"),
+		"the error must say what failed only once: %v", err)
 }

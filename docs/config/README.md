@@ -743,7 +743,7 @@ script or pulled in via `source`. Later lines win, just like a shell.
 ## Legacy JSON
 
 `crush.json` is the original format and is now deprecated. We plan to support
-it for the forseeable future, but new configuration options will only be added
+it for the foreseeable future, but new configuration options will only be added
 to Bash-based config.
 
 ```jsonc

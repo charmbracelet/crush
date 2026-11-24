@@ -140,7 +140,7 @@ crush run --continue "Follow up on your last response"
 			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, reasoningEffort, quiet || verbose, sessionID, useLast)
 		}
 
-		ws, cleanup, err := setupLocalWorkspace(cmd)
+		ws, cleanup, err := setupLocalWorkspace(cmd, false)
 		if err != nil {
 			return err
 		}

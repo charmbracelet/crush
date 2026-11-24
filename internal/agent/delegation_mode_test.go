@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -125,4 +126,29 @@ func TestReadOnlyParent(t *testing.T) {
 	assert.True(t, readOnlyParent(config.AgentPlan))
 	assert.False(t, readOnlyParent(config.AgentCoder))
 	assert.False(t, readOnlyParent(""))
+}
+
+// TestBuildToolsWithOnlyReadToolsNeedsNoServices pins the reason to filter
+// before constructing: a subagent allowed nothing but glob and grep should
+// build with a coordinator that has no lspManager, permissions, history or
+// filetracker. Today every constructor runs regardless, so this fails with a
+// nil dereference; after the filter moves earlier, it passes.
+func TestBuildToolsWithOnlyReadToolsNeedsNoServices(t *testing.T) {
+	t.Parallel()
+
+	agent := config.Agent{AllowedTools: []string{"glob", "grep"}}
+	c := &coordinator{interactive: false, cfg: testConfigStore()}
+
+	var built []string
+	require.NotPanics(t, func() {
+		builtTools, err := c.buildTools(context.Background(), agent, true, nil)
+		require.NoError(t, err)
+		for _, tool := range builtTools {
+			built = append(built, tool.Info().Name)
+		}
+	})
+
+	// Nothing outside the allowed list may be attached, and the LSP tools that
+	// auto_lsp would otherwise construct must not appear either.
+	assert.ElementsMatch(t, []string{"glob", "grep"}, built)
 }

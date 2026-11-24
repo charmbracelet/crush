@@ -936,3 +936,94 @@ func TestList_Restyle_KeepsHeights(t *testing.T) {
 	require.Equal(t, 2, items[19].renderHits)
 	require.Equal(t, 1, items[10].renderHits, "off-screen items keep their cached render")
 }
+
+// TestList_SetItemsEmpty_PreservesZeroOffset verifies that clearing a list
+// with SetItems keeps offsetIdx non-negative so appending items later still
+// renders them.
+func TestList_SetItemsEmpty_PreservesZeroOffset(t *testing.T) {
+	t.Parallel()
+
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
+
+	l := NewList(a)
+	l.SetSize(40, 10)
+	l.SetItems()
+
+	offsetIdx, offsetLine := l.ScrollPosition()
+	require.Equal(t, 0, offsetIdx)
+	require.Equal(t, 0, offsetLine)
+
+	l.AppendItems(a, b)
+	rendered := l.Render()
+	require.Contains(t, rendered, "alpha")
+	require.Contains(t, rendered, "bravo")
+}
+
+// TestList_ScrollToIndexEmpty_PreservesZeroOffset verifies that ScrollToIndex
+// on an empty list keeps offsetIdx at 0 so subsequent appends render cleanly.
+func TestList_ScrollToIndexEmpty_PreservesZeroOffset(t *testing.T) {
+	t.Parallel()
+
+	l := NewList()
+	l.SetSize(40, 10)
+	l.ScrollToIndex(0)
+
+	offsetIdx, offsetLine := l.ScrollPosition()
+	require.Equal(t, 0, offsetIdx)
+	require.Equal(t, 0, offsetLine)
+
+	l.AppendItems(newTrackedItem("a", "alpha"))
+	require.Contains(t, l.Render(), "alpha")
+}
+
+// TestList_SelectInViewEmpty_KeepsNoSelection verifies that selecting the
+// first or last visible item on an empty list preserves -1 (no selection).
+func TestList_SelectInViewEmpty_KeepsNoSelection(t *testing.T) {
+	t.Parallel()
+
+	l := NewList()
+	l.SetSize(40, 10)
+
+	l.SelectFirstInView()
+	require.Equal(t, -1, l.Selected())
+
+	l.SelectLastInView()
+	require.Equal(t, -1, l.Selected())
+}
+
+// TestList_SetGap_InvalidatesTotalHeight verifies that changing the item gap
+// invalidates totalHeightCache.
+func TestList_SetGap_InvalidatesTotalHeight(t *testing.T) {
+	t.Parallel()
+
+	items := []Item{
+		newMultiLineItem("a", 2),
+		newMultiLineItem("b", 2),
+		newMultiLineItem("c", 2),
+	}
+	l := NewList(items...)
+	l.SetSize(40, 10)
+
+	require.Equal(t, 6, l.TotalHeight())
+
+	l.SetGap(2)
+	require.Equal(t, 10, l.TotalHeight())
+}
+
+// TestList_Invalidate_InvalidatesTotalHeight verifies that Invalidating an
+// item forces TotalHeight to recompute from fresh renders.
+func TestList_Invalidate_InvalidatesTotalHeight(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 2)
+	b := newMultiLineItem("b", 3)
+	l := NewList(a, b)
+	l.SetSize(40, 10)
+
+	require.Equal(t, 5, l.TotalHeight())
+
+	a.height = 5
+	l.Invalidate(a)
+	require.Equal(t, 8, l.TotalHeight())
+}

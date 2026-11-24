@@ -746,9 +746,8 @@ func (b *Backend) admitLocked(clientID string) error {
 // first and this call releases its claim, or it arrives later and is
 // refused, registering nothing.
 //
-// When workspace auto-close is disabled, retirement only records the client
-// so later creates are refused; existing claims and their runs remain alive
-// for headless work.
+// When workspace auto-close is disabled, the client's claims are still
+// released, but its workspaces and their runs keep going for headless work.
 //
 // Idempotent. Lock order is the canonical b.mu -> ws.clientsMu; teardowns
 // for workspaces the client was last on run after b.mu is released and
@@ -763,10 +762,7 @@ func (b *Backend) RetireClient(clientID string) error {
 		b.retired = make(map[string]struct{})
 	}
 	b.retired[clientID] = struct{}{}
-	if !b.autoClose {
-		b.mu.Unlock()
-		return nil
-	}
+	autoClose := b.autoClose
 	var orphaned []*Workspace
 	viewing := make(map[*Workspace]string)
 	for _, ws := range b.workspaces.Seq2() {
@@ -785,6 +781,9 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.mu.Unlock()
 
+	if !autoClose {
+		return nil
+	}
 	for ws, sessionID := range viewing {
 		ws.cancelUnwatchedRun(sessionID)
 	}
@@ -818,29 +817,17 @@ func (b *Backend) releaseHold(workspaceID, clientID string) error {
 // back. The re-arm installs a fresh clientState rather than resetting the
 // old timer, so an already-fired timer racing this call fails expireHold's
 // identity check instead of killing the new claim.
-//
-// When workspace auto-close is disabled, the claim has no expiry timer and
-// remains until the workspace is explicitly released or the server shuts
-// down.
 func (b *Backend) registerClient(ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
 	if old, ok := ws.clients[clientID]; ok {
 		old.released = false
-		if old.holdTimer != nil {
-			old.holdTimer.Stop()
-			old.holdTimer = nil
-		}
-		if !b.autoClose || old.streams > 0 {
-			// Either the claim is permanent, or live streams already hold
-			// it; nothing to re-arm.
+		if old.holdTimer == nil {
+			// Live streams hold the claim; nothing to re-arm.
 			return
 		}
+		old.holdTimer.Stop()
 		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, old.sessionReported, b.createGrace)
-		return
-	}
-	if !b.autoClose {
-		ws.clients[clientID] = &clientState{}
 		return
 	}
 	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", false, b.createGrace)
@@ -859,16 +846,7 @@ func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, repor
 // expireHold is the body of the grace timer. It runs in its own
 // goroutine and races against AttachClient/releaseHold; the timer
 // stays valid only while the entry's holdTimer still points at it.
-// If workspace auto-close was disabled after the timer was armed, the
-// timer is harmless.
 func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState) {
-	b.mu.Lock()
-	if !b.autoClose {
-		b.mu.Unlock()
-		return
-	}
-	b.mu.Unlock()
-
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
 	if !ok || cs != timer || cs.holdTimer == nil || cs.streams > 0 {
@@ -880,17 +858,41 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 	viewing := cs.currentSessionID
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
+	b.claimEnded(ws, viewing, teardown)
+}
+
+// claimEnded cancels the run a departed client was viewing if nobody else
+// views it, and tears the workspace down once no claims are left. With
+// workspace auto-close disabled it does neither: the workspace and its
+// runs belong to the server and carry on headless.
+func (b *Backend) claimEnded(ws *Workspace, viewing string, teardown bool) {
+	b.mu.Lock()
+	autoClose := b.autoClose
+	b.mu.Unlock()
+	if !autoClose {
+		return
+	}
 	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
 }
 
+// releaseHoldLocked releases a client's claim on an explicit delete. With
+// workspace auto-close disabled, a workspace left with no clients is closed
+// by a delete from any client, since none holds it any more.
 func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
 	if !ok {
+		unclaimed := len(ws.clients) == 0
 		ws.clientsMu.Unlock()
+		b.mu.Lock()
+		autoClose := b.autoClose
+		b.mu.Unlock()
+		if unclaimed && !autoClose {
+			b.teardown(ws)
+		}
 		return
 	}
 	if cs.holdTimer != nil {
@@ -919,7 +921,6 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	b.mu.Lock()
 	grace := b.detachGrace
-	autoClose := b.autoClose
 	b.mu.Unlock()
 
 	ws.clientsMu.Lock()
@@ -934,13 +935,6 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	teardown := false
 	viewing := ""
 	if cs.streams == 0 && cs.holdTimer == nil {
-		if !autoClose && !cs.released {
-			// The workspace is owned by the explicitly started server, not
-			// the disconnected client. Keep its claim so headless work can
-			// continue after the client goes away.
-			ws.clientsMu.Unlock()
-			return
-		}
 		if grace > 0 && !cs.released {
 			// The stream dropped without the client releasing its claim, so
 			// treat it as an interruption rather than an exit: hold the
@@ -956,10 +950,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 		}
 	}
 	ws.clientsMu.Unlock()
-	ws.cancelUnwatchedRun(viewing)
-	if teardown {
-		b.teardown(ws)
-	}
+	b.claimEnded(ws, viewing, teardown)
 }
 
 // cancelUnwatchedRun cancels the run in sessionID unless a client left on

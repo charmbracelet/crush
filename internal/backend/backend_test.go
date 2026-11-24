@@ -1538,8 +1538,9 @@ func TestServer_DisabledIdleShutdownKeepsServerUp(t *testing.T) {
 
 // TestDisableWorkspaceAutoClose_KeepsHeadlessWork covers a server started
 // explicitly with `crush server`: neither an expired creation hold, a
-// detached stream, nor a retired client may close the workspace. Explicit
-// deletion still does.
+// detached stream, nor a retired client may close the workspace. Departed
+// clients must still be forgotten, so they do not linger as viewers or keep
+// another client's explicit delete from closing the workspace.
 func TestDisableWorkspaceAutoClose_KeepsHeadlessWork(t *testing.T) {
 	t.Parallel()
 
@@ -1550,33 +1551,36 @@ func TestDisableWorkspaceAutoClose_KeepsHeadlessWork(t *testing.T) {
 	b.SetDetachGrace(time.Millisecond)
 
 	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/headless-work")
-	cid := newClientID(t)
 
-	b.registerClient(ws, cid)
-	time.Sleep(50 * time.Millisecond)
+	neverAttached := newClientID(t)
+	b.registerClient(ws, neverAttached)
 
-	require.NoError(t, b.AttachClient(ws.ID, cid))
-	b.DetachClient(ws.ID, cid)
-	time.Sleep(50 * time.Millisecond)
+	disconnected := newClientID(t)
+	b.registerClient(ws, disconnected)
+	require.NoError(t, b.AttachClient(ws.ID, disconnected))
+	b.DetachClient(ws.ID, disconnected)
 
-	require.NoError(t, b.RetireClient(cid))
-	time.Sleep(50 * time.Millisecond)
+	retired := newClientID(t)
+	b.registerClient(ws, retired)
+	require.NoError(t, b.AttachClient(ws.ID, retired))
+	require.NoError(t, b.RetireClient(retired))
 
+	require.Eventually(t, func() bool {
+		ws.clientsMu.Lock()
+		defer ws.clientsMu.Unlock()
+		return len(ws.clients) == 0
+	}, time.Second, 10*time.Millisecond, "departed clients must be forgotten")
 	_, err := b.GetWorkspace(ws.ID)
 	require.NoError(t, err, "the workspace must remain open for headless work")
-	ws.clientsMu.Lock()
-	_, claimExists := ws.clients[cid]
-	ws.clientsMu.Unlock()
-	require.True(t, claimExists, "the retired client's claim must remain")
 	require.Zero(t, wsShutdowns.Load(), "the workspace must not be torn down")
 	require.Zero(t, serverShutdowns.Load(), "the server must remain open")
 
-	require.NoError(t, b.DeleteWorkspace(ws.ID, cid))
+	require.NoError(t, b.DeleteWorkspace(ws.ID, newClientID(t)))
 	require.Eventually(t, func() bool {
 		_, err := b.GetWorkspace(ws.ID)
 		return errors.Is(err, ErrWorkspaceNotFound)
 	}, time.Second, 10*time.Millisecond,
-		"an explicit delete must still release the workspace")
+		"an explicit delete must still close a workspace no client holds")
 	require.Equal(t, int32(1), wsShutdowns.Load())
 	require.Zero(t, serverShutdowns.Load(),
 		"deleting the last workspace must not shut down an explicitly started server")

@@ -776,7 +776,8 @@ option attribution-generated-with true
 Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
-> [!NOTE] The provider type describes the API format the provider speaks. Make
+>[!NOTE] 
+> The provider type describes the API format the provider speaks. Make
 > sure to choose the right one to ensure the best experience!
 >
 > - `responses` should be used when proxying or routing requests through OpenAI.

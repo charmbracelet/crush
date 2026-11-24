@@ -168,7 +168,7 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
-	if err := goose.Up(conn, "migrations"); err != nil {
+	if err := goose.Up(conn, "migrations", goose.WithAllowMissing()); err != nil {
 		conn.Close()
 		releaseLock()
 		slog.Error("Failed to apply migrations", "error", err)

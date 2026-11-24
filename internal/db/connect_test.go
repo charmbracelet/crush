@@ -244,3 +244,28 @@ func TestConnect_ServerPathFailsWhenDataDirLocked(t *testing.T) {
 	require.Error(t, err, "server-path Connect must refuse to open a locked data dir")
 	require.ErrorIs(t, err, ErrDataDirLocked)
 }
+
+func TestConnect_AppliesOutOfOrderMissingMigration(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := t.TempDir()
+	conn, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+
+	// Simulate a DB that already applied later migrations (e.g. 20261109000000)
+	// before an earlier-timestamped migration (20261019000000) was added.
+	_, err = conn.Exec(`ALTER TABLE messages DROP COLUMN router_name`)
+	require.NoError(t, err)
+	_, err = conn.Exec(`ALTER TABLE messages DROP COLUMN route_name`)
+	require.NoError(t, err)
+	_, err = conn.Exec(`DELETE FROM goose_db_version WHERE version_id = 20261019000000`)
+	require.NoError(t, err)
+	require.NoError(t, Release(dataDir))
+
+	conn, err = Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(dataDir) })
+
+	_, err = conn.Exec(`SELECT router_name, route_name FROM messages LIMIT 1`)
+	require.NoError(t, err)
+}

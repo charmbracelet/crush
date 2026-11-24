@@ -103,7 +103,7 @@ crush run --continue "Follow up on your last response"
 
 		// Only attach to a server that is already running; a one-shot
 		// run should not leave a detached server behind.
-		if useClientServer() && serverRunning(ctx) {
+		if useClientServer(cmd) && serverRunning(ctx) {
 			c, ws, cleanup, err := connectToServer(cmd)
 			if err != nil {
 				return err
@@ -159,7 +159,7 @@ crush run --continue "Follow up on your last response"
 		appWs := ws.(*workspace.AppWorkspace)
 
 		if sessionID != "" {
-			sess, err := resolveSessionID(ctx, appWs.App().Sessions, sessionID)
+			sess, err := resolveSessionID(ctx, appWs, sessionID)
 			if err != nil {
 				return err
 			}

@@ -1494,6 +1494,12 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 		opts = append(opts, bedrock.WithAPIKey(apiKey))
 	case os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "":
 		opts = append(opts, bedrock.WithAPIKey(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")))
+	case c.cfg.Config().Options.DisableAWSCredentials:
+		// Import is off and no key was configured, so falling back to the AWS
+		// SDK chain would use credentials the user refused to hand over.
+		return nil, fmt.Errorf(
+			"Bedrock needs an explicit api_key while disable_aws_credentials is set",
+		)
 	default:
 		// Skip, let the SDK do authentication.
 	}

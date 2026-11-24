@@ -608,6 +608,11 @@
           "description": "Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs",
           "default": false
         },
+        "disable_aws_credentials": {
+          "type": "boolean",
+          "description": "Never look for AWS credentials on your own: the Bedrock providers only appear when configured with an explicit api_key. AWS_* environment variables and ~/.aws are ignored, so a machine with AWS CLI credentials cannot silently route Crush through them.",
+          "default": false
+        },
         "attribution": {
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"

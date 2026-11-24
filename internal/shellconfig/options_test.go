@@ -221,7 +221,8 @@ func TestOption_InvertedBool(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `option metrics false`
+	script := `option metrics false
+option aws-credentials false`
 	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
@@ -232,6 +233,7 @@ func TestOption_InvertedBool(t *testing.T) {
 
 	opts := result["options"].(map[string]any)
 	require.Equal(t, true, opts["disable_metrics"])
+	require.Equal(t, true, opts["disable_aws_credentials"])
 }
 
 func TestOption_UnknownKey(t *testing.T) {

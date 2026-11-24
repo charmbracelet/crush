@@ -992,6 +992,21 @@ AWS SDK credential chain resolves, including `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`
 set `AWS_PROFILE` in your shell (`AWS_PROFILE=myprofile crush`) or in the
 top-level [`env`](#environment-variables) config.
 
+Machines that already carry AWS credentials for other tooling can keep Crush
+away from them entirely, so no model can silently route through your AWS
+account:
+
+```bash
+# crushrc
+option aws-credentials false
+```
+
+Or set the `CRUSH_DISABLE_AWS_CREDENTIALS=1` environment variable. With
+automatic import off, neither `AWS_*` variables nor `~/.aws` are consulted when
+deciding whether Bedrock is available, and the providers stay hidden until you
+configure a key yourself, for example
+`provider add bedrock --api-key "$AWS_BEARER_TOKEN_BEDROCK"`.
+
 If you authenticate via AWS SSO, your session expires periodically. Set
 `aws_auth_refresh` to a command that refreshes it. When Bedrock returns a
 credential error, Crush runs the command, then retries the request in place

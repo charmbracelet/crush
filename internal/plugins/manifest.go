@@ -84,12 +84,12 @@ func (m Manifest) Save(dir string) error {
 	return nil
 }
 
-// ShortCommit is the commit in the form a person recognizes in a log.
-func (m Manifest) ShortCommit() string {
-	if len(m.Commit) <= 8 {
-		return m.Commit
+// ShortSHA is a commit in the form a person recognizes in a log.
+func ShortSHA(sha string) string {
+	if len(sha) <= 8 {
+		return sha
 	}
-	return m.Commit[:8]
+	return sha[:8]
 }
 
 // FileNames lists the recorded plugin paths in name order.
@@ -158,6 +158,32 @@ func (m Manifest) Diff(dir string) (Diff, error) {
 	slices.Sort(d.Removed)
 	slices.Sort(d.Changed)
 	return d, nil
+}
+
+// Scripts lists the plugin scripts the config loader runs, in load order:
+// per root, its own scripts and those one directory down, sorted by path.
+// Hidden entries, including in-progress installs, are skipped.
+func Scripts(roots ...string) []string {
+	var all []string
+	for _, root := range roots {
+		dirs := []string{root}
+		entries, _ := os.ReadDir(root)
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				dirs = append(dirs, filepath.Join(root, entry.Name()))
+			}
+		}
+		var found []string
+		for _, dir := range dirs {
+			names, _ := PluginFiles(dir)
+			for _, name := range names {
+				found = append(found, filepath.Join(dir, name))
+			}
+		}
+		slices.Sort(found)
+		all = append(all, found...)
+	}
+	return all
 }
 
 // PluginFiles lists the plugin scripts directly inside dir in name order,

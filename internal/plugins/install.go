@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -49,10 +50,15 @@ func Install(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("invalid repository %q", opts.Source)
 	}
 	dir := Dir(opts.Root, opts.Source)
+	removeStaleStages(opts.Root, opts.Source)
 
 	previous, err := LoadManifest(dir)
 	switch {
 	case errors.Is(err, ErrNoManifest):
+		// Publishing replaces the directory whole, so an unmanaged one is refused, not deleted.
+		if _, statErr := os.Stat(dir); statErr == nil {
+			return Result{}, fmt.Errorf("%s exists but is not a managed install; move it aside first", dir)
+		}
 	case err != nil:
 		return Result{}, err
 	case !strings.EqualFold(previous.Source, opts.Source.String()):
@@ -70,7 +76,18 @@ func Install(ctx context.Context, opts Options) (Result, error) {
 		return Result{Dir: dir, Manifest: previous, Previous: previous.Commit, UpToDate: true}, nil
 	}
 
-	fetched, err := opts.GitHub.FetchPlugins(ctx, opts.Source, commit.SHA, opts.Root)
+	if err := os.MkdirAll(opts.Root, dirPerm); err != nil {
+		return Result{}, fmt.Errorf("failed to create %s: %w", opts.Root, err)
+	}
+	// The release is assembled in a hidden sibling the loader skips, so the
+	// install directory only ever holds a complete, recorded release.
+	stage, err := os.MkdirTemp(opts.Root, "."+opts.Source.DirName()+".stage-*")
+	if err != nil {
+		return Result{}, fmt.Errorf("failed to create a staging directory in %s: %w", opts.Root, err)
+	}
+	defer os.RemoveAll(stage)
+
+	files, err := opts.GitHub.stageRelease(ctx, opts.Source, commit.SHA, stage)
 	if err != nil {
 		return Result{}, err
 	}
@@ -84,15 +101,11 @@ func Install(ctx context.Context, opts Options) (Result, error) {
 		CommitURL:   commit.HTMLURL,
 		InstalledAt: now,
 		UpdatedAt:   now,
+		Files:       files,
 	}
 	if !previous.InstalledAt.IsZero() {
 		manifest.InstalledAt = previous.InstalledAt
 	}
-	for _, f := range fetched {
-		manifest.Files = append(manifest.Files, f.entry())
-	}
-	slices.SortFunc(manifest.Files, func(a, b File) int { return strings.Compare(a.Path, b.Path) })
-
 	before := previous.FileNames()
 	after := manifest.FileNames()
 	res := Result{
@@ -104,81 +117,89 @@ func Install(ctx context.Context, opts Options) (Result, error) {
 		Changed:  intersect(before, after),
 	}
 
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return Result{}, fmt.Errorf("failed to create %s: %w", dir, err)
+	if err := manifest.Save(stage); err != nil {
+		return Result{}, err
 	}
-	for _, f := range fetched {
-		if err := fsext.AtomicWriteFile(filepath.Join(dir, f.Path), f.Content, scriptPerm); err != nil {
-			return Result{}, fmt.Errorf("failed to install %s: %w", f.Path, err)
-		}
-	}
-	// A plugin deleted upstream has to go, or the load keeps running a file
-	// the recorded commit no longer contains.
-	for _, name := range res.Removed {
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
-			return Result{}, fmt.Errorf("failed to remove %s: %w", name, err)
-		}
-	}
-	// The lock is written last: until it exists the directory describes
-	// nothing that was fetched.
-	if err := manifest.Save(dir); err != nil {
+	if err := publish(stage, dir); err != nil {
 		return Result{}, err
 	}
 	return res, nil
 }
 
-// fetched is one plugin script pulled from an archive. The recorded digest is
-// computed from these bytes, so the lock describes what actually landed.
-type fetched struct {
-	Path    string
-	Content []byte
+// removeStaleStages deletes hidden staging siblings that failed runs left behind.
+func removeStaleStages(root string, src Source) {
+	entries, _ := os.ReadDir(root)
+	prefix := "." + src.DirName() + ".stage-"
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+		}
+	}
 }
 
-func (f fetched) entry() File {
-	d := Digest(f.Content)
-	d.Path = f.Path
-	return d
+// renameDir is fsext.Rename, replaced by tests to fail a publish.
+var renameDir = fsext.Rename
+
+// publish swaps a complete release into dir. Renaming over a non-empty
+// directory is not portable, so the old release is moved aside first.
+func publish(stage, dir string) error {
+	old := stage + ".old"
+	switch err := renameDir(dir, old); {
+	case errors.Is(err, fs.ErrNotExist):
+		old = ""
+	case err != nil:
+		return fmt.Errorf("failed to move the previous release aside: %w", err)
+	}
+	if err := renameDir(stage, dir); err != nil {
+		if old != "" {
+			if restoreErr := renameDir(old, dir); restoreErr != nil {
+				return fmt.Errorf("failed to publish %s: %w; previous release preserved at %s (restore failed: %v)", dir, err, old, restoreErr)
+			}
+		}
+		return fmt.Errorf("failed to publish %s: %w", dir, err)
+	}
+	if old != "" {
+		// A leftover is hidden, so the loader ignores it either way.
+		_ = os.RemoveAll(old)
+	}
+	return nil
 }
 
-// FetchPlugins downloads the archive for one commit and returns the plugin
-// scripts at its root. Staging happens inside root so writing a file into the
-// install directory cannot cross a filesystem boundary.
-func (g GitHub) FetchPlugins(ctx context.Context, src Source, sha, root string) ([]fetched, error) {
-	if err := os.MkdirAll(root, dirPerm); err != nil {
-		return nil, fmt.Errorf("failed to create %s: %w", root, err)
-	}
-	stage, err := os.MkdirTemp(root, ".fetch-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create a staging directory in %s: %w", root, err)
-	}
-	defer os.RemoveAll(stage)
-
+// stageRelease extracts one commit's archive into stage and prunes it to the
+// plugin scripts at the repository root, returning their digests.
+func (g GitHub) stageRelease(ctx context.Context, src Source, sha, stage string) ([]File, error) {
 	body, err := g.Tarball(ctx, src, sha)
 	if err != nil {
 		return nil, err
 	}
 	defer body.Close()
-
 	if _, err := ExtractTarGz(body, stage); err != nil {
 		return nil, err
 	}
-	names, err := PluginFiles(stage)
+
+	files, err := HashDir(stage)
 	if err != nil {
 		return nil, err
 	}
-	if len(names) == 0 {
+	if len(files) == 0 {
 		return nil, fmt.Errorf("no plugins found: %s has no %s files at the repository root", src, PluginExt)
 	}
-
-	files := make([]fetched, 0, len(names))
-	for _, name := range names {
-		content, err := os.ReadFile(filepath.Join(stage, name))
-		if err != nil {
-			return nil, fmt.Errorf("failed to read %s: %w", name, err)
-		}
-		files = append(files, fetched{Path: name, Content: content})
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		return nil, err
 	}
-	return files, nil
+	for _, entry := range entries {
+		path := filepath.Join(stage, entry.Name())
+		if !slices.ContainsFunc(files, func(f File) bool { return f.Path == entry.Name() }) {
+			err = os.RemoveAll(path)
+		} else {
+			err = os.Chmod(path, scriptPerm)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return files, os.Chmod(stage, dirPerm)
 }
 
 func subtract(a, b []string) []string {

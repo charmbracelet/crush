@@ -82,7 +82,7 @@ func TestManifestRoundTripAndValidation(t *testing.T) {
 	require.Equal(t, m.Source, got.Source)
 	require.Equal(t, m.Commit, got.Commit)
 	require.Equal(t, m.Files, got.Files)
-	require.Equal(t, 8, len(got.ShortCommit()))
+	require.Equal(t, 8, len(ShortSHA(got.Commit)))
 	require.Equal(t, filepath.Join(dir, ManifestName), ManifestPath(dir))
 
 	info, err := os.Stat(ManifestPath(dir))

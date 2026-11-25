@@ -2,12 +2,14 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/stretchr/testify/require"
 )
 
@@ -211,4 +213,145 @@ func TestRemove(t *testing.T) {
 
 	_, err = Remove(root, src)
 	require.ErrorIs(t, err, ErrNotInstalled)
+}
+
+// A publish that fails leaves the previous release, or nothing, in place: the
+// install directory never shows a partial or unrecorded release.
+func TestInstallFailurePublishesNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, root string, f *fakeGitHub)
+		want    []string
+	}{
+		{name: "first install", prepare: func(*testing.T, string, *fakeGitHub) {}},
+		{
+			name: "update",
+			prepare: func(t *testing.T, root string, f *fakeGitHub) {
+				f.publish(testRepo, DefaultRef, commitOne, map[string]string{"one.sh": oneScript, "two.sh": twoScript})
+				install(t, root, f, testRepo)
+			},
+			want: []string{"one.sh", "two.sh"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			f := newFakeGitHub(t)
+			tt.prepare(t, root, f)
+			f.publish(testRepo, DefaultRef, commitTwo, map[string]string{"one.sh": twoScript, "three.sh": oneScript})
+			dir := Dir(root, mustSource(t, testRepo))
+
+			// The staged release must be complete when it would become visible.
+			renameDir = func(from, to string) error {
+				if to == dir && !strings.HasSuffix(from, ".old") {
+					staged := mustLoad(t, from)
+					require.Equal(t, commitTwo, staged.Commit)
+					diff, err := staged.Diff(from)
+					require.NoError(t, err)
+					require.True(t, diff.Empty(), "staged release: %+v", diff)
+					return errors.New("injected publish failure")
+				}
+				return os.Rename(from, to)
+			}
+			t.Cleanup(func() { renameDir = fsext.Rename })
+
+			_, err := installErr(t, root, f, testRepo)
+			require.ErrorContains(t, err, "injected publish failure")
+
+			entries, err := os.ReadDir(root)
+			require.NoError(t, err)
+			if tt.want == nil {
+				require.Empty(t, entries, "a failed first install must leave nothing behind")
+				return
+			}
+			require.Len(t, entries, 1, "only the previous release may remain")
+			previous := mustLoad(t, dir)
+			require.Equal(t, commitOne, previous.Commit)
+			require.Equal(t, tt.want, previous.FileNames())
+			diff, err := previous.Diff(dir)
+			require.NoError(t, err)
+			require.True(t, diff.Empty(), "the previous release must be intact: %+v", diff)
+		})
+	}
+}
+
+// When the new release cannot be renamed in and the old one cannot be put
+// back, the error names where the old release survives, and stale staging
+// directories from earlier failed runs are removed.
+func TestInstallNamesPreservedReleaseWhenRollbackFails(t *testing.T) {
+	root := t.TempDir()
+	f := newFakeGitHub(t)
+	f.publish(testRepo, DefaultRef, commitOne, map[string]string{"one.sh": oneScript})
+	install(t, root, f, testRepo)
+	f.publish(testRepo, DefaultRef, commitTwo, map[string]string{"one.sh": twoScript})
+	src := mustSource(t, testRepo)
+	dir := Dir(root, src)
+
+	stale := filepath.Join(root, "."+src.DirName()+".stage-old")
+	require.NoError(t, os.MkdirAll(stale, dirPerm))
+	unrelated := filepath.Join(root, ".other__repo.stage-1")
+	require.NoError(t, os.MkdirAll(unrelated, dirPerm))
+
+	renameDir = func(from, to string) error {
+		if to == dir {
+			return errors.New("injected rename failure")
+		}
+		return os.Rename(from, to)
+	}
+	t.Cleanup(func() { renameDir = fsext.Rename })
+
+	_, publishErr := installErr(t, root, f, testRepo)
+	require.ErrorContains(t, publishErr, "previous release preserved at")
+	require.NoDirExists(t, stale)
+	require.DirExists(t, unrelated)
+
+	entries, err := os.ReadDir(root)
+	require.NoError(t, err)
+	var preserved string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".old") {
+			preserved = filepath.Join(root, e.Name())
+		}
+	}
+	require.NotEmpty(t, preserved)
+	require.ErrorContains(t, publishErr, preserved)
+	require.Equal(t, commitOne, mustLoad(t, preserved).Commit)
+}
+
+// Publishing replaces the whole directory, so one the installer does not own
+// is refused instead of deleted.
+func TestInstallRefusesUnmanagedDirectory(t *testing.T) {
+	root := t.TempDir()
+	f := newFakeGitHub(t)
+	f.publish(testRepo, DefaultRef, commitOne, map[string]string{"one.sh": oneScript})
+	dir := Dir(root, mustSource(t, testRepo))
+	require.NoError(t, os.MkdirAll(dir, dirPerm))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mine.sh"), []byte(twoScript), scriptPerm))
+
+	_, err := installErr(t, root, f, testRepo)
+	require.ErrorContains(t, err, "not a managed install")
+	require.FileExists(t, filepath.Join(dir, "mine.sh"))
+	require.NoFileExists(t, filepath.Join(dir, "one.sh"))
+}
+
+func TestScripts(t *testing.T) {
+	global := t.TempDir()
+	project := t.TempDir()
+	for _, name := range []string{
+		"z.sh", "a.sh", ".hidden.sh", "notes.txt",
+		"repo/b.sh", "repo/.plugin.json", "repo/deep/c.sh",
+		".repo.stage-1/d.sh",
+	} {
+		path := filepath.Join(global, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), dirPerm))
+		require.NoError(t, os.WriteFile(path, nil, scriptPerm))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(project, "p.sh"), nil, scriptPerm))
+
+	require.Equal(t, []string{
+		filepath.Join(global, "a.sh"),
+		filepath.Join(global, "repo", "b.sh"),
+		filepath.Join(global, "z.sh"),
+		filepath.Join(project, "p.sh"),
+	}, Scripts(global, filepath.Join(t.TempDir(), "missing"), project))
 }

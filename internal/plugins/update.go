@@ -73,42 +73,6 @@ func Update(ctx context.Context, opts UpdateOptions) (Result, error) {
 	return res, nil
 }
 
-// Outcome is one row of an update-all: what happened to one install, including
-// the error when it could not be updated.
-type Outcome struct {
-	Scope  Scope
-	Source Source
-	Dir    string
-	Result Result
-	Err    error
-}
-
-// UpdateAll refreshes every managed install in the roots. One repository that
-// cannot be reached must not stop the others, so failures are reported per
-// install rather than returned.
-func UpdateAll(ctx context.Context, roots []ScopedRoot, gh GitHub, force bool) ([]Outcome, error) {
-	installs, err := Discover(roots)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Outcome, 0, len(installs))
-	for _, install := range installs {
-		src, _, err := ParseSource(install.Manifest.Source)
-		if err != nil {
-			out = append(out, Outcome{Scope: install.Scope, Dir: install.Dir, Err: err})
-			continue
-		}
-		res, err := Update(ctx, UpdateOptions{
-			Root:   install.Root,
-			Source: src,
-			Force:  force,
-			GitHub: gh,
-		})
-		out = append(out, Outcome{Scope: install.Scope, Source: src, Dir: install.Dir, Result: res, Err: err})
-	}
-	return out, nil
-}
-
 // Remove deletes an installed plugin repository and returns the record it had.
 func Remove(root string, src Source) (Manifest, error) {
 	dir := Dir(root, src)

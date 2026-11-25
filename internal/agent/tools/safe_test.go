@@ -241,3 +241,66 @@ func TestFlagDenied(t *testing.T) {
 	assert.False(t, flagDenied("--utc", deny), "a long flag is not read character by character")
 	assert.False(t, flagDenied("--iso-8601=seconds", deny))
 }
+
+func TestBashGrantKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		command   string
+		dangerous bool
+		want      string
+	}{
+		{"git commit -m 'yolo'", false, "git"},
+		{"git status", false, "git"},
+		{"git.exe status", false, "git"},
+		{"timeout 5 git status", false, "git"},
+		// A path names a specific file, not the approved program.
+		{"/usr/bin/git log", false, "/usr/bin/git log"},
+		{"./git status", false, "./git status"},
+		{"/tmp/whatever/git status", false, "/tmp/whatever/git status"},
+		{"env /tmp/git status", false, "env /tmp/git status"},
+		{"env FOO=1 git status", false, "env FOO=1 git status"},
+		// Programs that run other code keep the exact command.
+		{"bash build.sh", false, "bash build.sh"},
+		{"bash -c 'rm -rf x'", false, "bash -c 'rm -rf x'"},
+		{"python test.py", false, "python test.py"},
+		{"python3.12 -c 'x'", false, "python3.12 -c 'x'"},
+		{"node script.js", false, "node script.js"},
+		{"npm test", false, "npm test"},
+		{"make", false, "make"},
+		{"xargs rm", false, "xargs rm"},
+		{"find . -exec rm {} +", false, "find . -exec rm {} +"},
+		{"command rm x", false, "command rm x"},
+		{"nohup nohup nohup nohup nohup rm x", false, "nohup nohup nohup nohup nohup rm x"},
+		// A call told to run another command keeps the exact command.
+		{"git -c core.pager='rm -rf x' log", false, "git -c core.pager='rm -rf x' log"},
+		{"git -C repo -c alias.x='!rm' x", false, "git -C repo -c alias.x='!rm' x"},
+		{"git --config-env=core.pager=P log", false, "git --config-env=core.pager=P log"},
+		{"git --exec-path=/tmp/x status", false, "git --exec-path=/tmp/x status"},
+		{"git config alias.x '!rm -rf x'", false, "git config alias.x '!rm -rf x'"},
+		{"git rebase -x 'rm x' main", false, "git rebase -x 'rm x' main"},
+		{"git rebase --exec='rm x' main", false, "git rebase --exec='rm x' main"},
+		{"git fetch --upload-pack='rm x' origin", false, "git fetch --upload-pack='rm x' origin"},
+		{"git fetch --upload-p='rm x' origin", false, "git fetch --upload-p='rm x' origin"},
+		{"git bisect run make", false, "git bisect run make"},
+		{"git submodule foreach rm x", false, "git submodule foreach rm x"},
+		{"rsync -avze 'sh -c x' a b", false, "rsync -avze 'sh -c x' a b"},
+		{"tar --use-compress=x -cf a.tar b", false, "tar --use-compress=x -cf a.tar b"},
+		{"fd -x rm", false, "fd -x rm"},
+		// Without such an argument the program grant still applies.
+		{"git -C repo switch -c feature", false, "git"},
+		{"git log -c", false, "git"},
+		{"git bisect start", false, "git"},
+		{"rsync -avz a b", false, "rsync"},
+		{"tar -xzf a.tar", false, "tar"},
+		{"git status && rm -rf x", false, "git status && rm -rf x"},
+		{"git log | head", false, "git log | head"},
+		{"FOO=1 git log", false, "FOO=1 git log"},
+		{"git log > out", false, "git log > out"},
+		{"git $(whoami)", false, "git $(whoami)"},
+		{"sudo rm -rf /", true, "sudo rm -rf /"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, bashGrantKey(tt.command, tt.dangerous), tt.command)
+	}
+}

@@ -7,10 +7,12 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -194,4 +196,29 @@ func TestPermissions_TallerViewportClampsOffset(t *testing.T) {
 
 	maxOffset := max(0, p.viewport.TotalLineCount()-p.viewport.Height())
 	require.LessOrEqual(t, p.viewport.YOffset(), maxOffset)
+}
+
+// TestPermissions_BashSessionButtonNamesProgram verifies that the session
+// button names the program when its grant covers every call of it, and keeps
+// the plain label when the grant is keyed to the exact command.
+func TestPermissions_BashSessionButtonNamesProgram(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s}
+
+	buttons := func(program string) string {
+		p := NewPermissions(com, permission.PermissionRequest{
+			ID:       "perm-test",
+			ToolName: tools.BashToolName,
+			Params: tools.BashPermissionsParams{
+				Command:        "git commit -m x",
+				SessionProgram: program,
+			},
+		})
+		return ansi.Strip(p.renderButtonGroup("  "))
+	}
+
+	require.Contains(t, buttons("git"), "Allow git for Session")
+	require.Contains(t, buttons(""), "Allow for Session")
+	require.NotContains(t, buttons(""), "git")
 }

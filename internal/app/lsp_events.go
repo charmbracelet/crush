@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
@@ -82,19 +83,54 @@ func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.C
 	})
 }
 
-// updateLSPDiagnostics updates the diagnostic count for an LSP client and publishes an event
-func updateLSPDiagnostics(name string, diagnosticCount int) {
-	if info, exists := lspStates.Get(name); exists {
-		info.DiagnosticCount = diagnosticCount
-		lspStates.Set(name, info)
+// diagnosticsPublishInterval caps per-server diagnostics events; servers report file by file.
+const diagnosticsPublishInterval = 150 * time.Millisecond
 
-		// Publish diagnostics change event
-		lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
-			Type:            LSPEventDiagnosticsChanged,
-			Name:            name,
-			State:           info.State,
-			Error:           info.Error,
-			DiagnosticCount: diagnosticCount,
-		})
+// keyedThrottle runs at most one pending call per key, after interval.
+type keyedThrottle struct {
+	interval time.Duration
+	mu       sync.Mutex
+	pending  map[string]bool
+}
+
+func (t *keyedThrottle) trigger(key string, fn func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.pending[key] {
+		return
 	}
+	t.pending[key] = true
+	time.AfterFunc(t.interval, func() {
+		t.mu.Lock()
+		delete(t.pending, key)
+		t.mu.Unlock()
+		fn()
+	})
+}
+
+var diagnosticsThrottle = &keyedThrottle{interval: diagnosticsPublishInterval, pending: map[string]bool{}}
+
+// updateLSPDiagnostics stores the count now and publishes the latest one at most once per interval.
+func updateLSPDiagnostics(name string, diagnosticCount int) {
+	info, exists := lspStates.Get(name)
+	if !exists {
+		return
+	}
+	info.DiagnosticCount = diagnosticCount
+	lspStates.Set(name, info)
+	diagnosticsThrottle.trigger(name, func() { publishLSPDiagnostics(name) })
+}
+
+func publishLSPDiagnostics(name string) {
+	info, exists := lspStates.Get(name)
+	if !exists {
+		return
+	}
+	lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
+		Type:            LSPEventDiagnosticsChanged,
+		Name:            name,
+		State:           info.State,
+		Error:           info.Error,
+		DiagnosticCount: info.DiagnosticCount,
+	})
 }

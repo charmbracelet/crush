@@ -35,7 +35,13 @@ func doRequest(ctx context.Context, method, baseURL, path, apiKey string, extraH
 	resolvedBase, _ := resolver.ResolveValue(baseURL)
 	resolvedKey, _ := resolver.ResolveValue(apiKey)
 
-	url := strings.TrimRight(resolvedBase, "/") + "/" + strings.TrimLeft(path, "/")
+	// An empty path means the base URL is already the whole endpoint.
+	// Appending nothing, rather than a bare slash, keeps a caller that names
+	// a full URL (a catalog a plugin declares, say) from drifting by one.
+	url := strings.TrimRight(resolvedBase, "/")
+	if path != "" {
+		url += "/" + strings.TrimLeft(path, "/")
+	}
 
 	var reqBody *bytes.Reader
 	if body != nil {

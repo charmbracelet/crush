@@ -150,3 +150,20 @@ func TestGrokFlowCompleteWithCodeWithoutBrowserFlow(t *testing.T) {
 	_, err := f.CompleteWithCode(context.Background(), "some-code")
 	require.ErrorContains(t, err, "no browser flow")
 }
+
+// A device sign-in has no code to paste, and a flow that never started has
+// nothing to close.
+func TestSpecFlowWithoutBrowserFlow(t *testing.T) {
+	f := &specFlow{}
+	f.Close()
+
+	f.f = deviceOnlyFlow{}
+	_, err := f.CompleteWithCode(context.Background(), "some-code")
+	require.ErrorContains(t, err, "no code to paste")
+}
+
+type deviceOnlyFlow struct{}
+
+func (deviceOnlyFlow) Wait(context.Context) (*oauth.Token, error) { return nil, nil }
+
+func (deviceOnlyFlow) Close() {}

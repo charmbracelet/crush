@@ -76,3 +76,25 @@ func TestPromptOverridesRejectsBadInput(t *testing.T) {
 		require.ErrorContains(t, err, tc.err, tc.arg)
 	}
 }
+
+// TestResolveFlagPaths_BeforeCwd covers a relative unix --host and
+// --prompt being resolved against --cwd, which the command changes into,
+// instead of against the directory crush was started in.
+func TestResolveFlagPaths_BeforeCwd(t *testing.T) {
+	// Not parallel: it changes directory and swaps a package var.
+	start, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	t.Chdir(start)
+	origHost := clientHost
+	clientHost = "unix://crush.sock"
+	t.Cleanup(func() { clientHost = origHost })
+
+	cmd := promptTestCmd(t, "--prompt", "coder=./coder.md.tpl")
+	require.NoError(t, resolveFlagPaths(cmd))
+	t.Chdir(t.TempDir())
+
+	require.Equal(t, "unix://"+filepath.Join(start, "crush.sock"), clientHost)
+	prompts, err := promptOverrides(cmd)
+	require.NoError(t, err)
+	require.Equal(t, config.PromptPaths{"coder": filepath.Join(start, "coder.md.tpl")}, prompts)
+}

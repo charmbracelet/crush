@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var clientHost string
@@ -93,6 +95,9 @@ var rootCmd = &cobra.Command{
 	Use:   "crush",
 	Short: "A terminal-first AI assistant for software development",
 	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+		return resolveFlagPaths(cmd)
+	},
 	Example: `
 # Run in interactive mode
 crush
@@ -1416,6 +1421,30 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 		return "", fmt.Errorf("failed to get current working directory: %v", err)
 	}
 	return cwd, nil
+}
+
+// resolveFlagPaths makes the relative paths in --host and --prompt
+// absolute against the directory crush was started in, which is what they
+// mean on the command line. It runs before anything changes into --cwd.
+func resolveFlagPaths(cmd *cobra.Command) error {
+	if strings.HasPrefix(clientHost, "unix://") {
+		if hostURL, err := server.ParseHostURL(clientHost); err == nil {
+			clientHost = "unix://" + hostURL.Host
+		}
+	}
+	prompts, err := promptOverrides(cmd)
+	if err != nil || len(prompts) == 0 {
+		return err
+	}
+	values := make([]string, 0, len(prompts))
+	for name, path := range prompts {
+		values = append(values, name+"="+path)
+	}
+	slices.Sort(values)
+	if f, ok := cmd.Flags().Lookup("prompt").Value.(pflag.SliceValue); ok {
+		return f.Replace(values)
+	}
+	return nil
 }
 
 func createDotCrushDir(dir string) error {

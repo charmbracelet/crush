@@ -360,7 +360,8 @@ func (b *Backend) GetDefaultSmallModel(workspaceID, providerID string) (config.S
 }
 
 // RunShellCommand runs a shell command in the workspace directory and
-// persists the command + output as a user message in the session.
+// persists the command + output as a user message in the session. When
+// the command started the session, the session is titled after it.
 func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req proto.ShellCommandRequest) (proto.ShellCommandResponse, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
@@ -390,6 +391,15 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 	}, persist)
 	if err != nil {
 		return proto.ShellCommandResponse{}, err
+	}
+
+	if req.IsFirstMessage && req.SessionID != "" {
+		if coord := ws.Coordinator(); coord != nil {
+			// In the background, so the output is not held back for the
+			// title, and bound to the workspace rather than the request: a
+			// client hanging up must not cut the title short, teardown must.
+			go coord.GenerateTitle(ws.ctx, req.SessionID, "$ "+req.Command)
+		}
 	}
 
 	return proto.ShellCommandResponse{

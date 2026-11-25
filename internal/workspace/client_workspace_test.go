@@ -417,6 +417,31 @@ func TestClientWorkspaceListMCPPrompts(t *testing.T) {
 	}, got)
 }
 
+// A '!' command that starts a session must tell the server so, or the
+// session is never titled.
+func TestClientWorkspaceRunShellCommandSendsFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	got := make(chan proto.ShellCommandRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req proto.ShellCommandRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		got <- req
+		_ = json.NewEncoder(w).Encode(proto.ShellCommandResponse{})
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	_, err = workspace.AgentRunShellCommand(t.Context(), "s1", "ls", 80, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, proto.ShellCommandRequest{Command: "ls", TermWidth: 80, IsFirstMessage: true}, <-got)
+}
+
 func TestClientWorkspaceListMCPPromptsServerError(t *testing.T) {
 	t.Parallel()
 

@@ -207,6 +207,9 @@ type ShellCommandRequest struct {
 	SessionID string `json:"session_id"`
 	Command   string `json:"command"`
 	TermWidth int    `json:"term_width,omitempty"`
+	// IsFirstMessage marks the command that started the session, so the
+	// session is titled after it.
+	IsFirstMessage bool `json:"is_first_message,omitempty"`
 }
 
 // ShellCommandResponse represents the result of a direct shell command.

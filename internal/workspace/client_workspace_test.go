@@ -763,6 +763,18 @@ func (r *connectionRecorder) sawStuck() bool {
 	return false
 }
 
+// TestRecreateArgs_KeepsPromptOverrides verifies that re-registering a
+// workspace the server lost asks for the --prompt overrides the client
+// started with, so the agent does not silently fall back to the built-in
+// prompts after a server restart.
+func TestRecreateArgs_KeepsPromptOverrides(t *testing.T) {
+	t.Parallel()
+
+	prompts := config.PromptPaths{"coder": "/tmp/coder.md.tpl"}
+	ws := NewClientWorkspace(nil, proto.Workspace{ID: "ws-1", Path: "/tmp/p", Prompts: prompts})
+	require.Equal(t, prompts, ws.recreateArgs().Prompts)
+}
+
 // TestClientWorkspace_RecoversFromWorkspaceGone is the headline client
 // regression: a 404 for the cached workspace ID must make the client
 // re-register, adopt the new ID, re-assert the session it was viewing,

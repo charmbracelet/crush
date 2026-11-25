@@ -148,6 +148,9 @@ type shellResultMsg struct {
 	ExitCode  int
 }
 
+// bangRun identifies a bang-mode shell command by the session it ran in.
+type bangRun struct{ sessionID, command string }
+
 // shellStreamMsg carries incremental output from a streaming shell command.
 type shellStreamMsg struct {
 	PendingID string
@@ -314,6 +317,12 @@ type UI struct {
 	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
 	// Escape works for bang commands the same way it does for agent runs.
 	bangCancel context.CancelFunc
+
+	// liveBangRuns counts the bang commands this UI ran, and so shows live,
+	// whose stored copy has not arrived yet. That copy is skipped so the
+	// command shows once; any other stored one, such as a command another
+	// client ran in the session, is shown.
+	liveBangRuns map[bangRun]int
 
 	header *header
 
@@ -2050,9 +2059,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 
 	switch msg.Role {
 	case message.User:
-		// Shell commands are rendered live via shellResultMsg; skip
-		// the persisted duplicate.
-		if msg.HasShellCommand() {
+		if m.takeLiveBangRun(msg) {
 			return nil
 		}
 		// A subagent report arrives on a user-role message but is not
@@ -2107,6 +2114,21 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 	}
 	return tea.Sequence(cmds...)
+}
+
+// takeLiveBangRun reports whether msg is the stored copy of a bang command
+// this UI ran, and so already shows live, and if so stops waiting for it.
+func (m *UI) takeLiveBangRun(msg message.Message) bool {
+	cmds := msg.ShellCommands()
+	if len(cmds) == 0 {
+		return false
+	}
+	run := bangRun{msg.SessionID, cmds[0].Command}
+	if m.liveBangRuns[run] == 0 {
+		return false
+	}
+	m.liveBangRuns[run]--
+	return true
 }
 
 func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
@@ -5729,6 +5751,11 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 
 	sessionID := m.session.ID
 	contentWidth := min(m.layout.main.Dx()-2, 120)
+
+	if m.liveBangRuns == nil {
+		m.liveBangRuns = make(map[bangRun]int)
+	}
+	m.liveBangRuns[bangRun{sessionID, command}]++
 
 	// Append a pending shell item immediately so the user sees feedback.
 	pendingItem := chat.NewPendingShellItem(m.com.Styles, command)

@@ -236,6 +236,11 @@ That said, you can also set environment variables for preferred providers:
 | `MOONSHOT_API_KEY`          | Moonshot                                           |
 | `XAI_API_KEY`               | xAI                                                |
 
+If you are signed in with Anthropic's `ant` command line tool (`ant auth login`)
+and `ANTHROPIC_API_KEY` is not set, Crush uses that login for Anthropic. It asks
+`ant` for a fresh token as needed and never stores it. An API key, when set,
+takes precedence.
+
 [hyper]: https://hyper.charm.land
 
 Also note that Crush can support nearly any provider, including

@@ -22,6 +22,15 @@ func (m *UI) selectedLargeModel() *workspace.AgentModel {
 	return nil
 }
 
+// showsWorkspaceStatus reports whether the landing page lists LSP, MCP and
+// skills. It does not while the user is going through first run: with no
+// provider yet, or with a project that still needs its context file. Those
+// moments are about setting up, and the extra columns would only compete with
+// the prompt.
+func (m *UI) showsWorkspaceStatus() bool {
+	return !m.isOnboarding() && !m.firstRun.needsInit
+}
+
 // landingView renders the landing page view showing the current working
 // directory, model information, and LSP/MCP status in a two-column layout.
 func (m *UI) landingView() string {
@@ -29,12 +38,32 @@ func (m *UI) landingView() string {
 	width := m.layout.main.Dx()
 	cwd := common.PrettyPathInline(t, m.com.Workspace.WorkingDir(), m.gitBranchLabel(), width)
 
-	parts := []string{
-		cwd,
+	parts := []string{cwd}
+
+	if m.isOnboarding() {
+		// Nothing is set up yet, so LSP, MCP and skills status would only
+		// be noise next to the first-run prompts. The instruction (or the
+		// held message) sits at the bottom, right above the editor.
+		if welcome := m.welcomeView(width); welcome != "" {
+			parts = append(parts, "", welcome)
+		}
+		top := lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return anchorBottom(width, m.layout.main.Dy()-1, top, m.firstRunPromptView(width))
 	}
 
-	parts = append(parts, "", m.modelInfo(width))
+	parts = append(parts, "", m.modelInfo(width), "", m.welcomeView(width))
 	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
+
+	if !m.showsWorkspaceStatus() {
+		// The project is still being set up (the /init hint is showing), so
+		// the page stays with the welcome and leaves LSP, MCP and skills
+		// out of it.
+		return lipgloss.NewStyle().
+			Width(width).
+			Height(m.layout.main.Dy() - 1).
+			PaddingTop(1).
+			Render(infoSection)
+	}
 
 	var remainingHeightArea image.Rectangle
 	layout.Vertical(

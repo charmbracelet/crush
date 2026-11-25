@@ -90,6 +90,10 @@ type SelectedModel struct {
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
+// ExternalAuthAnt marks an Anthropic provider that signs in with the login of
+// the `ant` command line tool instead of an API key.
+const ExternalAuthAnt = "ant"
+
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
@@ -103,6 +107,10 @@ type ProviderConfig struct {
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// The original API key template before resolution (for re-resolution on auth errors).
 	APIKeyTemplate string `json:"-"`
+	// ExternalAuth names a login managed outside Crush that stands in for an
+	// API key, such as [ExternalAuthAnt]. It is detected while loading and
+	// never written to the config file.
+	ExternalAuth string `json:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.

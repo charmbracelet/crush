@@ -150,6 +150,12 @@ func (m *OAuth) ID() string {
 	return OAuthID
 }
 
+// ProviderID returns the ID of the provider being signed in to.
+func (m *OAuth) ProviderID() string { return string(m.provider.ID) }
+
+// Failed reports whether the sign-in ended in an error.
+func (m *OAuth) Failed() bool { return m.State == OAuthStateError }
+
 // HandleMsg handles messages and state transitions.
 func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {

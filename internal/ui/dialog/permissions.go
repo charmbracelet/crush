@@ -77,6 +77,10 @@ type Permissions struct {
 
 	help   help.Model
 	keyMap permissionsKeyMap
+
+	// tip is a one-time hint shown under the buttons, such as what
+	// "Allow for session" does. Empty means no hint.
+	tip string
 }
 
 type permissionsKeyMap struct {
@@ -212,6 +216,13 @@ type PermissionsOption func(*Permissions)
 func WithDiffMode(split bool) PermissionsOption {
 	return func(p *Permissions) {
 		p.diffSplitMode = &split
+	}
+}
+
+// WithTip shows a one-time hint under the buttons.
+func WithTip(tip string) PermissionsOption {
+	return func(p *Permissions) {
+		p.tip = tip
 	}
 }
 
@@ -481,11 +492,37 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if content != "" {
 		parts = append(parts, "", content)
 	}
-	parts = append(parts, "", buttons, "", helpView)
+	parts = append(parts, "", buttons)
+	if tip := p.renderTip(contentWidth); tip != "" {
+		parts = append(parts, "", tip)
+	}
+	parts = append(parts, "", helpView)
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
 	return nil
+}
+
+// renderTip renders the one-time hint, wrapped to the content width and
+// indented under its label.
+func (p *Permissions) renderTip(contentWidth int) string {
+	if p.tip == "" {
+		return ""
+	}
+	t := p.com.Styles
+	label := t.Dialog.TitleAccent.Render("tip") + " "
+	indent := lipgloss.Width(label)
+	body := ansi.Wordwrap(p.tip, max(1, contentWidth-indent), "")
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		line = t.Dialog.SecondaryText.Render(line)
+		if i == 0 {
+			lines[i] = label + line
+		} else {
+			lines[i] = strings.Repeat(" ", indent) + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (p *Permissions) renderHeader(contentWidth int) string {

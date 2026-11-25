@@ -21,6 +21,7 @@ const (
 	nonInteractiveNestedAttrName = "NonInteractiveNested"
 	continueSessionByIDAttrName  = "ContinueSessionByID"
 	continueLastSessionAttrName  = "ContinueLastSession"
+	firstLaunchAttrName          = "FirstLaunch"
 )
 
 var (
@@ -51,6 +52,19 @@ func SetContinueLastSession(continueLastSession bool) {
 	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
 }
 
+// SetFirstLaunch marks every event of this process as coming from the first
+// launch of Crush on this machine.
+func SetFirstLaunch(firstLaunch bool) {
+	baseProps = baseProps.Set(firstLaunchAttrName, firstLaunch)
+}
+
+// IsFirstLaunch reports whether this process is the first launch of Crush on
+// this machine.
+func IsFirstLaunch() bool {
+	v, _ := baseProps[firstLaunchAttrName].(bool)
+	return v
+}
+
 func Init() {
 	c, err := posthog.NewWithConfig(key, posthog.Config{
 		Endpoint:        endpoint,
@@ -68,6 +82,9 @@ func GetID() string { return distinctId }
 
 // send logs an event to PostHog with the given event name and properties.
 func send(event string, props ...any) {
+	// Logged even when metrics are off, so the events can be checked
+	// locally with --debug without sending anything.
+	slog.Debug("Telemetry event", "event", event, "props", props)
 	if client == nil {
 		return
 	}

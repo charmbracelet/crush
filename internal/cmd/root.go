@@ -556,7 +556,6 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	wsPermMode := proto.WorkspacePermissionModeNormal
 	if yoloCount > 1 {
 		wsPermMode = proto.WorkspacePermissionModeSysadmin
-		fmt.Fprintln(os.Stderr, sysadminModeWarning)
 	} else if yoloCount == 1 {
 		wsPermMode = proto.WorkspacePermissionModeYolo
 	}
@@ -578,6 +577,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	warnPermissionMode(os.Stderr, wsPermMode, ws.PermissionMode)
 
 	if shouldEnableMetrics(ws.Config) {
 		event.Init()
@@ -612,6 +612,23 @@ func sayGoodbye(c *client.Client, workspaceID string) {
 	defer cancel()
 	if err := c.RetireClient(ctx); err != nil {
 		_ = c.DeleteWorkspace(ctx, workspaceID)
+	}
+}
+
+// warnPermissionMode tells the user which permission mode the project runs
+// in on the server. A project the server already has open keeps its mode,
+// whatever -y or -yy asked for, and an earlier client may have left it more
+// permissive than this one asked for.
+func warnPermissionMode(w io.Writer, requested, actual proto.WorkspacePermissionMode) {
+	if actual == "" {
+		// The server predates reporting the mode.
+		actual = requested
+	}
+	if actual != requested {
+		fmt.Fprintf(w, "Warning: this project is already open on the server in %s mode, and it stays in that mode.\n", actual)
+	}
+	if actual == proto.WorkspacePermissionModeSysadmin {
+		fmt.Fprintln(w, sysadminModeWarning)
 	}
 }
 

@@ -66,7 +66,8 @@ ORDER BY day ASC;
 
 -- name: GetAverageResponseTime :one
 SELECT
-    CAST(COALESCE(AVG(finished_at - created_at), 0) AS INTEGER) as avg_response_seconds
+    CAST(COALESCE(AVG(finished_at - created_at), 0) AS INTEGER) as avg_response_seconds,
+    COUNT(*) as response_count
 FROM messages
 WHERE role = 'assistant'
   AND finished_at IS NOT NULL

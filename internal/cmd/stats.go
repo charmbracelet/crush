@@ -70,6 +70,8 @@ type Stats struct {
 	AvgResponseTimeMs float64            `json:"avg_response_time_ms"`
 	ToolUsage         []ToolUsage        `json:"tool_usage"`
 	HourDayHeatmap    []HourDayHeatmapPt `json:"hour_day_heatmap"`
+	// responseCount is the number of responses behind AvgResponseTimeMs.
+	responseCount int64
 }
 
 type TotalStats struct {
@@ -488,10 +490,8 @@ func mergeStats(projectStats []ProjectStats) *Stats {
 		}
 
 		// Accumulate response time for averaging.
-		if s.AvgResponseTimeMs > 0 {
-			totalResponseTimeMs += s.AvgResponseTimeMs * float64(s.Total.TotalMessages)
-			responseTimeCount += s.Total.TotalMessages
-		}
+		totalResponseTimeMs += s.AvgResponseTimeMs * float64(s.responseCount)
+		responseTimeCount += s.responseCount
 	}
 
 	// Calculate averages.
@@ -638,7 +638,8 @@ func gatherStats(ctx context.Context, conn *sql.DB) (*Stats, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get average response time: %w", err)
 	}
-	stats.AvgResponseTimeMs = toFloat64(avgResp) * 1000
+	stats.AvgResponseTimeMs = toFloat64(avgResp.AvgResponseSeconds) * 1000
+	stats.responseCount = avgResp.ResponseCount
 
 	// Tool usage.
 	toolUsage, err := queries.GetToolUsage(ctx)

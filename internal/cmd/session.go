@@ -163,9 +163,14 @@ func sessionSetup(cmd *cobra.Command) (context.Context, sessionStore, func(), er
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
+	clientServer, cfg, err := clientServerMode(cmd)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	// Like `crush run`, only use a server that is already up rather than
 	// leave one behind for a one-off command.
-	if useClientServer(cmd) && serverRunning(ctx) {
+	if clientServer && serverRunning(ctx) {
 		c, ws, cleanup, err := connectToServer(cmd)
 		if err != nil {
 			return nil, nil, nil, err
@@ -173,14 +178,15 @@ func sessionSetup(cmd *cobra.Command) (context.Context, sessionStore, func(), er
 		return ctx, serverSessionStore{workspace.NewClientWorkspace(c, *ws)}, cleanup, nil
 	}
 
-	cwd, err := ResolveCwd(cmd)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	cfg, err := config.Init(cmd.Context(), cwd, dataDir, false)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
+	if cfg == nil {
+		cwd, err := ResolveCwd(cmd)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		cfg, err = config.Init(cmd.Context(), cwd, dataDir, false)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
+		}
 	}
 	if dataDir == "" {
 		dataDir = cfg.Config().Options.DataDirectory

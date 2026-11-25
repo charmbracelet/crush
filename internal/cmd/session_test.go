@@ -87,6 +87,31 @@ func TestSessionList_ClientServerModeAsksServer(t *testing.T) {
 	)
 }
 
+// TestSessionList_ConfigOptionAsksServer covers the session commands
+// ignoring options.experimental.client_server, which puts the TUI and
+// `crush run` in client/server mode.
+func TestSessionList_ConfigOptionAsksServer(t *testing.T) {
+	if os.Getenv(childTestEnv) == "1" {
+		project := os.Getenv("CRUSH_TEST_PROJECT")
+		require.NoError(t, os.WriteFile(filepath.Join(project, "crush.json"),
+			[]byte(`{"options": {"experimental": {"client_server": true}}}`), 0o644))
+		listSessionsOnServer(t, project, os.Getenv("CRUSH_TEST_DATA_DIR"))
+		return
+	}
+	t.Parallel()
+
+	runChildTest(t,
+		"CRUSH_CLIENT_SERVER=",
+		"CRUSH_CACHE_DIR="+t.TempDir(),
+		"CRUSH_GLOBAL_CONFIG="+t.TempDir(),
+		"CRUSH_GLOBAL_DATA="+t.TempDir(),
+		"CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1",
+		"CRUSH_DISABLE_METRICS=1",
+		"CRUSH_TEST_DATA_DIR="+t.TempDir(),
+		"CRUSH_TEST_PROJECT="+t.TempDir(),
+	)
+}
+
 // listSessionsOnServer runs `crush session list --json` from project
 // against a fake server that hosts one session. The project comes from the
 // parent test: the command changes into it, and Windows cannot remove a

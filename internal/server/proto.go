@@ -399,7 +399,11 @@ func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, history)
+	files := make([]proto.File, len(history))
+	for i, f := range history {
+		files[i] = fileToProto(f)
+	}
+	jsonEncode(w, files)
 }
 
 // handleGetWorkspaceSessionMessages returns all messages for a session.

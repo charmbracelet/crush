@@ -121,6 +121,7 @@ Available Commands:
   mcp           Manage MCP servers
   lsp           Manage language servers
   hook          Manage hooks
+  tool          Manage custom agent tools
   permissions   Configure tool permissions
   option        Configure general Crush behavior
 ```
@@ -263,19 +264,17 @@ parameter such as `audience` are covered by `--oauth-redirect-uri`,
 `--oauth-param`. Confidential clients whose server expects HTTP Basic auth
 set `--oauth-secret-basic true`.
 
-Some token endpoints only answer a request identifying the client they know,
-down to its User-Agent, and reject anything else with an opaque "invalid
-request format". `--oauth-token-header KEY VALUE` (repeatable) declares the
-headers those calls carry, so the plugin supplies the identity rather than
-Crush. A server that takes JSON bodies instead of the RFC 6749 form encoding
+Some token endpoints need extra headers on every call, such as a tenant or an
+API version. `--oauth-token-header KEY VALUE` (repeatable) declares them. A
+server that takes JSON bodies instead of the RFC 6749 form encoding
 sets `--oauth-token-encoding json`; with JSON, the authorization-code exchange
 also carries the flow's state, which those servers expect:
 
 ```bash
-provider add example-sub \
-  --type openai-compat \
+provider add example \
+  --type completions \
   --base-url "https://api.example.com/v1" \
-  --oauth-token-header User-Agent "example-cli/2.1.0" \
+  --oauth-token-header X-Tenant "example-tenant" \
   --oauth-token-encoding json
 ```
 
@@ -311,9 +310,9 @@ provider add example \
 
 ```text
 $ crush usage
-Google AI Subscription
-  Gemini Models · Weekly Limit Remaining: 99% left · resets in 6d 22h
-  Gemini Models · Five Hour Limit Remaining: 99% left · resets in 3h 57m
+Example Plan
+  Standard Models · Weekly Limit Remaining: 99% left · resets in 6d 22h
+  Standard Models · Five Hour Limit Remaining: 99% left · resets in 3h 57m
 ```
 
 The response is walked with [gjson](https://github.com/tidwall/gjson) paths.
@@ -334,8 +333,7 @@ that field with `--usage-spent-percent`, as a whole percentage from 0 to 100,
 and the meter shows its complement. The unit is in the flag name because the
 number alone cannot carry it: a plan 1% spent and a plan fully spent are both
 written as `1`. The provider's credential (its login token or API key) and
-`--extra-header` values are sent with the request, which matters for gateways
-that only answer a request identifying a supported client.
+`--extra-header` values are sent with the request.
 
 The same figures appear in the UI while the model is in use: the header
 shows a compact `◆ 5h 99% · weekly 99%` for the current model, and the
@@ -348,8 +346,8 @@ display shows the two limits that apply rather than every limit on the plan:
 provider add example \
   --usage-url "https://api.example.com/quota" \
   --usage-groups groups \
-  --usage-model-group gemini "Gemini" \
-  --usage-model-group cld "Claude"
+  --usage-model-group fast "Fast models" \
+  --usage-model-group pro "Pro models"
 ```
 
 A provider with one plan-wide allowance needs no mapping at all: every meter
@@ -375,12 +373,16 @@ and returns any of `url` (the request is re-addressed, and the Host header with
 it), `headers` to set, `drop_headers` to remove, and `body` to replace:
 
 ```bash
-provider add example   --type google   --base-url "https://api.example.com/"   --gateway-request '
-      .url as $u | .body as $b | .token as $t | .request_id as $id
-      | {url: ("https://gateway.example.com/v1internal" + ($u | capture(":/(?<v>[a-zA-Z]+)$").v)),
+provider add example \
+  --type google \
+  --base-url "https://api.example.com/" \
+  --gateway-request '
+      .body as $b | .token as $t | .request_id as $id
+      | {url: "https://gateway.example.com/v1/generate",
          headers: {Authorization: ("Bearer " + $t), "Content-Type": "application/json"},
-         drop_headers: ["x-goog-api-key"],
-         body: {model: $b.model, requestId: $id, request: $b}}'   --gateway-response '(.body.response // .body)'
+         drop_headers: ["x-api-key"],
+         body: {model: $b.model, requestId: $id, request: $b}}' \
+  --gateway-response '(.body.response // .body)'
 ```
 
 The response program runs once per reply: for a plain body it receives
@@ -404,9 +406,8 @@ with a per-request id, cannot do either in plain jq. Catalog programs speak the
 same dialect.
 
 `--gateway-http1 true` stops the transport negotiating HTTP/2, which Go does
-by default against servers that offer it. A provider being addressed as some
-other client's own is usually expected to sound like it, and the JS runtimes
-most of these clients ship on speak HTTP/1.1.
+by default against servers that offer it. Use it for a gateway that only works
+over HTTP/1.1.
 
 #### Model catalog
 
@@ -424,9 +425,9 @@ objects in the same shape a config file uses for a model — `id`, `name`,
 entry with no id is skipped.
 
 ```bash
-provider add example --type anthropic --base-url "https://api.anthropic.com" \
+provider add example --type messages --base-url "https://api.example.com" \
   --catalog-url "/v1/models" \
-  --catalog-header anthropic-version "2023-06-01" \
+  --catalog-header X-Api-Version "2025-01-01" \
   --catalog-program '
     .data | map({
       id,
@@ -453,7 +454,7 @@ default effort costs you nothing else about it:
 
 ```bash
 provider add example --catalog-url "/v1/models" --catalog-program '…'
-model add example/claude-opus-5-5 --reasoning-effort medium
+model add example/big-model --reasoning-effort medium
 ```
 
 Booleans are the exception: a declaration can add a capability, not veto one,
@@ -482,15 +483,16 @@ yourself — a plugin is Bash, so it can fetch a price list and pass the flags:
 provider add example --flat-rate true --usage-url "https://api.example.com/quota"
 
 # Prices are just configuration: fetch them at load time if you have a source.
-price=$(curl -fsSL "https://example.com/prices/gemini-3.8-flash.json" | jq -r .input)
-model add example/gemini-3.8-flash --name "Gemini 3.8 Flash" --price-input "$price"
+price=$(curl -fsSL "https://example.com/prices/code-1.json" | jq -r .input)
+model add example/code-1 --name "Code 1" --price-input "$price"
 ```
 
 ### plugins
 
 The builtins above are the plugin format. A plugin is a Bash script that
 runs at config load through the same embedded interpreter, so a provider
-can be added without a Crush release. Two directories are scanned:
+or an agent tool (see [tool](#tool)) can be added without a Crush release.
+Two directories are scanned:
 
 - `$XDG_CONFIG_HOME/crush/plugins/` — user-wide
 - `.crush/plugins/` — the working directory's project folder
@@ -501,6 +503,9 @@ overrides a global one, and your own crushrc overrides both, so a plugin never
 traps a project. A failing plugin fails the load, exactly like a failing
 crushrc — and like a crushrc, a plugin is trusted code with your shell
 privileges: review it before you install it.
+
+For a gentler walkthrough of writing and installing plugins, see
+[docs/plugins](../plugins/README.md).
 
 `crush plugin` installs them from GitHub instead of by hand:
 
@@ -525,11 +530,6 @@ A provider that declares an OAuth flow is a sign-in candidate until
 `crush login <id>` stores its token: it appears in the model picker but is
 not treated as a configured provider, so Crush asks you to authenticate
 rather than selecting it with no credential.
-
-One declared this way can carry any OAuth flow and quota report: for
-instance a Google AI subscription (Antigravity) provider, with Google's
-OAuth client, the gateway's models, and the client secret supplied through
-an environment variable the plugin expands.
 
 ### model
 
@@ -796,6 +796,157 @@ Usage:
 ```bash
 permissions allow view ls grep edit
 permissions deny bash
+```
+
+### tool
+
+Manage custom agent tools: tools the model can call whose implementation is a
+shell command. This is how a plugin ships a tool, the same way it ships a
+provider.
+
+```text
+Usage:
+  tool [command]
+
+Available Commands:
+  add       Add or update a tool
+  remove    Remove a tool
+  rm        Alias for remove
+```
+
+#### `tool add`
+
+```text
+Usage:
+  tool add <name> --description <text> --command <command> [flags]
+
+Flags:
+      --description string       what the tool does, shown to the model (required)
+      --command string           shell command run on every call (required
+                                 unless every action has its own)
+      --param NAME DESC          a string parameter (repeatable)
+      --schema JSON              a full JSON Schema object instead of --param
+      --required string          a parameter the model must supply (repeatable)
+      --timeout int              timeout in seconds (default 60)
+      --env KEY VALUE            extra environment for the command (repeatable)
+      --skip-permission bool     run calls without asking
+      --title TEMPLATE           name a call is shown with in the chat
+      --summary TEMPLATE         one-line description a call is shown with
+      --disabled bool            hide the tool from agents
+```
+
+```bash
+tool add jira_search \
+  --description "Search Jira issues with a JQL query" \
+  --param jql "The JQL query" --required jql \
+  --command 'curl -fsS -G -H "Authorization: Bearer $JIRA_TOKEN" \
+    --data-urlencode "jql=$jql" https://jira.example.com/rest/api/2/search'
+```
+
+When the agent calls the tool:
+
+- The command runs in the embedded shell, in the project directory. Every
+  declared parameter is a shell variable of the same name (`$jql`), empty when
+  the model leaves it out. Values are quoted, so input is never run as code.
+  The raw JSON input is also on stdin.
+- The environment carries `CRUSH_TOOL_NAME`, `CRUSH_TOOL_ACTION` (with
+  actions), `CRUSH_TOOL_INPUT` (the JSON), `CRUSH_SESSION_ID`,
+  `CRUSH_PROJECT_DIR`, `CRUSH_VERSION`, and, when a plugin declared it,
+  `CRUSH_PLUGIN_FILE` and `CRUSH_PLUGIN_DIR`.
+- Stdout is the result. A non-zero exit is reported to the model as an error
+  with the exit code, stderr, and stdout. A call past its timeout is stopped.
+- Calls ask for permission, like an MCP tool, unless the tool or action says
+  `--skip-permission true`. `permissions allow <name>` pre-approves the whole
+  tool, `permissions allow <name>:<action>` one action, and
+  `permissions deny <name>` hides it. PreToolUse hooks run for it like any
+  other tool.
+- The permission prompt leads with the call's title and summary (see below)
+  and the action's description, then lists the parameters, full values
+  included, and the command that will run. "Allow for Session" approves that
+  one action for the rest of the session, not the whole tool.
+- Only the coder agent gets custom tools; the read-only task and plan agents
+  do not.
+
+Parameter names must be lowercase shell identifiers. A tool name must match
+`^[a-zA-Z0-9_-]{1,64}$`, must not be a built-in tool's, and must not start with
+`mcp_`. A broken declaration fails the load, naming the tool. A later config
+can tweak a plugin's tool (`tool add jira_search --timeout 120`) or turn it off
+(`--disabled true`) without repeating it.
+
+#### `tool action`
+
+Give a tool named operations. The model picks one with an `action`
+parameter, and Crush writes the list of actions and their parameters into the
+tool's description, so one tool can cover a whole CLI. Each action has its
+own command and its own permission: reads can skip the prompt while writes
+still ask.
+
+```text
+Usage:
+  tool action <tool> <action> --description <text> [flags]
+
+Flags:
+      --description string       what the action does (required)
+      --command string           shell command for this action (default: the
+                                 tool's command, with $action set)
+      --param NAME DESC          a parameter only this action uses (repeatable)
+      --required string          a parameter this action needs (repeatable)
+      --skip-permission bool     run this action without asking
+      --title TEMPLATE           overrides the tool's --title for this action
+      --summary TEMPLATE         overrides the tool's --summary for this action
+```
+
+```bash
+tool add GitHub --description "Work with GitHub through the gh CLI" \
+  --param repo "OWNER/REPO; defaults to the project's repository"
+
+tool action GitHub pr_view --description "Show a pull request" \
+  --param number "Pull request number" --required number \
+  --skip-permission true \
+  --command 'gh pr view "$number" ${repo:+-R "$repo"}'
+
+tool action GitHub pr_comment --description "Comment on a pull request" \
+  --param number "Pull request number" --required number \
+  --param body "The comment" --required body \
+  --command 'printf "%s" "$body" | gh pr comment "$number" ${repo:+-R "$repo"} -F -'
+```
+
+The tool's own `--param`s are shared by every action. A plugin is trusted
+code already, so skipping a prompt grants it nothing new; to overrule a
+plugin, re-declare the action in your crushrc with `--skip-permission false`.
+
+#### How calls look in the chat
+
+By default a call shows the tool's name and its raw JSON input. `--title` and
+`--summary` replace that with a name and a one-line description built from the
+call's parameters, using Go [text/template](https://pkg.go.dev/text/template)
+syntax. Every declared parameter is available as `.name`, as an empty string
+when the call left it out, and `plural COUNT DEFAULT WORD` renders "1 pull
+request" or "5 pull requests", using `DEFAULT` when the count is empty, and
+`truncate N TEXT` shortens text to one line of at most `N` characters for
+previews like a comment body:
+
+```bash
+tool action GitHub pr_list --description "List pull requests" \
+  --title 'List PRs' \
+  --summary 'Latest {{plural .limit 20 "pull request"}}{{with .repo}} in {{.}}{{end}}' \
+  ...
+```
+
+A call to `{"action":"pr_list","limit":"1","repo":"charmbracelet/crush"}` then
+shows as **List PRs** · Latest 1 pull request in charmbracelet/crush. A
+template that does not parse fails the load. While the input is still
+streaming, or when nothing is declared, the call renders the default way.
+
+#### `tool remove`
+
+Remove a tool declared earlier in the same file. To turn off a tool another
+file declares, use `tool add <name> --disabled true` or `permissions deny`.
+
+```text
+Usage:
+  tool remove <name>
+  tool rm <name>
 ```
 
 ### option

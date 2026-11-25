@@ -1,6 +1,7 @@
-// Package plugins installs and updates provider plugins from GitHub.
+// Package plugins installs and updates plugins from GitHub.
 //
-// A plugin is a Bash script that declares providers with the same builtins a
+// A plugin is a Bash script that declares providers and tools with the same
+// builtins a
 // crushrc uses, and the config loader executes every non-hidden *.sh it finds
 // in a plugins directory. This package is the installer half: it fetches a
 // repository, records the exact commit each installed file came from, and

@@ -115,8 +115,12 @@ type LSPEvent struct {
 	DiagnosticCount int
 }
 
-// AgentModel holds the model information exposed to the UI.
+// AgentModel holds the active agent and its model, as exposed to the UI.
 type AgentModel struct {
+	// Agent names the active agent (config.AgentCoder or config.AgentPlan),
+	// which every client of a server workspace shares. Empty when unknown,
+	// as with a server too old to report it.
+	Agent      string
 	CatwalkCfg catwalk.Model
 	ModelCfg   config.SelectedModel
 }

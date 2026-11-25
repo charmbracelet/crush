@@ -156,6 +156,9 @@ type AgentInfo struct {
 	IsReady  bool                 `json:"is_ready"`
 	Model    catwalk.Model        `json:"model"`
 	ModelCfg config.SelectedModel `json:"model_cfg"`
+	// MainAgent names the active agent ("coder" or "plan"), which every
+	// client of the workspace shares. Empty when the agent is not ready.
+	MainAgent string `json:"main_agent,omitempty"`
 }
 
 // IsZero checks if the AgentInfo is zero-valued.

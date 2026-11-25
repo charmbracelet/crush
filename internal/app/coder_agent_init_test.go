@@ -21,6 +21,7 @@ type initFakeCoordinator struct {
 }
 
 func (c *initFakeCoordinator) SetMainAgent(string) error { return nil }
+func (c *initFakeCoordinator) MainAgent() string         { return "" }
 func (c *initFakeCoordinator) Run(context.Context, string, string, ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }

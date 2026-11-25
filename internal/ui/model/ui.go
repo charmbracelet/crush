@@ -285,6 +285,10 @@ type UI struct {
 	// modeSwitching is true while the async agent-model update kicked off
 	// by setInputMode is still in flight; sending is blocked meanwhile.
 	modeSwitching bool
+	// modeAdopted is set when mode follows a switch of the shared main
+	// agent that another client made (see followMainAgent), and cleared
+	// when this client switches.
+	modeAdopted bool
 
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
@@ -5090,6 +5094,10 @@ func (m *UI) applyModeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 		return []tea.Cmd{util.ReportError(msg.err)}
 	}
 	m.mode = msg.mode
+	m.modeAdopted = false
+	// Supersede any in-flight busy probe: it may have read the agent from
+	// before this switch, and followMainAgent would then switch back.
+	m.busyFetchGen++
 	m.setEditorPrompt(m.permModeCached())
 	var cmds []tea.Cmd
 	if msg.continueSessionID != "" && m.session != nil && m.session.ID == msg.continueSessionID {
@@ -5115,6 +5123,31 @@ type modeSwitchedMsg struct {
 	mode              uiInputMode
 	perm              permission.PermissionMode
 	err               error
+}
+
+// followMainAgent adopts the input mode of the workspace's main agent and
+// reports whether the mode changed. Every client of a server workspace
+// shares that agent, so this is how a switch another client made shows
+// here. It never switches the agent itself, and it leaves the mode alone
+// while this client's own switch is in flight or when the agent is unknown,
+// as with a server too old to report it.
+func (m *UI) followMainAgent(agent string) bool {
+	if m.modeSwitching {
+		return false
+	}
+	mode := m.mode
+	switch agent {
+	case config.AgentCoder:
+		mode = uiInputModeCode
+	case config.AgentPlan:
+		mode = uiInputModePlan
+	}
+	if mode == m.mode {
+		return false
+	}
+	m.mode = mode
+	m.modeAdopted = true
+	return true
 }
 
 // sysadminPromptFunc returns the sysadmin mode editor prompt style with red
@@ -6146,14 +6179,16 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 
 // resetPlanModeState drops any pending plan handoff and, when plan mode is
 // active, switches back to code mode. Used when the UI moves to a different
-// session, since plan mode is scoped to the session it was enabled in.
+// session, since plan mode is scoped to the session it was enabled in. Plan
+// mode followed from another client is kept: the agent is shared, so
+// switching it back would end planning in the client that enabled it.
 func (m *UI) resetPlanModeState() tea.Cmd {
 	m.setPlanReadyPending("")
 	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
 		m.activeInline = nil
 		m.textarea.Focus()
 	}
-	if m.mode != uiInputModePlan {
+	if m.mode != uiInputModePlan || m.modeAdopted {
 		return nil
 	}
 	// The backend rejects agent switches while a run is active (409). When

@@ -88,7 +88,7 @@ tasks:
     desc: Run tests and record all VCR cassettes again
     aliases: [record]
     cmds:
-      - rm -r internal/agent/testdata
+      - rm -rf internal/agent/testdata
       - go test -v -count=1 -timeout=1h ./internal/agent
 
   fmt:

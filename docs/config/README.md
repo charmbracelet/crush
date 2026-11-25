@@ -496,6 +496,8 @@ String Keys:
   initialize-as string             context filename created by crush init
   notifications string             notification style: auto, native, osc, bell,
                                    or disabled
+  coreutils string                 core utilities used by shell commands:
+                                   turtle, system, auto, or off (default auto)
   attribution-trailer-style string attribution trailer: none, co-authored-by,
                                    or assisted-by
 
@@ -526,6 +528,28 @@ option progress false
 option skill-path ./skills
 option attribution-trailer-style assisted-by
 ```
+
+#### `option coreutils`
+
+Select which implementation of the Unix core utilities Crush's shell runs
+for commands like `ls`, `find`, or `sed`.
+
+- `turtle`: always run
+  [`charm.land/turtle`](https://github.com/charmbracelet/turtle)'s
+  implementations.
+- `system`: prefer the system utilities found in PATH, falling back to
+  Turtle when one is missing.
+- `auto` (default): Turtle on Windows, the system utilities elsewhere.
+- `off`: skip the coreutils middleware entirely, so every core utility
+  resolves through the host system.
+
+```bash
+option coreutils turtle
+```
+
+The setting applies to the agent's bash tool, `!` commands, and hooks. A
+`crushrc` itself always runs with Turtle while its own configuration is
+being read.
 
 #### `option reset`
 
@@ -717,7 +741,7 @@ option ui completions-max-items 200
 > `.cursor/skills`.
 
 > [!NOTE]
-> The command palette's "Disable Background Color" and "Disable Mouse" 
+> The command palette's "Disable Background Color" and "Disable Mouse"
 > toggles always write to the global config. If a project config
 > also sets `transparent` or `mouse`, project settings win on the next
 > launch (see [Where config lives](#where-config-lives)), so the toggle can

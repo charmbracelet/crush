@@ -388,6 +388,7 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		Cwd:       ws.Path,
 		Env:       append(os.Environ(), ws.Env...),
 		TermWidth: req.TermWidth,
+		Coreutils: wsCoreutils(ws),
 	}, persist)
 	if err != nil {
 		return proto.ShellCommandResponse{}, err
@@ -406,4 +407,13 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		Output:   result.Output,
 		ExitCode: result.ExitCode,
 	}, nil
+}
+
+// wsCoreutils returns the workspace's coreutils mode, or the shell default
+// for the test workspaces built without a config store.
+func wsCoreutils(ws *Workspace) shell.CoreutilsMode {
+	if ws == nil || ws.Cfg == nil {
+		return shell.CoreutilsTurtle
+	}
+	return ws.Cfg.Config().Options.GetCoreutils()
 }

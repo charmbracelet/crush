@@ -727,6 +727,17 @@
         "experimental": {
           "$ref": "#/$defs/ExperimentalOptions",
           "description": "Experimental features. They are unfinished and may change or be removed in any release."
+        },
+        "coreutils": {
+          "type": "string",
+          "enum": [
+            "turtle",
+            "system",
+            "auto",
+            "off"
+          ],
+          "description": "How core utilities run in Crush shells.",
+          "default": "auto"
         }
       },
       "additionalProperties": false,

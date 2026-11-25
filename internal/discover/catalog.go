@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -53,13 +54,9 @@ func Catalog(ctx context.Context, cfg CatalogConfig, resolver Resolver) ([]catwa
 		base, path = cfg.BaseURL, cfg.Spec.URL
 	}
 
-	headers := make(map[string]string, len(cfg.Headers)+len(cfg.Spec.Headers))
-	for k, v := range cfg.Headers {
-		headers[k] = v
-	}
-	for k, v := range cfg.Spec.Headers {
-		headers[k] = v
-	}
+	headers := make(map[string]string)
+	maps.Copy(headers, cfg.Headers)
+	maps.Copy(headers, cfg.Spec.Headers)
 
 	// A gateway that serves a catalog at all usually serves it over POST, the
 	// same envelope its quota endpoint takes: an empty JSON body says "give me

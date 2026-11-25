@@ -316,6 +316,7 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 		return AgentModel{}
 	}
 	return AgentModel{
+		Agent:      info.MainAgent,
 		CatwalkCfg: info.Model,
 		ModelCfg:   info.ModelCfg,
 	}

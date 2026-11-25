@@ -38,6 +38,27 @@ func TestPostAgentMain_Success(t *testing.T) {
 	require.Equal(t, "plan", coord.lastMainAgentSet.Load())
 }
 
+// Every client of the workspace shares its main agent, so the agent info
+// they all poll reports it; that is how a client learns that another one
+// switched to plan mode.
+func TestGetAgent_ReportsMainAgent(t *testing.T) {
+	t.Parallel()
+
+	coord := newRunCoordinator(func(context.Context) error { return nil })
+	c, wsID := buildAgentWorkspace(t, coord)
+	require.Equal(t, http.StatusOK, postAgentMain(t, c, wsID, "plan").Code)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/workspaces/"+wsID+"/agent", nil)
+	req.SetPathValue("id", wsID)
+	rec := httptest.NewRecorder()
+	c.handleGetWorkspaceAgent(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var info proto.AgentInfo
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&info))
+	require.Equal(t, "plan", info.MainAgent)
+}
+
 func TestPostAgentMain_CoordinatorError(t *testing.T) {
 	t.Parallel()
 

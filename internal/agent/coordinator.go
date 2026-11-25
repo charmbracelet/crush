@@ -110,6 +110,8 @@ func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) str
 
 type Coordinator interface {
 	SetMainAgent(agentName string) error
+	// MainAgent names the current main agent, as last set by SetMainAgent.
+	MainAgent() string
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -364,6 +366,12 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	c.mainAgent = agent
 	c.mainAgentName = agentName
 	return nil
+}
+
+// MainAgent implements Coordinator.
+func (c *coordinator) MainAgent() string {
+	_, name := c.activeAgent()
+	return name
 }
 
 // Run implements Coordinator.

@@ -106,9 +106,10 @@ type busyStateMsg struct {
 	// sessionBusy reports whether forSession itself has a run in flight,
 	// unlike agentBusy, which any session or shell command sets.
 	sessionBusy bool
-	// model is the coordinator's selected model, fetched by the same probe
-	// so the sidebar/landing model info renders from memoized state. Zero
-	// (and ignored) when ready is false.
+	// model is the coordinator's active agent and selected model, fetched by
+	// the same probe so the sidebar/landing model info renders from
+	// memoized state and the input mode follows the shared agent. Zero (and
+	// ignored) when ready is false.
 	model workspace.AgentModel
 }
 
@@ -227,11 +228,12 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	m.permModeCache.set(msg.permMode)
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
-	if prevMode != msg.permMode {
-		// A remote/async toggle changed the permission mode: update the
-		// editor prompt function so the prompt icon/style tracks the new
-		// mode. The cache is written above and the placeholder is refreshed
-		// by the Update tail.
+	modeChanged := m.followMainAgent(msg.model.Agent)
+	if prevMode != msg.permMode || modeChanged {
+		// A remote/async toggle changed the permission or input mode:
+		// update the editor prompt function so the prompt icon/style tracks
+		// the new mode. The cache is written above and the placeholder is
+		// refreshed by the Update tail.
 		m.setEditorPrompt(msg.permMode)
 	}
 

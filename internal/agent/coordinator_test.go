@@ -829,9 +829,10 @@ func TestCoordinatorSetMainAgent(t *testing.T) {
 			},
 		}
 
+		assert.Equal(t, config.AgentCoder, coord.MainAgent())
 		err := coord.SetMainAgent(config.AgentPlan)
 		require.NoError(t, err)
-		assert.Equal(t, config.AgentPlan, coord.mainAgentName)
+		assert.Equal(t, config.AgentPlan, coord.MainAgent())
 		assert.Same(t, plan, coord.mainAgent)
 	})
 

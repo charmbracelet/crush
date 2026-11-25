@@ -581,6 +581,15 @@ func TestClientWorkspace_AgentReadyErr(t *testing.T) {
 	})
 }
 
+// The TUI's busy probe reads the shared main agent from the agent info it
+// already fetches for the model, so following another client's switch to
+// plan mode costs no extra request.
+func TestClientWorkspace_AgentModelReportsMainAgent(t *testing.T) {
+	t.Parallel()
+	ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: true, MainAgent: config.AgentPlan})
+	require.Equal(t, config.AgentPlan, ws.AgentModel().Agent)
+}
+
 // agentInfoWorkspace returns a ClientWorkspace whose server answers the
 // agent-info endpoint with the given info.
 func agentInfoWorkspace(t *testing.T, info proto.AgentInfo) *ClientWorkspace {

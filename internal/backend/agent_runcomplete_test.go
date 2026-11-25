@@ -49,6 +49,7 @@ func (c *errorCoordinator) Summarize(context.Context, string) error           { 
 func (c *errorCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *errorCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *errorCoordinator) SetMainAgent(string) error                         { return nil }
+func (c *errorCoordinator) MainAgent() string                                 { return "" }
 func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *errorCoordinator) SetHostContext(proto.HostContext)                  {}
 func (c *errorCoordinator) HostContext() proto.HostContext                    { return proto.HostContext{} }

@@ -54,6 +54,7 @@ func (s *stubCoordinator) Summarize(context.Context, string) error {
 func (s *stubCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (s *stubCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *stubCoordinator) SetMainAgent(string) error                     { return nil }
+func (s *stubCoordinator) MainAgent() string                             { return "" }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string) {}
 func (s *stubCoordinator) SetHostContext(proto.HostContext)              {}
 func (s *stubCoordinator) HostContext() proto.HostContext                { return proto.HostContext{} }

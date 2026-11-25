@@ -141,7 +141,7 @@ func (b *Backend) runAgent(ws *Workspace, coord agent.Coordinator, msg proto.Age
 	}
 }
 
-// GetAgentInfo returns the agent's model and busy status.
+// GetAgentInfo returns the agent's model, busy status, and active agent.
 func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
@@ -152,10 +152,11 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	if coord := ws.Coordinator(); coord != nil {
 		m := coord.Model()
 		agentInfo = proto.AgentInfo{
-			Model:    m.CatwalkCfg,
-			ModelCfg: m.ModelCfg,
-			IsBusy:   coord.IsBusy(),
-			IsReady:  true,
+			Model:     m.CatwalkCfg,
+			ModelCfg:  m.ModelCfg,
+			IsBusy:    coord.IsBusy(),
+			IsReady:   true,
+			MainAgent: coord.MainAgent(),
 		}
 	}
 	return agentInfo, nil

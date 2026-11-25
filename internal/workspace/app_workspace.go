@@ -198,6 +198,7 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 	}
 	m := w.app.Agent().Model()
 	return AgentModel{
+		Agent:      w.app.Agent().MainAgent(),
 		CatwalkCfg: m.CatwalkCfg,
 		ModelCfg:   m.ModelCfg,
 	}

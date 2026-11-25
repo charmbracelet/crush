@@ -24,6 +24,15 @@ func TestDeclaredOAuthProviderPlugin(t *testing.T) {
 	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
 	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
 	t.Setenv("EXAMPLE_CLIENT_SECRET", "shared-secret")
+	// Any ambient AWS setting keeps Bedrock usable, and Bedrock then wins
+	// the default selection the assertions below expect to be empty.
+	for _, key := range []string{
+		"AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+		"AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
+		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+	} {
+		t.Setenv(key, "")
+	}
 
 	workDir := t.TempDir()
 	writePluginScript(t, workDir, "example.sh", `#!/usr/bin/env bash

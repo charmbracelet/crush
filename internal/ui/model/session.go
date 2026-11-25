@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -73,30 +75,39 @@ type SessionFile struct {
 // UI never blocks on the call.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
 	load := func() tea.Msg {
-		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
-		if err != nil {
-			return util.ReportError(err)
-		}
-
-		sessionFiles, err := m.loadSessionFiles(sessionID)
-		if err != nil {
-			return util.ReportError(err)
-		}
-
-		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)
-		if err != nil {
-			slog.Error("Failed to load read files for session", "error", err)
-		}
-
-		// Read the transcript here, not in Update: a long session is tens
-		// of megabytes and would freeze the event loop while it loads.
-		messages, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
-		if err != nil {
+		// Off the event loop and in parallel: a long transcript takes hundreds of ms to read.
+		var (
+			sess         session.Session
+			sessionFiles []SessionFile
+			readFiles    []string
+			messages     []message.Message
+		)
+		g, ctx := errgroup.WithContext(context.Background())
+		g.Go(func() (err error) {
+			sess, err = m.com.Workspace.GetSession(ctx, sessionID)
+			return err
+		})
+		g.Go(func() (err error) {
+			sessionFiles, err = m.loadSessionFiles(sessionID)
+			return err
+		})
+		g.Go(func() error {
+			var err error
+			if readFiles, err = m.com.Workspace.FileTrackerListReadFiles(ctx, sessionID); err != nil {
+				slog.Error("Failed to load read files for session", "error", err)
+			}
+			return nil
+		})
+		g.Go(func() (err error) {
+			messages, err = m.com.Workspace.ListMessages(ctx, sessionID)
+			return err
+		})
+		if err := g.Wait(); err != nil {
 			return util.ReportError(err)
 		}
 
 		return loadSessionMsg{
-			session:   &session,
+			session:   &sess,
 			files:     sessionFiles,
 			readFiles: readFiles,
 			messages:  messages,

@@ -412,6 +412,9 @@ type UI struct {
 	// skillsEnabledOverrides mirrors the repository-scoped enabled set
 	// (config-disabled skills re-enabled for this repository).
 	skillsEnabledOverrides map[string]bool
+	// skillItems caches the sidebar's skill list; see skillStatusItems.
+	skillItems    []skillStatusItem
+	skillItemsCfg *config.Config
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
@@ -964,6 +967,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The coordinator model changed (selection, thinking, reasoning):
 		// re-fetch the memoized ready/model state off-thread.
 		m.invalidateBusyCaches()
+		m.invalidateSkillItems()
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1098,6 +1102,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case skillsOverridesLoadedMsg:
 		m.skillsDisabledOverrides = msg.disabled
 		m.skillsEnabledOverrides = msg.enabled
+		m.invalidateSkillItems()
 		if dia := m.dialog.Dialog(dialog.SkillsTogglesID); dia != nil {
 			if toggles, ok := dia.(*dialog.SkillToggles); ok {
 				toggles.SetItems(m.skillsTogglesList())
@@ -1215,6 +1220,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+		m.invalidateSkillItems()
 	case pubsub.Event[agenttools.ToolProgress]:
 		if m.session == nil {
 			break
@@ -5495,6 +5501,7 @@ func (m *UI) previewTheme(s styles.Styles) {
 // Callers are responsible for invalidating chat render caches.
 func (m *UI) refreshStyles() {
 	t := m.com.Styles
+	m.invalidateSkillItems()
 	m.header.refresh()
 	if m.layout.sidebar.Dx() > 0 {
 		m.cacheSidebarLogo(m.layout.sidebar.Dx())

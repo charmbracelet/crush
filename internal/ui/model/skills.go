@@ -59,7 +59,23 @@ func (m *UI) skillsInfo(width, maxItems int, isSection bool) string {
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
+// skillStatusItems returns the sidebar's skill list, rebuilt only after
+// invalidateSkillItems or a config change. Callers must not modify it.
 func (m *UI) skillStatusItems() []skillStatusItem {
+	var cfg *config.Config
+	if m.com.Workspace != nil {
+		cfg = m.com.Config()
+	}
+	if m.skillItems == nil || m.skillItemsCfg != cfg {
+		m.skillItems, m.skillItemsCfg = m.buildSkillStatusItems(), cfg
+	}
+	return m.skillItems
+}
+
+// invalidateSkillItems marks the skill list stale after its inputs change.
+func (m *UI) invalidateSkillItems() { m.skillItems = nil }
+
+func (m *UI) buildSkillStatusItems() []skillStatusItem {
 	t := m.com.Styles
 	var items []skillStatusItem
 	stateNames := make(map[string]struct{}, len(m.skillStates))

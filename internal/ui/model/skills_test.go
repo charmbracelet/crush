@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/pubsub"
+
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -110,4 +112,50 @@ func TestSkillStatusItemsShowsErroredSkillWithRedDot(t *testing.T) {
 	invalid, ok := byName["invalid"]
 	require.True(t, ok, "a validation-failed skill must appear in the sidebar")
 	require.Contains(t, invalid.icon, st.Resource.ErrorIcon.String())
+}
+
+// TestSkillStatusItemsFollowsInputs checks that each change the UI applies
+// to the skill list's inputs rebuilds it, including an in-place theme swap.
+func TestSkillStatusItemsFollowsInputs(t *testing.T) {
+	t.Parallel()
+
+	ui := newHostThemeTestUI(t, nil)
+	ws := &ui.com.Workspace.(*themeTestWorkspace).testWorkspace
+	find := func(name string) (skillStatusItem, bool) {
+		for _, item := range ui.skillStatusItems() {
+			if item.name == name {
+				return item, true
+			}
+		}
+		return skillStatusItem{}, false
+	}
+
+	first := ui.skillStatusItems()
+	require.Equal(t, &first[0], &ui.skillStatusItems()[0], "an unchanged frame reuses the list")
+
+	ui.Update(pubsub.Event[skills.Event]{Payload: skills.Event{States: []*skills.SkillState{{Name: "fresh-skill", Path: "/tmp/fresh-skill/SKILL.md"}}}})
+	_, ok := find("fresh-skill")
+	require.True(t, ok, "new skill states rebuild the list")
+
+	ui.Update(skillsOverridesLoadedMsg{disabled: map[string]bool{"fresh-skill": true}})
+	_, ok = find("fresh-skill")
+	require.False(t, ok, "a repository override rebuilds the list")
+
+	ui.Update(skillsOverridesLoadedMsg{})
+	ws.cfg = &config.Config{Options: &config.Options{TUI: &config.TUIOptions{}, DisabledSkills: []string{"fresh-skill"}}}
+	_, ok = find("fresh-skill")
+	require.False(t, ok, "a new config rebuilds the list")
+
+	ws.cfg = &config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}}
+	before, _ := find("fresh-skill")
+	theme := uistyles.CharmtonePantera()
+	theme.Resource.Name = theme.Resource.Name.Bold(true).Underline(true)
+	ui.applyTheme(theme)
+	after, _ := find("fresh-skill")
+	require.NotEqual(t, before.title, after.title, "a theme applied in place rebuilds the list")
+
+	ui.skillStates = nil
+	ui.Update(agentModelChangedMsg{})
+	_, ok = find("fresh-skill")
+	require.False(t, ok, "rebuilding the agent rebuilds the list")
 }

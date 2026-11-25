@@ -84,7 +84,7 @@ func ExpandValueInDir(ctx context.Context, value, dir string, env []string) (str
 	}
 
 	// Build a minimal Shell value purely to reuse its handler chain
-	// (builtins, block funcs, optional Go coreutils) inside $(...).
+	// (builtins, block funcs, optional Turtle coreutils) inside $(...).
 	// We deliberately skip NewShell so the passed-in env is used
 	// verbatim, with no CRUSH/AGENT/AI_AGENT injection: callers of
 	// ExpandValue control the env, and nounset must treat any name
@@ -118,7 +118,7 @@ func ExpandValueInDir(ctx context.Context, value, dir string, env []string) (str
 				interp.Interactive(false),
 				interp.Env(expand.ListEnviron(env...)),
 				interp.Dir(s.cwd),
-				execHandlerOption(s.blockFuncs),
+				execHandlerOption(s.blockFuncs, s.coreutils),
 			}
 			if strict {
 				// Match the outer NoUnset: an unset $VAR inside

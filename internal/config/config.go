@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/invopop/jsonschema"
 )
 
@@ -487,6 +488,32 @@ type Options struct {
 	PinentryCacheTimeout *int                 `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
 	Prompts              PromptPaths          `json:"prompts,omitempty" jsonschema:"description=Files that replace Crush's built-in prompts\\, keyed by prompt name. A replacement is used verbatim\\, so anything the built-in template injected (skills\\, context files\\, LSP status) is lost unless the replacement asks for it too."`
 	Experimental         *ExperimentalOptions `json:"experimental,omitempty" jsonschema:"description=Experimental features. They are unfinished and may change or be removed in any release."`
+	Coreutils            CoreutilsMode        `json:"coreutils,omitempty" jsonschema:"description=How core utilities run in Crush shells.,enum=turtle,enum=system,enum=auto,enum=off,default=auto"`
+}
+
+// CoreutilsMode is the shell package's coreutils mode, aliased so configs
+// can hold it directly.
+type CoreutilsMode = shell.CoreutilsMode
+
+// Coreutils mode values.
+const (
+	CoreutilsTurtle = shell.CoreutilsTurtle
+	CoreutilsSystem = shell.CoreutilsSystem
+	CoreutilsAuto   = shell.CoreutilsAuto
+	CoreutilsOff    = shell.CoreutilsOff
+)
+
+// DefaultCoreutils is the coreutils mode used when the configuration does
+// not specify one.
+const DefaultCoreutils = CoreutilsAuto
+
+// GetCoreutils returns the configured coreutils mode, or DefaultCoreutils
+// when it is not set. Callers pass the result to the shell surfaces.
+func (o *Options) GetCoreutils() CoreutilsMode {
+	if o == nil || o.Coreutils == "" {
+		return DefaultCoreutils
+	}
+	return o.Coreutils
 }
 
 // ExperimentalOptions holds unfinished features. Each mirrors an environment

@@ -841,3 +841,31 @@ func TestRunnerPicksUpSourceChanges(t *testing.T) {
 	hooks = map[string][]HookConfig{EventPreToolUse: {{Command: "exit 0"}}}
 	require.Equal(t, 1, r.Run(context.Background(), preToolEvent("bash", `{}`)).HookCount)
 }
+
+func TestRunnerCoreutilsMode(t *testing.T) {
+	hookCfg := HookConfig{Command: "# irrelevant; runShell is stubbed"}
+
+	var got shell.CoreutilsMode
+	origRunShell := runShell
+	runShell = func(_ context.Context, opts shell.RunOptions) error {
+		got = opts.Coreutils
+		return nil
+	}
+	t.Cleanup(func() { runShell = origRunShell })
+
+	r := NewRunner(
+		Static(map[string][]HookConfig{EventPreToolUse: {hookCfg}}),
+		t.TempDir(), t.TempDir(),
+		WithCoreutils(func() shell.CoreutilsMode { return shell.CoreutilsSystem }),
+	)
+	r.Run(t.Context(), preToolEvent("bash", `{}`))
+	require.Equal(t, shell.CoreutilsSystem, got)
+
+	// Without the option, hooks run with the shell's default mode.
+	r = NewRunner(
+		Static(map[string][]HookConfig{EventPreToolUse: {hookCfg}}),
+		t.TempDir(), t.TempDir(),
+	)
+	r.Run(t.Context(), preToolEvent("bash", `{}`))
+	require.Equal(t, shell.CoreutilsTurtle, got)
+}

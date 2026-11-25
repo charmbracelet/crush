@@ -138,6 +138,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 		Command:   command,
 		Cwd:       w.store.WorkingDir(),
 		TermWidth: termWidth,
+		Coreutils: w.store.Config().Options.GetCoreutils(),
 	}
 
 	var result shell.CaptureResult

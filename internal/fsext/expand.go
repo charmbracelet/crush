@@ -2,6 +2,7 @@ package fsext
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"mvdan.cc/sh/v3/expand"
@@ -15,6 +16,7 @@ func Expand(s string) (string, error) {
 	if s == "" {
 		return "", nil
 	}
+	s = filepath.ToSlash(s)
 	p := syntax.NewParser()
 	word, err := p.Document(strings.NewReader(s))
 	if err != nil {

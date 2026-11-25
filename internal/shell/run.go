@@ -46,6 +46,9 @@ type RunOptions struct {
 	// BlockFuncs is an optional list of deny-list matchers applied before
 	// each command reaches the exec layer. nil disables blocking entirely.
 	BlockFuncs []BlockFunc
+	// Coreutils selects how core utilities execute. The zero value runs
+	// Turtle, used where no workspace configuration is available.
+	Coreutils CoreutilsMode
 	// TermWidth is the terminal width in columns for PTY execution.
 	// Zero uses a default of 200.
 	TermWidth int
@@ -56,7 +59,7 @@ type RunOptions struct {
 
 // Run parses and executes a shell command using the same mvdan.cc/sh
 // interpreter stack that the stateful [Shell] type uses (builtins,
-// optional block list, optional Go coreutils). It is safe to call
+// optional block list, optional Turtle coreutils). It is safe to call
 // concurrently from multiple goroutines: each call builds its own
 // [interp.Runner] and shares no state with other callers or with any
 // [Shell] instance.
@@ -93,7 +96,7 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 		return fmt.Errorf("could not parse command: %w", err)
 	}
 
-	runner, err := newRunner(opts.Cwd, opts.Env, opts.Stdin, stdout, stderr, opts.BlockFuncs)
+	runner, err := newRunner(opts.Cwd, opts.Env, opts.Stdin, stdout, stderr, opts.BlockFuncs, opts.Coreutils)
 	if err != nil {
 		return fmt.Errorf("could not run command: %w", err)
 	}
@@ -222,14 +225,14 @@ func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, erro
 // newRunner constructs an [interp.Runner] configured with the standard
 // Crush handler stack. Shared by the stateless [Run] entrypoint and the
 // stateful [Shell] so the two surfaces cannot drift.
-func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writer, blockFuncs []BlockFunc) (*interp.Runner, error) {
+func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writer, blockFuncs []BlockFunc, coreutils CoreutilsMode) (*interp.Runner, error) {
 	env = withNonInteractiveEnv(env)
 	return interp.New(
 		interp.StdIO(stdin, stdout, stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(env...)),
 		interp.Dir(cwd),
-		execHandlerOption(blockFuncs),
+		execHandlerOption(blockFuncs, coreutils),
 	)
 }
 
@@ -243,10 +246,10 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 // isolation. Without isolation, shells like zsh that set up job control
 // when sourcing framework files can send SIGINT/SIGTERM to Crush's process
 // group and crash the parent.
-func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
+func execHandlerOption(blockFuncs []BlockFunc, coreutils CoreutilsMode) interp.RunnerOption {
 	base := processGroupExecHandler(defaultKillTimeout)
 	handler := base
-	for _, mw := range slices.Backward(standardHandlers(blockFuncs)) {
+	for _, mw := range slices.Backward(standardHandlers(blockFuncs, coreutils)) {
 		handler = mw(handler)
 	}
 	// ExecHandlers always appends DefaultExecHandler which lacks process
@@ -359,7 +362,7 @@ type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 //     invocations through loopback pinentry (the TUI prompts for the
 //     passphrase/PIN) instead of an external terminal pinentry. It runs
 //     after the block list so deny rules still apply to gpg;
-//  5. optional Go coreutils (only when useGoCoreUtils is on).
+//  5. optional Turtle coreutils (skipped when coreutils is off).
 //
 // What this chain can and cannot see is worth stating plainly, because it
 // is easy to assume more: it observes commands this interpreter dispatches
@@ -367,15 +370,15 @@ type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 // interpreter, `sh -c`, make, a language runtime — is invisible to it. The
 // block list is a guardrail against invoking something dangerous by
 // accident, not a sandbox.
-func standardHandlers(blockFuncs []BlockFunc) []execMiddleware {
+func standardHandlers(blockFuncs []BlockFunc, coreutils CoreutilsMode) []execMiddleware {
 	handlers := []execMiddleware{
 		blockHandler(blockFuncs),
 		builtinHandler(),
-		scriptDispatchHandler(blockFuncs),
+		scriptDispatchHandler(blockFuncs, coreutils),
 		gpgHandler(),
 	}
-	if useGoCoreUtils && coreUtilsExecHandler != nil {
-		handlers = append(handlers, coreUtilsExecHandler)
+	if mw := coreutilsHandler(coreutils); mw != nil {
+		handlers = append(handlers, mw)
 	}
 	return handlers
 }

@@ -42,8 +42,24 @@ type Runner struct {
 	cwd        string
 	projectDir string
 
+	// coreutils returns the mode hook commands run with, so a workspace's
+	// configuration (and its reloads) apply without extra wiring. nil
+	// falls back to the shell default.
+	coreutils func() shell.CoreutilsMode
+
 	matchersMu sync.Mutex
 	matchers   map[string]*regexp.Regexp // nil value: pattern did not compile
+}
+
+// RunnerOption configures a Runner created by [NewRunner].
+type RunnerOption func(*Runner)
+
+// WithCoreutils returns a RunnerOption that resolves the coreutils mode
+// through src on every hook run.
+func WithCoreutils(src func() shell.CoreutilsMode) RunnerOption {
+	return func(r *Runner) {
+		r.coreutils = src
+	}
 }
 
 // NewRunner creates a Runner that reads hook configs from source.
@@ -51,13 +67,17 @@ type Runner struct {
 // compile is skipped with a warning rather than treated as
 // match-everything. ValidateHooks is expected to have caught syntax
 // errors earlier, so this is defense in depth.
-func NewRunner(source Source, cwd, projectDir string) *Runner {
-	return &Runner{
+func NewRunner(source Source, cwd, projectDir string, opts ...RunnerOption) *Runner {
+	r := &Runner{
 		source:     source,
 		cwd:        cwd,
 		projectDir: projectDir,
 		matchers:   make(map[string]*regexp.Regexp),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Run executes every configured hook for the event in parallel and
@@ -178,16 +198,22 @@ func (r *Runner) runOne(parentCtx context.Context, hook HookConfig, envVars []st
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
+	coreutils := shell.CoreutilsTurtle
+	if r.coreutils != nil {
+		coreutils = r.coreutils()
+	}
+
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
 		done <- runShell(ctx, shell.RunOptions{
-			Command: hook.Command,
-			Cwd:     r.cwd,
-			Env:     envVars,
-			Stdin:   bytes.NewReader(payload),
-			Stdout:  &stdout,
-			Stderr:  &stderr,
+			Command:   hook.Command,
+			Cwd:       r.cwd,
+			Env:       envVars,
+			Stdin:     bytes.NewReader(payload),
+			Stdout:    &stdout,
+			Stderr:    &stderr,
+			Coreutils: coreutils,
 		})
 	}()
 

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleOption implements the `option` builtin.
@@ -36,6 +38,7 @@ import (
 //	option max-background-jobs 200
 //	option pinentry-integrated false
 //	option pinentry-cache-timeout 300
+//	option coreutils turtle
 //	option experimental client-server true
 //
 // Boolean shortcuts: for boolean fields, omitting the value sets it to true.
@@ -117,6 +120,20 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		childMap(o, "attribution")["generated_with"] = bv
 		slog.Info("Option set in shell config", "key", key, "value", bv)
+		return nil
+	}
+
+	if key == "coreutils" {
+		if val == "" {
+			return usage(stderr, "option: coreutils requires a value")
+		}
+		switch shell.CoreutilsMode(val) {
+		case shell.CoreutilsTurtle, shell.CoreutilsSystem, shell.CoreutilsAuto, shell.CoreutilsOff:
+		default:
+			return usage(stderr, fmt.Sprintf("option: coreutils expects turtle, system, auto, or off, got %q", val))
+		}
+		o["coreutils"] = val
+		slog.Info("Option set in shell config", "key", key, "value", val)
 		return nil
 	}
 

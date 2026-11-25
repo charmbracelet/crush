@@ -20,7 +20,7 @@ import (
 func recordingPermissions(t *testing.T) (permission.Service, func() []string) {
 	t.Helper()
 	dir := t.TempDir()
-	logPath := filepath.Join(dir, "hooks.log")
+	logPath := filepath.ToSlash(filepath.Join(dir, "hooks.log"))
 	record := config.HookConfig{Command: `jq -r '[.hook_event_name, .tool_name, .decision // empty] | join(" ")' >> ` + logPath}
 	cfg := map[string][]config.HookConfig{
 		hooks.EventPermissionRequest: {record},

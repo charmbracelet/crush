@@ -210,6 +210,33 @@ func TestRestartIfStale_GivesUpOnUnresponsiveServer(t *testing.T) {
 	require.NoError(t, ctx.Err(), "restartIfStale waited for the caller's deadline")
 }
 
+// TestSayGoodbye_GivesUpOnUnresponsiveServer guards a command hanging on
+// exit, deaf to Ctrl+C, when the server accepts its goodbye but never
+// answers.
+func TestSayGoodbye_GivesUpOnUnresponsiveServer(t *testing.T) {
+	// Not parallel: it swaps a package var.
+	orig := goodbyeTimeout
+	goodbyeTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { goodbyeTimeout = orig })
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	c, err := client.NewClient(t.TempDir(), "tcp", ln.Addr().String())
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		sayGoodbye(c, "ws-1")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the goodbye did not give up on a server that never answers")
+	}
+}
+
 // TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer covers the
 // startup race left over from making the shutdown decision final: a client
 // can reach a server in the instant between its committing to an idle

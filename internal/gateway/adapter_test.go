@@ -1,12 +1,15 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
@@ -279,24 +282,178 @@ func TestProgramFunctions(t *testing.T) {
 	require.Contains(t, seen.req.Header.Get("X-Seen"), "X-Existing")
 }
 
-// A gateway that impersonates an HTTP/1.1 client must not let Go negotiate
-// HTTP/2, and a transport it cannot reconfigure passes through untouched.
-func TestForceHTTP1(t *testing.T) {
+func TestNewReusesTransportAndPrograms(t *testing.T) {
 	t.Parallel()
 
-	forced := forceHTTP1(http.DefaultTransport)
-	transport, ok := forced.(*http.Transport)
-	require.True(t, ok)
-	require.False(t, transport.ForceAttemptHTTP2)
-	require.Equal(t, []string{"http/1.1"}, transport.TLSClientConfig.NextProtos)
+	spec := &oauth.GatewaySpec{Request: `{}`, Response: `.body`, HTTP1: true}
+	first, err := New(spec, "token 1", nil)
+	require.NoError(t, err)
+	second, err := New(spec, "token 2", http.DefaultTransport)
+	require.NoError(t, err)
+	require.Same(t, http.DefaultTransport, first.Base, "HTTP1 is the caller's base to choose")
+	require.Same(t, first.Base, second.Base)
+	require.Same(t, first.request, second.request)
+	require.Same(t, first.response, second.response)
 
-	custom := &stubTransport{}
-	require.Same(t, custom, forceHTTP1(custom))
+	swapped, err := New(&oauth.GatewaySpec{Request: spec.Response, Response: spec.Request}, "", nil)
+	require.NoError(t, err)
+	require.Same(t, first.request, swapped.response)
+	require.Same(t, first.response, swapped.request)
 }
 
-type stubTransport struct{}
+func TestRewrittenBodyOwnershipAndReplay(t *testing.T) {
+	t.Parallel()
 
-func (*stubTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, nil }
+	original := &trackedBody{Reader: strings.NewReader(`{"original":true}`)}
+	upstream := &trackedBody{Reader: strings.NewReader(`{"response":true}`)}
+	adapter := newStubAdapter(t, `{body: {rewritten: true}}`, `.body`, roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		require.Equal(t, 1, original.closes)
+		defer req.Body.Close()
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"rewritten":true}`, string(body))
+		require.EqualValues(t, len(body), req.ContentLength)
+
+		replay, err := req.GetBody()
+		require.NoError(t, err)
+		defer replay.Close()
+		replayed, err := io.ReadAll(replay)
+		require.NoError(t, err)
+		require.Equal(t, body, replayed)
+		return &http.Response{StatusCode: http.StatusOK, Body: upstream}, nil
+	}))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://provider.example", strings.NewReader(`{"original":true}`))
+	require.NoError(t, err)
+	req.Body = original
+	resp, err := adapter.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, 1, upstream.closes)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, 1, upstream.closes)
+}
+
+func TestBodyClosedOnFailure(t *testing.T) {
+	t.Parallel()
+
+	readErr := errors.New("body failure")
+	tests := []struct {
+		name    string
+		request bool
+		body    io.Reader
+		want    string
+	}{
+		{name: "request read failure", request: true, body: iotest.ErrReader(readErr), want: "read request body: body failure"},
+		{name: "response read failure", body: iotest.ErrReader(readErr), want: "read response body: body failure"},
+		{name: "oversized request", request: true, body: &io.LimitedReader{R: zeroReader{}, N: maxBody + 1}, want: "read request body: body exceeds"},
+		{name: "oversized response", body: &io.LimitedReader{R: zeroReader{}, N: maxBody + 1}, want: "read response body: body exceeds"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			body := &trackedBody{Reader: tt.body}
+			adapter := newStubAdapter(t, `{}`, `.body`, roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				defer req.Body.Close()
+				require.False(t, tt.request, "invalid request bodies must not be sent")
+				return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
+			}))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://provider.example", strings.NewReader(`{}`))
+			require.NoError(t, err)
+			if tt.request {
+				req.Body = body
+			}
+			resp, err := adapter.RoundTrip(req)
+			if resp != nil {
+				defer resp.Body.Close()
+			}
+			require.ErrorContains(t, err, tt.want)
+			require.Equal(t, 1, body.closes)
+		})
+	}
+}
+
+func TestStreamTransfersBodyOwnership(t *testing.T) {
+	t.Parallel()
+
+	upstream := &trackedBody{Reader: strings.NewReader("data: 1\n\n")}
+	resp := stubGateway(t, `{}`, `[.data]`, "text/event-stream", upstream)
+	require.Zero(t, upstream.closes)
+	_, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Zero(t, upstream.closes)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, 1, upstream.closes)
+}
+
+func TestGatewayJQCancellation(t *testing.T) {
+	t.Parallel()
+
+	for _, stage := range []string{"request", "response", "stream event"} {
+		t.Run(stage, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			request, response := `{}`, `.body`
+			if stage == "request" {
+				request = `{headers: {"X-Rewritten": "yes"}}`
+				cancel()
+			}
+			adapter := newStubAdapter(t, request, response, roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				defer req.Body.Close()
+				switch stage {
+				case "request":
+					t.Fatal("a canceled request program must not forward a request")
+				case "response":
+					cancel()
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+				case "stream event":
+					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: 1\n\n"))}, nil
+				}
+				panic("unknown stage")
+			}))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://provider.example", nil)
+			require.NoError(t, err)
+			resp, err := adapter.RoundTrip(req)
+			if stage == "stream event" {
+				require.NoError(t, err)
+				defer resp.Body.Close()
+				cancel()
+				_, err = io.ReadAll(resp.Body)
+			}
+			require.ErrorIs(t, err, context.Canceled)
+			require.ErrorContains(t, err, "rewrite "+stage)
+		})
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+type trackedBody struct {
+	io.Reader
+	closes int
+}
+
+func (b *trackedBody) Close() error {
+	b.closes++
+	return nil
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func newStubAdapter(t *testing.T, request, response string, base http.RoundTripper) *Adapter {
+	t.Helper()
+	adapter, err := New(&oauth.GatewaySpec{Request: request, Response: response}, "", base)
+	require.NoError(t, err)
+	return adapter
+}
 
 func parseEvents(t *testing.T, stream string) []map[string]any {
 	t.Helper()

@@ -5,10 +5,9 @@
 package gateway
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -21,13 +20,10 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 )
 
-// maxBody bounds a rewritten request or response body, matching what the
-// SDKs themselves are willing to carry.
+// maxBody bounds incoming request and unary response bodies.
 const maxBody = 64 << 20
 
-// Adapter rewrites HTTP traffic through the two jq programs of a
-// [oauth.GatewaySpec]. Create one per provider with [New]; the compiled
-// programs are reused across requests.
+// Adapter rewrites HTTP traffic through the two jq programs of a [oauth.GatewaySpec].
 type Adapter struct {
 	Base     http.RoundTripper
 	Token    string
@@ -35,8 +31,7 @@ type Adapter struct {
 	response *jq.Program
 }
 
-// New compiles the spec's programs and returns an adapter that forwards to
-// base (http.DefaultTransport when nil), presenting token to both programs.
+// New uses the default transport when base is nil.
 func New(spec *oauth.GatewaySpec, token string, base http.RoundTripper) (*Adapter, error) {
 	if !spec.Usable() {
 		return nil, fmt.Errorf("gateway adapter needs both a request and a response program")
@@ -52,40 +47,12 @@ func New(spec *oauth.GatewaySpec, token string, base http.RoundTripper) (*Adapte
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	if spec.HTTP1 {
-		base = forceHTTP1(base)
-	}
 	return &Adapter{Base: base, Token: token, request: reqCode, response: respCode}, nil
 }
 
-// forceHTTP1 returns a transport that will not negotiate HTTP/2. Go enables it
-// by default against servers that offer it, and a client that impersonates a
-// Node-based one is expected to speak HTTP/1.1. Only a concrete
-// [*http.Transport] can be reconfigured; anything else passes through.
-func forceHTTP1(base http.RoundTripper) http.RoundTripper {
-	transport, ok := base.(*http.Transport)
-	if !ok {
-		return base
-	}
-	clone := transport.Clone()
-	clone.ForceAttemptHTTP2 = false
-	if clone.TLSClientConfig == nil {
-		clone.TLSClientConfig = &tls.Config{}
-	}
-	clone.TLSClientConfig.NextProtos = []string{"http/1.1"}
-	return clone
-}
-
-// RoundTrip implements [http.RoundTripper]: it rewrites the request through
-// the request program, sends it, and rewrites the response through the
-// response program — as one unit for plain bodies, and as events for
-// server-sent streams.
+// RoundTrip rewrites both halves of an HTTP exchange through jq.
 func (a *Adapter) RoundTrip(req *http.Request) (*http.Response, error) {
-	requestID, err := randomToken(12)
-	if err != nil {
-		return nil, err
-	}
-
+	requestID := randomToken(12)
 	rewritten, err := a.rewriteRequest(req, requestID)
 	if err != nil {
 		return nil, err
@@ -95,22 +62,18 @@ func (a *Adapter) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := a.rewriteResponse(resp, requestID); err != nil {
-		resp.Body.Close() //nolint:errcheck // the request is failing anyway
+	if err := a.rewriteResponse(req.Context(), resp, requestID); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-// rewriteRequest applies the request program. The returned request shares
-// nothing mutable with the original.
 func (a *Adapter) rewriteRequest(req *http.Request, requestID string) (*http.Request, error) {
-	raw, err := readBody(req.Body)
+	raw, err := readAndCloseBody(req.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
-	// A body that is not JSON is still forwarded untouched; the program only
-	// sees values it can reason about.
+	// Non-JSON input is passed through unless the program supplies a body.
 	body, _ := parseJSON(raw)
 
 	input := map[string]any{
@@ -121,7 +84,7 @@ func (a *Adapter) rewriteRequest(req *http.Request, requestID string) (*http.Req
 		"request_id": requestID,
 		"token":      a.Token,
 	}
-	output, err := a.request.Run(input)
+	output, err := a.request.Run(req.Context(), input)
 	if err != nil {
 		return nil, fmt.Errorf("rewrite request: %w", err)
 	}
@@ -156,7 +119,7 @@ func (a *Adapter) rewriteRequest(req *http.Request, requestID string) (*http.Req
 		}
 	}
 	sent := raw
-	if replacement, present := rules["body"]; present && replacement != nil {
+	if replacement := rules["body"]; replacement != nil {
 		encoded, err := json.Marshal(replacement)
 		if err != nil {
 			return nil, fmt.Errorf("encode rewritten body: %w", err)
@@ -166,14 +129,20 @@ func (a *Adapter) rewriteRequest(req *http.Request, requestID string) (*http.Req
 			clone.Header.Set("Content-Type", "application/json")
 		}
 	}
-	// Reading the body consumed it, so whatever is sent has to be put back,
-	// rewritten or not.
-	clone.Body = io.NopCloser(bytes.NewReader(sent))
-	clone.ContentLength = int64(len(sent))
-	if len(sent) == 0 {
-		clone.Body = http.NoBody
-	}
+	setRequestBody(clone, sent)
 	return clone, nil
+}
+
+func setRequestBody(req *http.Request, data []byte) {
+	body := func() io.ReadCloser {
+		if len(data) == 0 {
+			return http.NoBody
+		}
+		return io.NopCloser(bytes.NewReader(data))
+	}
+	req.Body = body()
+	req.GetBody = func() (io.ReadCloser, error) { return body(), nil }
+	req.ContentLength = int64(len(data))
 }
 
 func parseAbsolute(raw string) (*url.URL, error) {
@@ -187,10 +156,7 @@ func parseAbsolute(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
-// rewriteResponse applies the response program to the reply: once for a plain
-// body, per event for a stream. Errors leave the response unreadable, so
-// callers fail the request rather than serve a half-rewritten reply.
-func (a *Adapter) rewriteResponse(resp *http.Response, requestID string) error {
+func (a *Adapter) rewriteResponse(ctx context.Context, resp *http.Response, requestID string) error {
 	base := map[string]any{
 		"status":     resp.StatusCode,
 		"headers":    firstHeaders(resp.Header),
@@ -199,25 +165,20 @@ func (a *Adapter) rewriteResponse(resp *http.Response, requestID string) error {
 	}
 
 	if isEventStream(resp) {
-		resp.Body = &eventConverter{
-			base:     base,
-			program:  a.response,
-			upstream: resp.Body,
-		}
-		// The rewritten stream has its own framing; a stale length would
-		// truncate it.
+		resp.Body = newEventConverter(ctx, a.response, base, resp.Body)
+		// The upstream length does not apply to the rewritten stream.
 		resp.ContentLength = -1
 		resp.Header.Del("Content-Length")
 		return nil
 	}
 
-	raw, err := readBody(resp.Body)
+	raw, err := readAndCloseBody(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)
 	}
 	body, _ := parseJSON(raw)
-	input := mapsWith(base, map[string]any{"body": body})
-	output, err := a.response.Run(input)
+	base["body"] = body
+	output, err := a.response.Run(ctx, base)
 	if err != nil {
 		return fmt.Errorf("rewrite response: %w", err)
 	}
@@ -229,155 +190,6 @@ func (a *Adapter) rewriteResponse(resp *http.Response, requestID string) error {
 	resp.ContentLength = int64(len(encoded))
 	resp.Header.Del("Content-Length")
 	return nil
-}
-
-// eventConverter rewrites a server-sent event stream event by event. The
-// last event is held back until the upstream ends, because the program cannot
-// know an event is final until nothing follows it; a stream through a gateway
-// therefore lags the upstream by one event.
-type eventConverter struct {
-	base     map[string]any
-	program  *jq.Program
-	upstream io.ReadCloser
-	buffered *bufio.Reader
-	pending  bytes.Buffer
-	done     bool
-}
-
-// Read implements [io.Reader], producing rewritten events on demand.
-func (c *eventConverter) Read(p []byte) (int, error) {
-	for c.pending.Len() == 0 {
-		if c.done {
-			return 0, io.EOF
-		}
-		if err := c.nextEvent(); err != nil {
-			return 0, err
-		}
-	}
-	return c.pending.Read(p)
-}
-
-// Close implements [io.Closer].
-func (c *eventConverter) Close() error {
-	return c.upstream.Close() //nolint:errcheck // closing a finished stream has nothing to report
-}
-
-// nextEvent reads one upstream event, rewrites it, and queues the result.
-func (c *eventConverter) nextEvent() error {
-	name, data, err := readEvent(c.reader())
-	switch {
-	case err != nil && err != io.EOF:
-		return err
-	case data == "" && err == io.EOF:
-		c.done = true
-		return nil
-	case data == "":
-		// A blank-line run between events; nothing to rewrite.
-		return nil
-	}
-
-	// An event is final only when nothing follows it, so one byte of
-	// lookahead decides: the event is held back until the next byte arrives
-	// (or the upstream ends), which is the single event of lag a rewritten
-	// stream carries.
-	atEOF := err == io.EOF
-	if !atEOF {
-		if _, peekErr := c.reader().Peek(1); peekErr == io.EOF {
-			atEOF = true
-		}
-	}
-	if atEOF {
-		c.done = true
-	}
-
-	payload, ok := parseJSON([]byte(data))
-	if !ok {
-		// Comments, keepalives, and any non-JSON data pass through with their
-		// framing intact; the program only sees events it can parse.
-		writeEvent(&c.pending, name, data)
-		return nil
-	}
-
-	input := map[string]any{
-		"event":      true,
-		"status":     c.base["status"],
-		"headers":    c.base["headers"],
-		"data":       payload,
-		"final":      atEOF,
-		"request_id": c.base["request_id"],
-		"token":      c.base["token"],
-	}
-	output, err := c.program.Run(input)
-	if err != nil {
-		return fmt.Errorf("rewrite stream event: %w", err)
-	}
-	events, ok := output.([]any)
-	if !ok {
-		return fmt.Errorf("rewrite stream event: program output must be an array of events, got %T", output)
-	}
-	for _, event := range events {
-		encoded, err := json.Marshal(event)
-		if err != nil {
-			return fmt.Errorf("encode rewritten event: %w", err)
-		}
-		writeEvent(&c.pending, name, string(encoded))
-	}
-	return nil
-}
-
-// writeEvent queues one server-sent event. The event name is framing, not data
-// the program rewrites, so it is carried over verbatim: a provider whose
-// events are named (Anthropic's message_start, message_delta, ...) dispatches
-// on it, and dropping it would leave the stream unreadable.
-func writeEvent(w *bytes.Buffer, name, data string) {
-	if name != "" {
-		w.WriteString("event: ")
-		w.WriteString(name)
-		w.WriteString("\n")
-	}
-	w.WriteString("data: ")
-	w.WriteString(data)
-	w.WriteString("\n\n")
-}
-
-func (c *eventConverter) reader() *bufio.Reader {
-	if c.buffered == nil {
-		c.buffered = bufio.NewReader(c.upstream)
-	}
-	return c.buffered
-}
-
-// readEvent reads one SSE event: its name, from an event: line, and its data,
-// the accumulated data lines of a blank-line-terminated block. io.EOF is
-// returned with the final block when the stream ends inside one.
-func readEvent(r *bufio.Reader) (name, data string, err error) {
-	var dataLines strings.Builder
-	for {
-		line, readErr := r.ReadString('\n')
-		trimmed := strings.TrimRight(line, "\r\n")
-		switch {
-		case trimmed == "" && readErr == nil:
-			if dataLines.Len() > 0 {
-				return name, strings.TrimSuffix(dataLines.String(), "\n"), nil
-			}
-			// Blank line outside an event: keep reading.
-		case strings.HasPrefix(trimmed, ":"):
-			// Comment line; ignored.
-		case strings.HasPrefix(trimmed, "event:"):
-			name = strings.TrimPrefix(strings.TrimPrefix(trimmed, "event:"), " ")
-		case strings.HasPrefix(trimmed, "data:"):
-			// SSE allows one optional space after the prefix, and multiple
-			// data lines join with newlines.
-			dataLines.WriteString(strings.TrimPrefix(strings.TrimPrefix(trimmed, "data:"), " "))
-			dataLines.WriteString("\n")
-		}
-		if readErr != nil {
-			if readErr == io.EOF && dataLines.Len() > 0 {
-				return name, strings.TrimSuffix(dataLines.String(), "\n"), io.EOF
-			}
-			return name, "", readErr
-		}
-	}
 }
 
 // firstHeaders flattens a header set to one value per key, the shape the
@@ -394,24 +206,19 @@ func firstHeaders(h http.Header) map[string]any {
 	return flat
 }
 
-// mapsWith merges two maps for a program input.
-func mapsWith(base, extra map[string]any) map[string]any {
-	merged := make(map[string]any, len(base)+len(extra))
-	for k, v := range base {
-		merged[k] = v
-	}
-	for k, v := range extra {
-		merged[k] = v
-	}
-	return merged
-}
-
-// readBody reads a body whole, bounded by maxBody.
-func readBody(body io.Reader) ([]byte, error) {
+func readAndCloseBody(body io.ReadCloser) ([]byte, error) {
 	if body == nil {
 		return nil, nil
 	}
-	return io.ReadAll(io.LimitReader(body, maxBody))
+	defer body.Close()
+	raw, err := io.ReadAll(io.LimitReader(body, maxBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxBody {
+		return nil, fmt.Errorf("body exceeds %d bytes", maxBody)
+	}
+	return raw, nil
 }
 
 // parseJSON reports whether raw parses as JSON, returning the value.
@@ -427,10 +234,8 @@ func isEventStream(resp *http.Response) bool {
 	return strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
 }
 
-func randomToken(n int) (string, error) {
+func randomToken(n int) string {
 	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }

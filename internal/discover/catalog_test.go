@@ -122,11 +122,19 @@ func TestCatalogKeepsDeclaredFields(t *testing.T) {
 	models, err := Catalog(context.Background(), CatalogConfig{
 		ID:      "plan",
 		BaseURL: server.URL,
-		Spec:    &oauth.CatalogSpec{URL: "/v1/models", Program: catalogProgram},
+		Spec: &oauth.CatalogSpec{
+			URL: "/v1/models",
+			Program: catalogProgram + ` | map(. + {
+				type: "responses", max_attachments: 1, options: {temperature: 0.5, top_k: 10}})`,
+		},
 		Existing: []catwalk.Model{{
-			ID:        "claude-opus-5-5",
-			Name:      "Pinned Name",
-			Reasoning: catwalk.Reasoning{DefaultEffortLevel: "high"},
+			ID:             "claude-opus-5-5",
+			Name:           "Pinned Name",
+			Type:           catwalk.TypeMessages,
+			MaxAttachments: 3,
+			Options:        catwalk.ModelOptions{Temperature: new(0.0)},
+			Capabilities:   catwalk.Capabilities{Audio: true},
+			Reasoning:      catwalk.Reasoning{DefaultEffortLevel: "high"},
 		}},
 	}, &mockResolver{})
 	require.NoError(t, err)
@@ -137,7 +145,11 @@ func TestCatalogKeepsDeclaredFields(t *testing.T) {
 	require.Equal(t, "high", first.Reasoning.DefaultEffortLevel, "a declared effort wins")
 	require.Equal(t, int64(1000000), first.ContextWindow, "the catalog fills what was left unset")
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, first.ReasoningEffortLevels())
-	require.True(t, first.Capabilities.Vision)
+	require.True(t, first.Capabilities.Vision, "declared false does not veto a reported capability")
+	require.True(t, first.Capabilities.Audio)
+	require.Equal(t, catwalk.TypeMessages, first.Type)
+	require.Equal(t, 3, first.MaxAttachments)
+	require.Equal(t, catwalk.ModelOptions{Temperature: new(0.0), TopK: new(int64(10))}, first.Options)
 
 	// A declared model the catalog never lists survives as it was.
 	models, err = Catalog(context.Background(), CatalogConfig{

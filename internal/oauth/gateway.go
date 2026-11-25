@@ -26,11 +26,9 @@ package oauth
 //
 //	{event: true, status, headers, data, final, request_id, token}
 //
-// where data is the parsed event and final marks the last event — determining
-// that requires holding one event back, so a stream through a gateway lags the
-// upstream by a single event. It returns an array of replacement events, which
-// may be empty (drop the event) or longer than one (append synthesized ones).
-// Events whose data is not JSON pass through untouched.
+// final marks the last JSON event at clean EOF, so rewrites lag by one JSON event.
+// Comments and non-JSON events pass through without resolving finality.
+// The program may return zero or more replacement events.
 //
 // Both programs run with two functions beyond jq itself: sha256hex(s) returns
 // the lowercase hex SHA-256 of a string, and uuid returns a fresh random
@@ -43,10 +41,7 @@ type GatewaySpec struct {
 	// Response is the jq program rewriting responses. Required.
 	Response string `json:"response" jsonschema:"required,description=jq program rewriting each response or stream event, see the gateway adapter contract in the docs"`
 
-	// HTTP1 forces the adapter to speak HTTP/1.1 rather than letting Go
-	// negotiate HTTP/2. A server that fingerprints the protocol — the
-	// JS-runtime clients this adapter impersonates all run on Node's
-	// HTTP/1.1 stack — sees a different client otherwise.
+	// HTTP1 pins the provider's base transport to the shared HTTP/1.1 pool.
 	HTTP1 bool `json:"http1,omitempty" jsonschema:"description=Force HTTP/1.1 instead of negotiating HTTP/2"`
 }
 

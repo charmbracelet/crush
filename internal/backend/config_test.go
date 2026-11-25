@@ -116,6 +116,23 @@ func TestSetProviderAPIKey_PublishesConfigChanged(t *testing.T) {
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
+// TestSetProviderAPIKey_WakesReauthWait verifies that signing in again
+// through the server releases a run that waits for the user to
+// re-authenticate, as it does in local mode.
+func TestSetProviderAPIKey_WakesReauthWait(t *testing.T) {
+	b, ws, _ := newPublishingWorkspace(t)
+
+	waited := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		waited <- ws.Cfg.WaitForTokenChange(ctx, "openai")
+	}()
+
+	require.NoError(t, b.SetProviderAPIKey(ws.ID, config.ScopeGlobal, "openai", "new-key"))
+	require.NoError(t, <-waited)
+}
+
 func TestMarkProjectInitialized_PublishesConfigChanged(t *testing.T) {
 	b, ws, evc := newPublishingWorkspace(t)
 

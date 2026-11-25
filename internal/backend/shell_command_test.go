@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
@@ -61,18 +62,21 @@ func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {
 	require.Empty(t, stored)
 }
 
-// titleCoordinator records the titles it is asked to generate. Any other
-// call panics.
+// titleCoordinator reports the titles it is asked to generate on titles,
+// once release is closed. Any other call panics.
 type titleCoordinator struct {
 	agent.Coordinator
-	titles [][2]string
+	release chan struct{}
+	titles  chan [2]string
 }
 
 func (c *titleCoordinator) GenerateTitle(_ context.Context, sessionID, prompt string) {
-	c.titles = append(c.titles, [2]string{sessionID, prompt})
+	<-c.release
+	c.titles <- [2]string{sessionID, prompt}
 }
 
-// A '!' command that starts a session titles it, as it does in local mode.
+// A '!' command that starts a session titles it, as it does in local mode,
+// without holding back the command's output until the title is done.
 func TestRunShellCommand_TitlesTheSessionItStarted(t *testing.T) {
 	t.Parallel()
 
@@ -90,7 +94,10 @@ func TestRunShellCommand_TitlesTheSessionItStarted(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			coord := &titleCoordinator{}
+			coord := &titleCoordinator{
+				release: make(chan struct{}),
+				titles:  make(chan [2]string, 1),
+			}
 			var c agent.Coordinator = coord
 			if tt.noAgent {
 				c = nil
@@ -100,18 +107,44 @@ func TestRunShellCommand_TitlesTheSessionItStarted(t *testing.T) {
 			sess, err := ws.Sessions.Create(t.Context(), "New Session")
 			require.NoError(t, err)
 
-			resp, err := b.RunShellCommand(t.Context(), ws.ID, proto.ShellCommandRequest{
-				SessionID:      sess.ID,
-				Command:        "echo hello",
-				IsFirstMessage: tt.first,
-			})
-			require.NoError(t, err)
-			require.Equal(t, "hello\n", resp.Output)
+			// The output must come back while the title is still being
+			// generated.
+			type result struct {
+				resp proto.ShellCommandResponse
+				err  error
+			}
+			done := make(chan result, 1)
+			go func() {
+				resp, err := b.RunShellCommand(t.Context(), ws.ID, proto.ShellCommandRequest{
+					SessionID:      sess.ID,
+					Command:        "echo hello",
+					IsFirstMessage: tt.first,
+				})
+				done <- result{resp, err}
+			}()
+			select {
+			case r := <-done:
+				require.NoError(t, r.err)
+				require.Equal(t, "hello\n", r.resp.Output)
+			case <-time.After(5 * time.Second):
+				close(coord.release)
+				t.Fatal("the output waited for the title")
+			}
+			close(coord.release)
 
-			if tt.wantTitle {
-				require.Equal(t, [][2]string{{sess.ID, "$ echo hello"}}, coord.titles)
-			} else {
-				require.Empty(t, coord.titles)
+			if !tt.wantTitle {
+				select {
+				case got := <-coord.titles:
+					t.Fatalf("unexpected title request %v", got)
+				case <-time.After(100 * time.Millisecond):
+				}
+				return
+			}
+			select {
+			case got := <-coord.titles:
+				require.Equal(t, [2]string{sess.ID, "$ echo hello"}, got)
+			case <-time.After(5 * time.Second):
+				t.Fatal("the session was never titled")
 			}
 		})
 	}

@@ -395,9 +395,10 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 
 	if req.IsFirstMessage && req.SessionID != "" {
 		if coord := ws.Coordinator(); coord != nil {
-			// Bound to the workspace rather than the request: a client
-			// hanging up must not cut the title short, teardown must.
-			coord.GenerateTitle(ws.ctx, req.SessionID, "$ "+req.Command)
+			// In the background, so the output is not held back for the
+			// title, and bound to the workspace rather than the request: a
+			// client hanging up must not cut the title short, teardown must.
+			go coord.GenerateTitle(ws.ctx, req.SessionID, "$ "+req.Command)
 		}
 	}
 

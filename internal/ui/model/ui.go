@@ -1224,6 +1224,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.handleChannelMessage(msg.Payload)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
+		// The server re-sends a pending request whenever a client reports
+		// its session; keep the dialog already showing it, so its scroll,
+		// diff mode, and selected button survive, and don't notify again.
+		if d, ok := m.dialog.Dialog(dialog.PermissionsID).(*dialog.Permissions); ok && d.RequestID() == msg.Payload.ID {
+			break
+		}
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

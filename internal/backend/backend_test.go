@@ -1863,6 +1863,20 @@ func TestShutdownIfIdle_GrantedAndFinal(t *testing.T) {
 	require.ErrorIs(t, err, ErrServerShuttingDown)
 }
 
+// TestShutdownIfIdle_RefusedByExplicitServer keeps a client of another
+// build from replacing a server the user started with `crush server`: the
+// replacement it spawns would shut itself down once idle.
+func TestShutdownIfIdle_RefusedByExplicitServer(t *testing.T) {
+	t.Parallel()
+
+	b, shutdowns := newTestBackend(t)
+	b.DisableIdleShutdown()
+
+	require.False(t, b.ShutdownIfIdle(), "an explicitly started server must refuse")
+	require.Equal(t, int32(0), shutdowns.Load())
+	require.False(t, b.Closing())
+}
+
 // TestIdleShutdown_RefusesLaterCreates covers the same finality for the
 // unprompted path: a server that decided to exit because it went idle
 // must not accept the create of a client that arrives a moment later.

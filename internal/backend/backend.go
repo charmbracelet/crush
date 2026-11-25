@@ -1382,8 +1382,16 @@ func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 // under the lock creates and teardowns take, closes that window: the answer
 // is atomic, and granting it latches the decision so creates arriving
 // afterwards are refused.
+//
+// A server started explicitly always declines: the user asked for it, and
+// the replacement a client spawns would not keep running the way it does.
 func (b *Backend) ShutdownIfIdle() bool {
 	b.mu.Lock()
+	if !b.idleShutdown {
+		b.mu.Unlock()
+		slog.Warn("Refusing shutdown request: the server was started explicitly")
+		return false
+	}
 	live, pending := b.workspaces.Len(), b.pending
 	idle := live == 0 && pending == 0
 	if idle {

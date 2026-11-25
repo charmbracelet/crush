@@ -286,6 +286,18 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 	require.Equal(t, "seeded", got[0].Name)
 }
 
+// TestSessionConversionKeepsEstimatedUsage verifies that the flag marking a
+// session's usage as estimated survives the trip to and from the server, so
+// the TUI can mark the numbers as estimates.
+func TestSessionConversionKeepsEstimatedUsage(t *testing.T) {
+	t.Parallel()
+
+	in := proto.Session{ID: "s1", PromptTokens: 10, EstimatedUsage: true}
+	got := protoToSession(in)
+	require.True(t, got.EstimatedUsage)
+	require.True(t, sessionToProto(got).EstimatedUsage)
+}
+
 // TestTranslateEvent_HostTheme verifies that host theme events reach the
 // TUI as HostThemeEvent: the theme for an update, nil for a clear.
 func TestTranslateEvent_HostTheme(t *testing.T) {

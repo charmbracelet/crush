@@ -350,12 +350,38 @@ func sessionToProto(s session.Session) proto.Session {
 		MessageCount:     s.MessageCount,
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
+		EstimatedUsage:   s.EstimatedUsage,
 		Cost:             s.Cost,
 		Todos:            todosToProto(s.Todos),
 		Channel:          s.Channel,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func protoToSession(s proto.Session) session.Session {
+	sess := session.Session{
+		ID:               s.ID,
+		ParentSessionID:  s.ParentSessionID,
+		Title:            s.Title,
+		SummaryMessageID: s.SummaryMessageID,
+		MessageCount:     s.MessageCount,
+		PromptTokens:     s.PromptTokens,
+		CompletionTokens: s.CompletionTokens,
+		EstimatedUsage:   s.EstimatedUsage,
+		Cost:             s.Cost,
+		Channel:          s.Channel,
+		CreatedAt:        s.CreatedAt,
+		UpdatedAt:        s.UpdatedAt,
+	}
+	for _, t := range s.Todos {
+		sess.Todos = append(sess.Todos, session.Todo{
+			Content:    t.Content,
+			Status:     session.TodoStatus(t.Status),
+			ActiveForm: t.ActiveForm,
+		})
+	}
+	return sess
 }
 
 // isSessionBusy reports whether the given workspace has an in-flight

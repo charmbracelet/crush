@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/shell"
@@ -75,7 +76,11 @@ func BuildPayload(ev Event, cwd string) []byte {
 // CLAUDE_PROJECT_DIR mirrors CRUSH_PROJECT_DIR so hook scripts written
 // for Claude Code can locate themselves.
 func BuildEnv(ev Event, cwd, projectDir string) []string {
-	env := os.Environ()
+	// Drop tool variables inherited from an outer Crush so tool-less events
+	// don't report a stale tool.
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "CRUSH_TOOL_NAME=") || strings.HasPrefix(kv, "CRUSH_TOOL_INPUT_")
+	})
 	env = append(env, shell.CrushEnvMarkers()...)
 	env = append(
 		env,

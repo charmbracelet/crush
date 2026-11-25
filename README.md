@@ -19,7 +19,9 @@
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
-- **Channel-Ready:** MCP servers can push real-time events into your session via [Claude Channels](https://code.claude.com/docs/en/channels-reference) — CI failures, webhooks, and more, acting on them without you typing a thing
+- **Channel-Ready:** MCP servers can push real-time events into your session via
+  [Claude Channels](https://code.claude.com/docs/en/channels-reference) — CI
+  failures, webhooks, and more, acting on them without you typing a thing
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux,
   Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
 - **Industrial Grade:** built on the Charm ecosystem, powering 25k+
@@ -840,23 +842,12 @@ A provider plugin is a Bash script that declares a provider with the same
 crushrc builtins, so a new provider needs no Go code and no Crush release. Drop
 a `*.sh` file into a plugins directory and Crush runs it at config load:
 
-- `~/.config/crush/plugins/` — user-wide
-- `.crush/plugins/` — project-local; a project plugin overrides a global one,
-  and your own crushrc overrides both
-
 Both directories also run the scripts one level down, which is where an
 installed repository lives. `crush plugin install` fetches one from GitHub
 rather than making you copy files:
 
 ```bash
-crush plugin install example/crush-plugins             # default branch, user-wide
-crush plugin install example/crush-plugins@v1.2.3      # a tag, branch, or commit
-crush plugin install example/crush-plugins --project   # .crush/plugins, so a team shares it
-crush plugin update                                    # every installed repository, or:
-crush plugin update example/crush-plugins
-crush plugin list                                      # the ref and commit each one pins
-crush plugin trust example/crush-plugins               # accept edits you made after installing
-crush plugin uninstall example/crush-plugins
+crush plugin install example/crush-plugins
 ```
 
 The plugins of a repository are the non-hidden `*.sh` files at its root; the

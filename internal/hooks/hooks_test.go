@@ -806,6 +806,15 @@ func TestRunnerLifecycleEvent(t *testing.T) {
 	require.Zero(t, none.HookCount)
 }
 
+func TestBuildEnvDropsInheritedToolVars(t *testing.T) {
+	t.Setenv("CRUSH_TOOL_NAME", "outer")
+	t.Setenv("CRUSH_TOOL_INPUT_COMMAND", "outer")
+	env := BuildEnv(Event{Name: EventTurnEnd}, t.TempDir(), t.TempDir())
+	for _, kv := range env {
+		require.False(t, strings.HasPrefix(kv, "CRUSH_TOOL_"), kv)
+	}
+}
+
 func TestRunnerPostToolUseReplacesOutput(t *testing.T) {
 	t.Parallel()
 	r := NewRunner(Static(map[string][]HookConfig{

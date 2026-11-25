@@ -50,10 +50,15 @@ type ClientWorkspace struct {
 	ws     proto.Workspace
 	skills *skills.Manager
 	// lastSession is the most recent session ID reported via
-	// SetCurrentSession. The subscription loop re-asserts it after a
-	// reconnect, because the server's per-client presence entry (or the
-	// whole workspace) may have been re-created in the meantime.
+	// SetCurrentSession, "" for the landing screen. The subscription loop
+	// reports it every time the event stream attaches: the server only
+	// accepts a report from an attached client, and its presence entry (or
+	// the whole workspace) may have been re-created in the meantime.
 	lastSession string
+	// presenceMu serializes session reports, so a report the subscription
+	// loop read before a newer SetCurrentSession can never reach the
+	// server after it.
+	presenceMu sync.Mutex
 	// mainAgent is the agent this client last made the main agent (empty
 	// until it switches). Recovery restores it: a re-created workspace
 	// runs the coder agent, so plan mode would otherwise get write tools
@@ -228,10 +233,40 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 // state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
 	w.herdrClient.SetSessionID(sessionID)
+	w.presenceMu.Lock()
+	defer w.presenceMu.Unlock()
 	w.mu.Lock()
 	w.lastSession = sessionID
 	w.mu.Unlock()
+	return w.sendCurrentSession(ctx, sessionID)
+}
+
+// presenceReportTimeout bounds a session report, so a wedged server cannot
+// hold up the reports that follow it.
+const presenceReportTimeout = 5 * time.Second
+
+// sendCurrentSession sends a session report. Callers hold presenceMu.
+func (w *ClientWorkspace) sendCurrentSession(ctx context.Context, sessionID string) error {
+	ctx, cancel := context.WithTimeout(ctx, presenceReportTimeout)
+	defer cancel()
 	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
+}
+
+// reportCurrentSession tells the server which session this client views
+// once its event stream has attached. The server sends a client that never
+// reported every session's permission and question prompts, and rejects a
+// report made before the stream attached, so without this a window on the
+// landing screen, or one whose first report lost that race, would pop up
+// prompts for sessions it does not show.
+func (w *ClientWorkspace) reportCurrentSession() {
+	w.presenceMu.Lock()
+	defer w.presenceMu.Unlock()
+	w.mu.RLock()
+	sid := w.lastSession
+	w.mu.RUnlock()
+	if err := w.sendCurrentSession(w.subCtx, sid); err != nil && w.subCtx.Err() == nil {
+		slog.Warn("Failed to report the current session", "error", err)
+	}
 }
 
 // RoutesChannelEvents reports true: the server backend injects each
@@ -1025,10 +1060,10 @@ var recoveryCreateTimeout = 30 * time.Second
 // succeed and the loop re-registers instead. When nothing listens on the
 // server's address at all, the server died and no retry can reach it, so
 // the loop has the respawn hook start a new one, which then answers with
-// that 404. And any stream that closes loses whatever was published while
-// the client was away, so every re-established stream — even one that
-// reconnects on the first try — re-asserts the client's session and asks
-// the UI to resync.
+// that 404. Every stream that attaches, the first one included, reports
+// the session the client views. And any stream that closes loses whatever
+// was published while the client was away, so every re-established stream
+// — even one that reconnects on the first try — asks the UI to resync.
 func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 	w.subStarted.Store(true)
 	defer close(w.subDone)
@@ -1089,6 +1124,7 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 			continue
 		}
 
+		w.reportCurrentSession()
 		if degraded {
 			degraded = false
 			recoveryFailures = 0
@@ -1221,21 +1257,9 @@ func ServerVersionWarning(serverVersion string) string {
 }
 
 // afterReconnect runs once a degraded subscription is re-established. It
-// re-asserts the client's current-session selection, since the server's
-// presence entry (or the whole workspace) may have been re-created while we
-// were away, re-reads the host theme, and tells the UI to resync state
-// published while detached. The SSE handler attaches the client before
-// writing its 200, so the presence call cannot be rejected as not-attached
-// here.
+// re-reads the host theme and tells the UI to resync state published while
+// detached.
 func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
-	w.mu.RLock()
-	sid := w.lastSession
-	w.mu.RUnlock()
-	if sid != "" {
-		if err := w.SetCurrentSession(w.subCtx, sid); err != nil {
-			slog.Warn("Failed to re-assert current session after reconnect", "error", err)
-		}
-	}
 	w.resyncHostTheme(send)
 	send(ConnectionEvent{State: ConnectionRecovered})
 }

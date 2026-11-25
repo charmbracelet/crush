@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -187,6 +188,23 @@ func TestClientWriteTextFile(t *testing.T) {
 	}
 	if string(data) != "hello world" {
 		t.Fatalf("unexpected content: %q", data)
+	}
+}
+
+func TestClientElicitationUnsupported(t *testing.T) {
+	impl := &crushClient{client: &Client{}}
+	ctx := context.Background()
+
+	_, err := impl.CreateElicitation(ctx, acp.CreateElicitationRequest{})
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Code != -32601 {
+		t.Fatalf("expected -32601, got %d", reqErr.Code)
+	}
+	if err := impl.CompleteElicitation(ctx, acp.CompleteElicitationNotification{}); err != nil {
+		t.Fatalf("CompleteElicitation: %v", err)
 	}
 }
 

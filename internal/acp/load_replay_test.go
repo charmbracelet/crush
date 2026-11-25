@@ -161,6 +161,9 @@ func TestLoadSessionReplaysFullHistory(t *testing.T) {
 			content, _ := result.ToolCallUpdate.Content.Value()
 			require.Len(t, content, 1)
 			require.Equal(t, "file body", content[0].Content.Content.Text.Text)
+			rawOutput, ok := result.ToolCallUpdate.RawOutput.Value()
+			require.True(t, ok)
+			require.JSONEq(t, `"file body"`, string(rawOutput))
 			return
 		case <-time.After(5 * time.Second):
 			t.Fatal("timeout waiting for LoadSession replay")

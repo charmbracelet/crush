@@ -4,8 +4,8 @@ Crush implements the Agent Client Protocol as an **ACP Server** (Zed,
 JetBrains, Neovim drive it) and, secondarily, as an **ACP Client**
 (`crush acp connect` drives external agents). Spec:
 https://agentclientprotocol.com/protocol/v1/ — the docs are vendored under
-`docs/acp/` by `scripts/fetch_acp_docs.go`; the normative v1 prose is the 22
-files in `docs/acp/protocol/v1/` (the rest of the tree is v2 drafts, RFDs,
+`docs/acp/` by `scripts/fetch_acp_docs/main.go`; the normative v1 prose is
+now the 23 files in `docs/acp/protocol/v1/` (the rest of the tree is v2 drafts, RFDs,
 announcements and community pages, which are informational only).
 
 Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
@@ -106,7 +106,7 @@ so the reference survives edits.
 | Method | Level | Status |
 |---|---|---|
 | `session/new` | MUST | ✅ creates session, returns `modes`+`configOptions`; cwd must be absolute, validated; `mcpServers` connected |
-| `session/prompt` | MUST | ✅ runs coordinator, returns `StopReason` |
+| `session/prompt` | MUST | ✅ runs coordinator, returns a spec `StopReason`; Fantasy errors/tool-call finishes map to `end_turn` because SDK v0.20 has no `error`/`max_turn_requests` prompt stop reason |
 | `session/cancel` (notification) | MUST | ✅ cancels coordinator |
 | `session/update` baseline types (text/thought/tool) | MUST | ✅ see 4.3 |
 | `session/close` | OPTIONAL | ✅ cancels work, frees resources (MCP teardown), idempotent empty result |
@@ -135,7 +135,7 @@ used, none outside reserved ranges ✅.
 | `agent_message_chunk` | baseline | ✅ `subscribeMessages` |
 | `agent_thought_chunk` | SHOULD | ✅ `streamThoughts` (S3) |
 | `tool_call` | SHOULD | ✅ start with kind/title/locations/rawInput (S1/S10) |
-| `tool_call_update` | SHOULD | ✅ pending→in_progress→completed/failed lifecycle (S10) |
+| `tool_call_update` | SHOULD | ✅ pending→in_progress→completed/failed lifecycle (S10); live and replayed results carry `rawOutput` |
 | `plan` | SHOULD | ✅ full-replace from `todos` results (S4) |
 | `available_commands_update` | MAY | ✅ advertised (skills/custom/MCP prompts, `input.hint`) + executable (O24) |
 | `current_mode_update` | MAY | ✅ on mode change (S9) |
@@ -281,7 +281,47 @@ additionalDirectories}`, `mcpCapabilities{http,sse}`, `auth.logout`,
 HTTP/SSE MCP transports map onto Crush's MCP client.
 
 Not advertised: `sessionCapabilities.systemPrompt` (OQ-5), elicitation and
-terminal auth (Crush has no auth session to terminate).
+terminal auth (Crush has no auth session to terminate). Client
+`subagents`/`plan` capabilities are never needed by the unimplemented families
+in §5.5.
+
+### 4.15 v1 spec coverage index
+
+All 23 normative v1 files are accounted for here.
+
+| Spec file | Plan coverage |
+|---|---|
+| `agent-plan.md` | §4.3 `plan`; §5.5 identified plans |
+| `authentication.md` | §4.1 `authMethods`/`logout`, `authenticate`; §5.2 AUTH-1 |
+| `cancellation.md` | §4.9 |
+| `content.md` | §4.4 |
+| `elicitation.md` | §4.6, OQ-4 |
+| `error.md` | §4.2 error codes |
+| `extensibility.md` | §4.11 |
+| `file-system.md` | §4.7 |
+| `initialization.md` | §4.1, §4.14 |
+| `overview.md` | §2, §4.12 |
+| `prompt-turn.md` | §4.2, §4.3, §4.5, §4.9 |
+| `schema.md` | §1 SDK types plus every matrix section |
+| `security.md` | §4.13 |
+| `session-config-options.md` | §4.2, §4.3, M-SDK-2 |
+| `session-delete.md` | §4.2 |
+| `session-list.md` | §4.2, §4.3 |
+| `session-modes.md` | §4.2, §4.3, OQ-3 |
+| `session-setup.md` | §4.2, §4.10 |
+| `slash-commands.md` | §4.3, O24/OQ-2 |
+| `subagents.md` | §5.5 |
+| `terminals.md` | §4.8 |
+| `tool-calls.md` | §4.5 |
+| `transports.md` | §4.12 |
+
+Level wording is kept distinct from implementation posture: the spec says stdio
+SHOULD be supported (`transports.md:13`) and permission MAY be requested
+(`tool-calls.md:137`), while Crush enforces stdio and asks permission whenever
+its safety policy requires it. HTTP MCP is MAY to advertise (`initialization.md:291`)
+but SHOULD be supported by new Agents (`session-setup.md:460`); Crush supports
+it and advertises it. Plans are MAY generally (`agent-plan.md:11`) and SHOULD
+when the model creates one (`agent-plan.md:17`).
 
 ## 5. Open items
 
@@ -385,6 +425,23 @@ SDK transport.
   `currentValue` stays truthful because it reads live state back. `plan`+
   `yolo` has no ACP id; selecting `plan` resets permissions to Normal, which
   raises oversight — the safe direction.
+
+### 5.5 Unimplemented optional protocol families
+
+These are optional v1 features. They are listed so the matrix does not imply
+coverage that does not exist. None is owed while its client gate is absent.
+
+- **Subagents** (`subagents.md`, OPTIONAL): no `subagents` gate read, no
+  `subagent_update`, `session_message`, `session_message_chunk`, child
+  work-state, child cancellation, or replay handling. SDK v0.20 still marks
+  these update variants UNSTABLE.
+- **Identified plans** (`agent-plan.md`, SHOULD when a plan exists): only the
+  stable `plan` checklist is emitted. `plan_update`/`plan_removed` require the
+  client `plan` gate and are not implemented.
+- **Terminal auth** (`authentication.md`, MAY): no `auth.terminal` gate read
+  and no terminal auth method advertised.
+- **`systemPrompt`** (OQ-5), **elicitation** (OQ-4), **notices/compaction**
+  (M-SDK-4), **terminals** (O8): see the named items.
 
 ## 6. Decision log
 
@@ -510,14 +567,20 @@ writes route through the client when it advertises fs (O12).
   `http`/`sse` advertised and served; `additionalDirectories` advertised,
   validated, stored, listed and merged into the tool root set. Conformance
   tests added for both capability groups.
+- **2026-11-25** — v1 re-audit after refreshing the vendored docs: 23 v1
+  files now exist. Added the §4.15 coverage index and §5.5 optional-family
+  list; corrected the level wording that had conflated spec SHOULD/MAY with
+  Crush's implementation posture. `session/new` now rejects an empty cwd with
+  `-32602`, load replay emits `rawOutput` alongside tool result content, and
+  the elicitation client callback actually returns `-32601` as recorded.
 
 **Conformance position (current, after M-SDK):** no MUST gap and no SHOULD
-gap remains. `thinking` is a real boolean where the client advertises it, and
-the select is the documented fallback. The root set is `[cwd]` plus each
-session's `additionalDirectories`, both enforced. Remaining open items are
-decisions (OQ-4 elicitation, OQ-5 systemPrompt), one deferred optional
-emission pair (M-SDK-4 notices/compaction, gates unadvertised) and one
-optional feature (O8 terminals).
+gap remains in the capabilities Crush advertises. `thinking` is a real boolean
+where the client advertises it, and the select is the documented fallback. The
+root set is `[cwd]` plus each session's `additionalDirectories`, both enforced.
+Remaining open items are decisions (OQ-4 elicitation, OQ-5 systemPrompt), one
+deferred optional emission pair (M-SDK-4 notices/compaction, gates
+unadvertised), and the optional families in §5.5.
 
 ## 8. Tests
 
@@ -540,7 +603,9 @@ helpers; initialize-before-request and unknown session codes; golden JSON
 fixtures (33) and the Tangerg/Zed interop fixtures. Added 11-20: tool `name`
 and `messageId` presence on live and replayed updates, boolean vs select config
 options behind the client gate, MCP `http`/`sse` advertising, and an
-`additionalDirectories` round trip (apply → list → relative reject).
+`additionalDirectories` round trip (apply → list → relative reject). Added
+11-25: elicitation client `-32601`, empty-cwd rejection, replay `rawOutput`,
+and the complete Fantasy-to-ACP stop-reason table.
 
 Still uncovered: MCP prompt resolution end-to-end (needs a live MCP client),
 blob attachments flowing all the way through `Coordinator.Run`.

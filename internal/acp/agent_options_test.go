@@ -48,6 +48,7 @@ func TestNewSessionAppliesAdditionalDirectories(t *testing.T) {
 	// are reported back on session/list (session-setup.md:437-444).
 	a := newTestAgent(&stubSessionService{})
 	resp, err := a.NewSession(context.Background(), acp.NewSessionRequest{
+		Cwd:                   "/workspace",
 		AdditionalDirectories: []string{"/extra1"},
 	})
 	require.NoError(t, err)
@@ -63,6 +64,7 @@ func TestNewSessionRejectsRelativeAdditionalDirectories(t *testing.T) {
 	// Every protocol path is absolute (overview.md:160).
 	a := newTestAgent(&stubSessionService{})
 	_, err := a.NewSession(context.Background(), acp.NewSessionRequest{
+		Cwd:                   "/workspace",
 		AdditionalDirectories: []string{"relative/dir"},
 	})
 	var reqErr *acp.RequestError
@@ -71,10 +73,13 @@ func TestNewSessionRejectsRelativeAdditionalDirectories(t *testing.T) {
 }
 
 func TestValidateCwd(t *testing.T) {
-	// No config store means no working directory, so nothing can be compared
-	// and the check is a no-op rather than a refusal.
+	// No config store means no working directory to compare against, but cwd
+	// is still a protocol path and must be absolute (overview.md:160).
 	a := newTestAgent(&stubSessionService{})
-	require.NoError(t, a.validateCwd(""))
+	err := a.validateCwd("")
+	var reqErr *acp.RequestError
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32602, reqErr.Code)
 	require.NoError(t, a.validateCwd("/anything"))
 }
 
@@ -106,7 +111,7 @@ func TestRequireSessionTracksConnectionActiveSet(t *testing.T) {
 	require.Equal(t, -32002, reqErr.Code)
 
 	// Creating it on the connection makes it active.
-	resp, err := a.NewSession(context.Background(), acp.NewSessionRequest{})
+	resp, err := a.NewSession(context.Background(), acp.NewSessionRequest{Cwd: "/workspace"})
 	require.NoError(t, err)
 	require.NoError(t, a.requireSession(context.Background(), resp.SessionId))
 
@@ -137,7 +142,7 @@ func TestListSessionsPaginates(t *testing.T) {
 	stub := &stubSessionService{}
 	a := newTestAgent(stub)
 	for range listPageSize + 5 {
-		_, err := a.NewSession(context.Background(), acp.NewSessionRequest{})
+		_, err := a.NewSession(context.Background(), acp.NewSessionRequest{Cwd: "/workspace"})
 		require.NoError(t, err)
 	}
 
@@ -162,7 +167,7 @@ func TestListSessionsPaginates(t *testing.T) {
 func TestListSessionsFiltersByCwd(t *testing.T) {
 	stub := &stubSessionService{}
 	a := newTestAgent(stub)
-	_, err := a.NewSession(context.Background(), acp.NewSessionRequest{})
+	_, err := a.NewSession(context.Background(), acp.NewSessionRequest{Cwd: "/workspace"})
 	require.NoError(t, err)
 
 	// No config store means no working directory, so the filter is a no-op

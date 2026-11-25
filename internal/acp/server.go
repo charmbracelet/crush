@@ -268,7 +268,10 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 		}
 		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status), acp.WithUpdateName(tr.Name)}
 		if len(contents) > 0 {
-			opts = append(opts, acp.WithUpdateContent(contents))
+			opts = append(opts,
+				acp.WithUpdateContent(contents),
+				acp.WithUpdateRawOutput(tr.Content),
+			)
 		}
 		return send(acp.UpdateToolCall(id, opts...))
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -360,6 +361,26 @@ func TestValidateConfigOption_RejectsUnknown(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{ConfigId: "model", Value: "openai/nonexistent"},
 	}))
 	require.Error(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{}))
+}
+
+func TestMapFinishReason(t *testing.T) {
+	tests := []struct {
+		reason fantasy.FinishReason
+		want   acp.StopReason
+	}{
+		{fantasy.FinishReasonStop, acp.StopReasonEndTurn},
+		{fantasy.FinishReasonToolCalls, acp.StopReasonEndTurn},
+		{fantasy.FinishReasonOther, acp.StopReasonEndTurn},
+		{fantasy.FinishReasonUnknown, acp.StopReasonEndTurn},
+		{fantasy.FinishReasonLength, acp.StopReasonMaxTokens},
+		{fantasy.FinishReasonContentFilter, acp.StopReasonRefusal},
+		{fantasy.FinishReasonError, acp.StopReasonEndTurn},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.reason), func(t *testing.T) {
+			require.Equal(t, tt.want, mapFinishReason(tt.reason))
+		})
+	}
 }
 
 func TestWithTraceMetaGeneratesTraceparent(t *testing.T) {

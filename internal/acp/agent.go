@@ -150,9 +150,6 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 // (session-setup.md:437-444, overview.md:160). Crush serves exactly one
 // workspace per process, so a mismatch cannot be honoured.
 func (a *crushAgent) validateCwd(cwd string) error {
-	if cwd == "" {
-		return nil
-	}
 	if !isAbsPath(cwd) {
 		return invalidParam("cwd", cwd)
 	}
@@ -1223,7 +1220,8 @@ func mediaAttachmentType(declared string, data []byte) (string, bool) {
 // mapFinishReason converts fantasy finish reasons to ACP stop reasons.
 func mapFinishReason(reason fantasy.FinishReason) acp.StopReason {
 	switch reason {
-	case fantasy.FinishReasonStop:
+	case fantasy.FinishReasonStop, fantasy.FinishReasonToolCalls,
+		fantasy.FinishReasonOther, fantasy.FinishReasonUnknown:
 		return acp.StopReasonEndTurn
 	case fantasy.FinishReasonLength:
 		return acp.StopReasonMaxTokens

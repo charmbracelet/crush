@@ -329,13 +329,11 @@ func (cc *crushClient) ReleaseTerminal(_ context.Context, _ acp.ReleaseTerminalR
 	return acp.ReleaseTerminalResponse{}, fmt.Errorf("terminals not supported by Crush ACP client")
 }
 
-// CreateElicitation answers "cancel": Crush advertises no elicitation
-// capability, so a request here comes from an agent that ignored the
-// handshake. Cancelling is the spec's way to say the client did not handle it.
+// CreateElicitation answers -32601: Crush advertises no elicitation
+// capability, so an agent that sends this request is calling an unsupported
+// method.
 func (cc *crushClient) CreateElicitation(_ context.Context, _ acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
-	return acp.CreateElicitationResponse{
-		Cancel: &acp.CreateElicitationCancel{Action: "cancel"},
-	}, nil
+	return acp.CreateElicitationResponse{}, acp.NewMethodNotFound("elicitation/create")
 }
 
 // CompleteElicitation acknowledges the end of a URL-based elicitation, which

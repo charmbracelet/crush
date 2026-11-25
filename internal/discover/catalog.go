@@ -3,10 +3,12 @@ package discover
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
@@ -20,32 +22,35 @@ const maxCatalogBody = 8 << 20
 
 // CatalogConfig holds what reading a declared catalog needs.
 type CatalogConfig struct {
-	ID      string
-	Spec    *oauth.CatalogSpec
-	BaseURL string
-	// Bearer is the credential sent with the request: a login's access
-	// token, or the provider's API key when it has no login.
-	Bearer  string
-	Headers map[string]string
-	// Existing models keep their own settings; the catalog fills the rest.
+	ID       string
+	Spec     *oauth.CatalogSpec
+	BaseURL  string
+	Bearer   string
+	Headers  map[string]string
 	Existing []catwalk.Model
+
+	program *jq.Program
 }
 
-// Catalog fetches the catalog a provider's config declares and maps it with
-// the program the same config supplies, so reading a listing whose field
-// names Crush has never seen stays the plugin's business.
-//
-// Declared models are kept: each one retains every field it sets and gains,
-// from the catalog, the fields it left alone. Models the catalog lists that
-// config never mentioned are appended.
-func Catalog(ctx context.Context, cfg CatalogConfig, resolver Resolver) ([]catwalk.Model, error) {
+// Compile validates the catalog and prepares its jq program for reuse.
+func (cfg *CatalogConfig) Compile() error {
 	if !cfg.Spec.Usable() {
-		return nil, fmt.Errorf("catalog for provider %s names no url or program", cfg.ID)
+		return errors.New("names no url or program")
 	}
-
 	program, err := jq.Compile(cfg.Spec.Program)
 	if err != nil {
-		return nil, fmt.Errorf("catalog program for provider %s: %w", cfg.ID, err)
+		return err
+	}
+	cfg.program = program
+	return nil
+}
+
+// Catalog fetches the listing, maps it with jq, and folds in declared models.
+func Catalog(ctx context.Context, cfg CatalogConfig, resolver Resolver) ([]catwalk.Model, error) {
+	if cfg.program == nil {
+		if err := cfg.Compile(); err != nil {
+			return nil, fmt.Errorf("catalog program for provider %s: %w", cfg.ID, err)
+		}
 	}
 
 	base, path := cfg.Spec.URL, ""
@@ -89,7 +94,7 @@ func Catalog(ctx context.Context, cfg CatalogConfig, resolver Resolver) ([]catwa
 		return nil, fmt.Errorf("catalog for provider %s is not JSON: %w", cfg.ID, err)
 	}
 
-	output, err := program.Run(doc)
+	output, err := cfg.program.Run(ctx, doc)
 	if err != nil {
 		return nil, fmt.Errorf("catalog program for provider %s: %w", cfg.ID, err)
 	}
@@ -109,7 +114,7 @@ func Catalog(ctx context.Context, cfg CatalogConfig, resolver Resolver) ([]catwa
 		return nil, fmt.Errorf("catalog program for provider %s produced no model list: %w", cfg.ID, err)
 	}
 
-	return merge(cfg.Existing, found), nil
+	return MergeCatalogModels(cfg.Existing, found), nil
 }
 
 func isJSONArray(value any) bool {
@@ -124,11 +129,8 @@ func orDefault(value, fallback string) string {
 	return value
 }
 
-// merge folds a catalog into the models config declares. A declared entry
-// keeps what it sets and adopts the rest; entries the catalog adds keep their
-// reported order after the declared ones, which is how the model list reads
-// when config pins a favourite first.
-func merge(declared, found []catwalk.Model) []catwalk.Model {
+// MergeCatalogModels overlays declared fields and preserves declared order.
+func MergeCatalogModels(declared, found []catwalk.Model) []catwalk.Model {
 	byID := make(map[string]int, len(declared))
 	out := make([]catwalk.Model, 0, len(declared))
 	for _, model := range declared {
@@ -151,44 +153,27 @@ func merge(declared, found []catwalk.Model) []catwalk.Model {
 	return out
 }
 
-// keepDeclared layers a declared model over the catalog's report of the same
-// id. Only fields the declaration actually set win, which is what lets a
-// plugin pin a name or a window and still inherit the rest. Booleans cannot
-// express "unset", so the catalog decides those.
+// keepDeclared overlays set fields, so false can never veto a reported capability.
 func keepDeclared(declared, reported catwalk.Model) catwalk.Model {
-	merged := reported
-	if declared.Name != "" {
-		merged.Name = declared.Name
+	overlayFields(reflect.ValueOf(&reported).Elem(), reflect.ValueOf(declared))
+	return reported
+}
+
+func overlayFields(dst, src reflect.Value) {
+	for i := range src.NumField() {
+		from, to := src.Field(i), dst.Field(i)
+		if !to.CanSet() || from.IsZero() {
+			continue
+		}
+		switch from.Kind() {
+		case reflect.Struct:
+			overlayFields(to, from)
+		case reflect.Slice, reflect.Map:
+			if from.Len() > 0 {
+				to.Set(from)
+			}
+		default:
+			to.Set(from)
+		}
 	}
-	if declared.Pricing.Input != 0 {
-		merged.Pricing.Input = declared.Pricing.Input
-	}
-	if declared.Pricing.Output != 0 {
-		merged.Pricing.Output = declared.Pricing.Output
-	}
-	if declared.Pricing.CacheCreate != 0 {
-		merged.Pricing.CacheCreate = declared.Pricing.CacheCreate
-	}
-	if declared.Pricing.CacheHit != 0 {
-		merged.Pricing.CacheHit = declared.Pricing.CacheHit
-	}
-	if declared.ContextWindow != 0 {
-		merged.ContextWindow = declared.ContextWindow
-	}
-	if declared.DefaultMaxTokens != 0 {
-		merged.DefaultMaxTokens = declared.DefaultMaxTokens
-	}
-	if len(declared.Reasoning.EffortLevels) > 0 {
-		merged.Reasoning.EffortLevels = declared.Reasoning.EffortLevels
-	}
-	if declared.Reasoning.DefaultEffortLevel != "" {
-		merged.Reasoning.DefaultEffortLevel = declared.Reasoning.DefaultEffortLevel
-	}
-	if declared.Reasoning.Thinking != "" {
-		merged.Reasoning.Thinking = declared.Reasoning.Thinking
-	}
-	if declared.Capabilities.Vision {
-		merged.Capabilities.Vision = true
-	}
-	return merged
 }

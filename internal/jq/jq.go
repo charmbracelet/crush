@@ -5,10 +5,12 @@
 package jq
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sync"
 
 	"github.com/itchyny/gojq"
 )
@@ -18,10 +20,18 @@ type Program struct {
 	code *gojq.Code
 }
 
-// Compile parses and compiles a program with the plugin dialect available to
-// it. Compiling once and running many times keeps a per-request program off
-// the hot path.
+var (
+	compileMu sync.Mutex
+	programs  = make(map[string]*Program)
+)
+
+// Compile reuses a program compiled for the same source text.
 func Compile(source string) (*Program, error) {
+	compileMu.Lock()
+	defer compileMu.Unlock()
+	if program := programs[source]; program != nil {
+		return program, nil
+	}
 	query, err := gojq.Parse(source)
 	if err != nil {
 		return nil, err
@@ -33,14 +43,14 @@ func Compile(source string) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Program{code: code}, nil
+	program := &Program{code: code}
+	programs[source] = program
+	return program, nil
 }
 
-// Run evaluates the program once and returns its single result. A program
-// returning several results contributes only the first, the way a gateway
-// rewrite expects one document out.
-func (p *Program) Run(input any) (any, error) {
-	value, ok := p.code.Run(input).Next()
+// Run returns the first result of the program or a context error.
+func (p *Program) Run(ctx context.Context, input any) (any, error) {
+	value, ok := p.code.RunWithContext(ctx, input).Next()
 	if !ok {
 		return nil, fmt.Errorf("produced no output")
 	}

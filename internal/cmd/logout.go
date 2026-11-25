@@ -2,14 +2,12 @@ package cmd
 
 import (
 	"cmp"
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
 
-	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/logout"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 )
@@ -56,13 +54,14 @@ crush logout grok
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, ws, cleanup, err := connectToServer(cmd)
+		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
 
-		progressEnabled := ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
+		cfg := ws.Config()
+		progressEnabled := cfg.Options.Progress == nil || *cfg.Options.Progress
 		if progressEnabled && supportsProgressBar() {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 			defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
@@ -71,7 +70,7 @@ crush logout grok
 		var provider string
 		chose := false
 		if len(args) == 0 {
-			provider, chose, err = pickLoggedInProvider(c, ws.ID)
+			provider, chose, err = pickLoggedInProvider(cfg)
 			if err != nil {
 				return err
 			}
@@ -111,25 +110,23 @@ crush logout grok
 
 		switch provider {
 		case "hyper":
-			return logoutHyper(c, ws.ID)
+			return logoutHyper(ws)
 		case "copilot":
-			return logoutCopilot(c, ws.ID)
+			return logoutCopilot(ws)
 		case "openai":
-			return logoutOpenAI(c, ws.ID)
+			return logoutOpenAI(ws)
 		case "xai":
-			return logoutXAI(c, ws.ID)
+			return logoutXAI(ws)
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
 	},
 }
 
-func logoutHyper(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
+func logoutHyper(ws workspace.Workspace) error {
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.oauth"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.api_key"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.oauth"),
 	); err != nil {
 		return err
 	}
@@ -138,12 +135,10 @@ func logoutHyper(c *client.Client, wsID string) error {
 	return nil
 }
 
-func logoutCopilot(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
+func logoutCopilot(ws workspace.Workspace) error {
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.oauth"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.api_key"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.oauth"),
 	); err != nil {
 		return err
 	}
@@ -152,17 +147,15 @@ func logoutCopilot(c *client.Client, wsID string) error {
 	return nil
 }
 
-func logoutOpenAI(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
+func logoutOpenAI(ws workspace.Workspace) error {
 	// Logout clears every OpenAI credential: the ChatGPT token and its
 	// model catalog, and the API key too. The API key mirrors the access
 	// token when it came from the OAuth flow, and an explicit logout
 	// should leave nothing behind either way.
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.oauth"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.chatgpt_models"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.api_key"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.openai.oauth"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.openai.chatgpt_models"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.openai.api_key"),
 	); err != nil {
 		return err
 	}
@@ -171,16 +164,14 @@ func logoutOpenAI(c *client.Client, wsID string) error {
 	return nil
 }
 
-func logoutXAI(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
+func logoutXAI(ws workspace.Workspace) error {
 	// Logout clears both stored xAI credentials: the OAuth token, its
 	// model catalog, and the API key, which mirrors the OAuth access
 	// token when the sign-in wrote it.
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.oauth"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.grok_models"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.api_key"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.xai.oauth"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.xai.grok_models"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.xai.api_key"),
 	); err != nil {
 		return err
 	}
@@ -191,14 +182,7 @@ func logoutXAI(c *client.Client, wsID string) error {
 
 // pickLoggedInProvider returns the provider to log out of and whether the
 // user explicitly picked it from a list of logged-in platforms.
-func pickLoggedInProvider(c *client.Client, wsID string) (string, bool, error) {
-	ctx := getLogoutContext()
-
-	cfg, err := c.GetConfig(ctx, wsID)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to get config: %w", err)
-	}
-
+func pickLoggedInProvider(cfg *config.Config) (string, bool, error) {
 	// Only OAuth-based providers support login/logout. Keep this list in
 	// sync with the switch in RunE and the login command.
 	var loggedIn []struct {
@@ -241,14 +225,4 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, bool, error) {
 
 func init() {
 	logoutCmd.Flags().BoolP("force", "f", false, "Skip logout confirmation prompt")
-}
-
-func getLogoutContext() context.Context {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-	go func() {
-		<-ctx.Done()
-		cancel()
-		os.Exit(1)
-	}()
-	return ctx
 }

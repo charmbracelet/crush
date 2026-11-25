@@ -157,6 +157,7 @@ func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, prov
 	if err := ws.Cfg.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
 		return err
 	}
+	ws.Cfg.SignalAuthComplete(providerID)
 	publishConfigChanged(ws)
 	return nil
 }

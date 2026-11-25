@@ -980,3 +980,66 @@ func TestClose_LastReferenceClosesSessions(t *testing.T) {
 		}
 	}
 }
+
+// stdioServerEnv makes the test binary serve MCP over stdio instead of
+// running tests, so tests can start a real stdio server child.
+const stdioServerEnv = "CRUSH_TEST_MCP_STDIO_SERVER"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(stdioServerEnv) == "1" {
+		server := mcp.NewServer(&mcp.Implementation{Name: "stdio-test"}, nil)
+		if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// TestCreateSession_StdioLifetime guards that a stdio server outlives the
+// context it was started under. Callers pass short-lived contexts (an HTTP
+// request in client/server mode, the tool call that renews a dead session),
+// so binding the child to them killed it as soon as the call returned while
+// the server was still reported as connected.
+func TestCreateSession_StdioLifetime(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	m := config.MCPConfig{
+		Type:    config.MCPStdio,
+		Command: exe,
+		Env:     map[string]string{stdioServerEnv: "1"},
+	}
+	resolver := shellResolverWithPath(t, nil)
+
+	t.Run("outlives the context that started it", func(t *testing.T) {
+		t.Parallel()
+		const name = "stdio-outlives-ctx"
+		t.Cleanup(func() { states.Del(name) })
+
+		ctx, cancel := context.WithCancel(t.Context())
+		sess, err := createSession(ctx, nil, name, m, resolver, false)
+		require.NoError(t, err)
+		t.Cleanup(func() { closeSession(name, sess) })
+
+		cancel()
+		// The child used to be killed right after ctx ended; give that time
+		// to happen.
+		time.Sleep(200 * time.Millisecond)
+		require.NoError(t, pingSession(t.Context(), sess, 5*time.Second),
+			"the server must keep running after the context that started it ends")
+	})
+
+	t.Run("a cancelled context aborts the connect", func(t *testing.T) {
+		t.Parallel()
+		const name = "stdio-cancelled-connect"
+		t.Cleanup(func() { states.Del(name) })
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		sess, err := createSession(ctx, nil, name, m, resolver, false)
+		require.Error(t, err)
+		require.Nil(t, sess)
+	})
+}

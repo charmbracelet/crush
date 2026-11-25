@@ -3,8 +3,10 @@ package acp
 import (
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/skills"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // commandMatch is one advertised slash command reduced to what resolving it
@@ -21,6 +23,18 @@ type commandMatch struct {
 	prompt *commands.MCPPrompt
 }
 
+func filterSessionMCPPrompts(prompts []commands.MCPPrompt, sessionID acp.SessionId) []commands.MCPPrompt {
+	out := make([]commands.MCPPrompt, 0, len(prompts))
+	for _, prompt := range prompts {
+		owner, isACP := mcp.ACPSessionOf(prompt.ClientID)
+		if isACP && owner != string(sessionID) {
+			continue
+		}
+		out = append(out, prompt)
+	}
+	return out
+}
+
 // resolveCommand replaces a leading /name with the text that command stands
 // for. A prompt that names no advertised command is returned unchanged, so
 // ordinary prose starting with a slash still reaches the model.
@@ -28,8 +42,8 @@ type commandMatch struct {
 // This is an ACP-local copy of the resolution the TUI performs (see plan Q1):
 // the TUI drives a dialog to collect arguments, which a prompt has no
 // equivalent of, so arguments are bound positionally from the trailing text.
-func (a *crushAgent) resolveCommand(prompt string) string {
-	return a.resolveAgainst(a.advertisedCommands(), prompt)
+func (a *crushAgent) resolveCommand(sessionID acp.SessionId, prompt string) string {
+	return a.resolveAgainst(a.advertisedCommands(sessionID), prompt)
 }
 
 // resolveAgainst is resolveCommand against a supplied command index, so the
@@ -124,7 +138,7 @@ func lookupCommand(matches map[string]commandMatch, name string) (commandMatch, 
 }
 
 // advertisedCommands indexes the commands availableCommandsUpdate advertises.
-func (a *crushAgent) advertisedCommands() map[string]commandMatch {
+func (a *crushAgent) advertisedCommands(sessionID acp.SessionId) map[string]commandMatch {
 	out := map[string]commandMatch{}
 
 	add := func(m commandMatch) {
@@ -153,6 +167,7 @@ func (a *crushAgent) advertisedCommands() map[string]commandMatch {
 	}
 
 	if prompts, err := commands.LoadMCPPrompts(); err == nil {
+		prompts = filterSessionMCPPrompts(prompts, sessionID)
 		for i := range prompts {
 			p := prompts[i]
 			add(commandMatch{name: p.ID, prompt: &p, args: p.Arguments})

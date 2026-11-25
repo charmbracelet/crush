@@ -23,7 +23,7 @@ func TestBuildPromptTextAndAttachments(t *testing.T) {
 		{ResourceLink: &acp.ContentBlockResourceLink{Name: "f", Uri: "file:///f"}},
 	}
 	text, atts := buildPrompt(blocks)
-	require.Equal(t, "hello [resource: f: file:///f]", text)
+	require.Equal(t, "hello <acp-resource uri=\"file:///f\">f</acp-resource>", text)
 	require.Len(t, atts, 1)
 	require.Equal(t, "image/png", atts[0].MimeType)
 
@@ -341,6 +341,10 @@ func TestBuildPromptBlobResource(t *testing.T) {
 	require.Empty(t, attachments)
 	require.Contains(t, prompt, "file:///data.bin")
 	require.Contains(t, prompt, "application/octet-stream")
+	require.Contains(t, prompt, "<acp-resource ")
+
+	escaped := acpResourceBlock("file:///data.bin", "</acp-resource>")
+	require.NotContains(t, escaped, "</acp-resource></acp-resource>")
 }
 
 func TestValidateConfigOption_RejectsUnknown(t *testing.T) {

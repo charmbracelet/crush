@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -53,6 +54,9 @@ type crushAgent struct {
 	// followed by the additionalDirectories its setup request supplied
 	// (session-setup.md:437-452).
 	sessionRoots sync.Map
+
+	// systemPrompts holds ACP append-only system instructions per session.
+	systemPrompts sync.Map
 }
 
 // newCrushAgent creates an ACP agent backed by the given Crush app.
@@ -91,6 +95,7 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 				Delete:                &acp.SessionDeleteCapabilities{},
 				List:                  &acp.SessionListCapabilities{},
 				Resume:                &acp.SessionResumeCapabilities{},
+				SystemPrompt:          &acp.SessionSystemPromptCapabilities{},
 			},
 			// stdio is the baseline transport (session-setup.md:458); http and
 			// sse are served because a Crush MCP server can use either.
@@ -108,6 +113,10 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	if err := a.validateCwd(req.Cwd); err != nil {
 		return acp.NewSessionResponse{}, err
 	}
+	text, err := validateSystemPrompt(req.SystemPrompt)
+	if err != nil {
+		return acp.NewSessionResponse{}, err
+	}
 
 	session, err := a.app.Sessions.Create(context.Background(), title)
 	if err != nil {
@@ -116,6 +125,9 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	a.activeSessions.Store(string(session.ID), struct{}{})
 	a.log.Info("ACP new session", "sessionId", session.ID, "cwd", req.Cwd)
 	sid := acp.SessionId(session.ID)
+	if text != "" {
+		a.systemPrompts.Store(string(sid), text)
+	}
 
 	// The session's root set is cwd plus whatever additional roots the
 	// client asked for, so paths under them do not need per-use consent
@@ -134,7 +146,7 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	// notifications are sent before the response returns, so the client's
 	// request barrier (which waits for prior notifications) satisfies them
 	// inline, exactly like streaming during a prompt.
-	a.pushUpdate(ctx, sid, a.availableCommandsUpdate())
+	a.pushUpdate(ctx, sid, a.availableCommandsUpdate(sid))
 	a.pushUpdate(ctx, sid, a.sessionInfoUpdate(session.Title))
 
 	return acp.NewSessionResponse{
@@ -224,6 +236,52 @@ func (a *crushAgent) setSessionRoots(sessionID acp.SessionId, dirs []string) err
 	return nil
 }
 
+func validateSystemPrompt(prompt *acp.SystemPrompt) (string, error) {
+	if prompt == nil {
+		return "", nil
+	}
+	if prompt.Mode != acp.SystemPromptModeAppend {
+		return "", invalidParam("systemPrompt.mode", string(prompt.Mode))
+	}
+	if len(prompt.Content) == 0 {
+		return "", invalidParam("systemPrompt.content", "")
+	}
+	var text strings.Builder
+	for _, block := range prompt.Content {
+		if block.Text == nil {
+			return "", invalidParam("systemPrompt.content", "non-text block")
+		}
+		if text.Len() > 0 {
+			text.WriteString("\n\n")
+		}
+		text.WriteString(block.Text.Text)
+	}
+	return text.String(), nil
+}
+
+// SetSessionSystemPrompt validates and stores append-only system instructions.
+func (a *crushAgent) SetSessionSystemPrompt(sessionID acp.SessionId, prompt *acp.SystemPrompt) error {
+	text, err := validateSystemPrompt(prompt)
+	if err != nil {
+		return err
+	}
+	if text == "" {
+		a.systemPrompts.Delete(string(sessionID))
+		return nil
+	}
+	a.systemPrompts.Store(string(sessionID), text)
+	return nil
+}
+
+// systemPromptFor returns the stored ACP append-only instructions.
+func (a *crushAgent) systemPromptFor(sessionID acp.SessionId) string {
+	text, _ := a.systemPrompts.Load(string(sessionID))
+	if text == nil {
+		return ""
+	}
+	return text.(string)
+}
+
 // extraRoots returns the additional roots the session's setup request asked
 // for, so a turn's tools treat them as in scope (session-setup.md:444-452).
 func (a *crushAgent) extraRoots(sessionID acp.SessionId) []string {
@@ -277,7 +335,7 @@ func (a *crushAgent) ListSessions(_ context.Context, req acp.ListSessionsRequest
 	// Crush has a single workspace root, so a filter naming any other
 	// directory matches nothing.
 	if req.Cwd != nil && *req.Cwd != "" && cwd != "" && !samePath(cwd, *req.Cwd) {
-		return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
+		return acp.ListSessionsResponse{Meta: req.Meta, Sessions: []acp.SessionInfo{}}, nil
 	}
 
 	sessions, err := a.app.Sessions.List(context.Background())
@@ -297,7 +355,7 @@ func (a *crushAgent) ListSessions(_ context.Context, req acp.ListSessionsRequest
 		start = offset
 	}
 	if start >= len(sessions) {
-		return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
+		return acp.ListSessionsResponse{Meta: req.Meta, Sessions: []acp.SessionInfo{}}, nil
 	}
 	end := min(start+listPageSize, len(sessions))
 
@@ -317,7 +375,7 @@ func (a *crushAgent) ListSessions(_ context.Context, req acp.ListSessionsRequest
 		out = append(out, info)
 	}
 
-	resp := acp.ListSessionsResponse{Sessions: out}
+	resp := acp.ListSessionsResponse{Meta: req.Meta, Sessions: out}
 	if end < len(sessions) {
 		next := encodeListCursor(end)
 		resp.NextCursor = &next
@@ -359,6 +417,7 @@ func (a *crushAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest
 	mcp.TeardownSession(id)
 	a.activeSessions.Delete(id)
 	a.sessionRoots.Delete(id)
+	a.systemPrompts.Delete(id)
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -376,6 +435,9 @@ func (a *crushAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionReq
 	}
 	if !a.SessionExists(ctx, req.SessionId) {
 		return acp.ResumeSessionResponse{}, sessionNotFound(req.SessionId)
+	}
+	if err := a.SetSessionSystemPrompt(req.SessionId, req.SystemPrompt); err != nil {
+		return acp.ResumeSessionResponse{}, err
 	}
 	// Resuming is what makes a session active on this connection
 	// (error.md:56), so the existence check above stays store-only.
@@ -423,6 +485,8 @@ func (a *crushAgent) DeleteSession(ctx context.Context, req acp.DeleteSessionReq
 		}
 	}
 	a.activeSessions.Delete(id)
+	a.sessionRoots.Delete(id)
+	a.systemPrompts.Delete(id)
 	mcp.TeardownSession(id)
 	return acp.DeleteSessionResponse{}, nil
 }
@@ -458,12 +522,15 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 	// Paths under the session's additional roots are in scope for this
 	// turn's tools (session-setup.md:444-452).
 	ctx = context.WithValue(ctx, tools.RootsContextKey, a.extraRoots(req.SessionId))
+	if prompt := a.systemPromptFor(req.SessionId); prompt != "" {
+		ctx = tools.WithSystemPromptAppend(ctx, prompt)
+	}
 
 	prompt, attachments := buildPrompt(req.Prompt)
 	// A leading /name is resolved against the commands advertised in
 	// available_commands_update, as the spec says commands are "run as part of
 	// regular session/prompt requests" (slash-commands.md:9,99).
-	prompt = a.resolveCommand(prompt)
+	prompt = a.resolveCommand(req.SessionId, prompt)
 	a.log.Info("ACP prompt", "sessionId", sessionID, "promptLen", len(prompt))
 
 	// Prompt result.
@@ -814,7 +881,7 @@ func (a *crushAgent) store() *config.ConfigStore {
 // input is expected, an unstructured-input hint is included so the client can
 // prompt the user for it. Shell builtins are intentionally omitted; they are
 // crushrc config operations with no slash-command surface (see plan Q1).
-func (a *crushAgent) availableCommandsUpdate() acp.SessionUpdate {
+func (a *crushAgent) availableCommandsUpdate(sessionID acp.SessionId) acp.SessionUpdate {
 	var cmds []acp.AvailableCommand
 
 	// User-invocable skills become commands the user can type directly.
@@ -839,7 +906,7 @@ func (a *crushAgent) availableCommandsUpdate() acp.SessionUpdate {
 	}
 
 	if prompts, err := commands.LoadMCPPrompts(); err == nil {
-		for _, p := range prompts {
+		for _, p := range filterSessionMCPPrompts(prompts, sessionID) {
 			cmds = append(cmds, newAvailableCommand(p.ID, p.Description, p.Arguments))
 		}
 	}
@@ -915,6 +982,16 @@ func (a *crushAgent) configOptions(sessionID acp.SessionId) []acp.SessionConfigO
 func (a *crushAgent) booleanConfigOptions() bool {
 	caps := a.clientCaps.Session
 	return caps != nil && caps.ConfigOptions != nil && caps.ConfigOptions.Boolean != nil
+}
+
+func (a *crushAgent) noticesEnabled() bool {
+	caps := a.clientCaps.Session
+	return caps != nil && caps.Notices != nil
+}
+
+func (a *crushAgent) CompactionEnabled() bool {
+	caps := a.clientCaps.Session
+	return caps != nil && caps.Compaction != nil
 }
 
 // configOptionsFor builds the config-option list from a config snapshot and the
@@ -1169,9 +1246,10 @@ func buildPrompt(blocks []acp.ContentBlock) (string, []message.Attachment) {
 				})
 			}
 		case b.ResourceLink != nil:
-			sb.WriteString("[resource: " + b.ResourceLink.Name + ": " + b.ResourceLink.Uri + "]")
+			sb.WriteString(acpResourceBlock(b.ResourceLink.Uri, b.ResourceLink.Name))
 		case b.Resource != nil && b.Resource.Resource.TextResourceContents != nil:
-			sb.WriteString("[resource: " + b.Resource.Resource.TextResourceContents.Uri + ": " + b.Resource.Resource.TextResourceContents.Text + "]")
+			text := b.Resource.Resource.TextResourceContents
+			sb.WriteString(acpResourceBlock(text.Uri, text.Text))
 		case b.Resource != nil && b.Resource.Resource.BlobResourceContents != nil:
 			blob := b.Resource.Resource.BlobResourceContents
 			data, err := base64.StdEncoding.DecodeString(blob.Blob)
@@ -1197,10 +1275,17 @@ func buildPrompt(blocks []acp.ContentBlock) (string, []message.Attachment) {
 			if label == "" {
 				label = "unknown type"
 			}
-			fmt.Fprintf(&sb, "[resource: %s: %d bytes of %s]", blob.Uri, len(data), label)
+			sb.WriteString(acpResourceBlock(blob.Uri, fmt.Sprintf("%d bytes of %s", len(data), label)))
 		}
 	}
 	return sb.String(), attachments
+}
+
+func acpResourceBlock(uri, content string) string {
+	var attr, body strings.Builder
+	_ = xml.EscapeText(&attr, []byte(uri))
+	_ = xml.EscapeText(&body, []byte(content))
+	return "<acp-resource uri=\"" + attr.String() + "\">" + body.String() + "</acp-resource>"
 }
 
 // mediaAttachmentType reports the MIME type to attach a blob as, when the blob

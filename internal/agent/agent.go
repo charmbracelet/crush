@@ -965,6 +965,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
+	if appended := tools.SystemPromptAppend(ctx); appended != "" {
+		systemPrompt += "\n\n<acp-system-prompt>\n" + appended + "\n</acp-system-prompt>"
+	}
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.

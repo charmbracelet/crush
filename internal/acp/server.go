@@ -51,6 +51,10 @@ type Agent interface {
 	SessionState(sessionID acp.SessionId) (*acp.SessionModeState, []acp.SessionConfigOption)
 	// SetSessionRoots records the additional roots a setup request supplied.
 	SetSessionRoots(sessionID acp.SessionId, dirs []string) error
+	// SetSessionSystemPrompt validates and stores append-only system instructions.
+	SetSessionSystemPrompt(sessionID acp.SessionId, prompt *acp.SystemPrompt) error
+	// CompactionEnabled reports whether the client can receive compaction updates.
+	CompactionEnabled() bool
 	// ConnectMCPServers starts the MCP servers a setup request supplied. The
 	// dispatcher owns session/load, which carries the same field session/new
 	// and session/resume do (session-setup.md:458).
@@ -77,6 +81,8 @@ func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) 
 
 	// Create event bridge for streaming notifications.
 	eventBridge := newEventBridge(conn, a, log)
+	eventBridge.noticesEnabled = ca.noticesEnabled
+	eventBridge.compactionEnabled = ca.CompactionEnabled
 	ca.bridge = eventBridge
 
 	return &Server{
@@ -208,6 +214,9 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 			map[string]any{"sessionId": string(req.SessionId)},
 		)
 	}
+	if err := d.agent.SetSessionSystemPrompt(req.SessionId, req.SystemPrompt); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 	// Loading is what makes the session active on this connection
 	// (error.md:56), and it must be recorded before the replay streams so a
 	// later session-scoped request passes the active check.
@@ -237,6 +246,20 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 			note.Meta = req.Meta
 		}
 		return d.conn.SessionUpdate(ctx, note)
+	}
+	if d.agent.CompactionEnabled() {
+		for _, m := range msgs {
+			if !m.IsSummaryMessage || m.Content().Text == "" {
+				continue
+			}
+			if err := send(acp.SessionUpdate{CompactionUpdate: &acp.SessionCompactionUpdate{
+				CompactionId: acp.CompactionId(m.ID),
+				Status:       acp.CompactionStatusCompleted,
+				Summary:      acp.PatchSet([]acp.ContentBlock{acp.TextBlock(m.Content().Text)}),
+			}}); err != nil {
+				return acp.LoadSessionResponse{}, fmt.Errorf("stream compaction: %w", err)
+			}
+		}
 	}
 	emitToolResult := func(tr message.ToolResult) error {
 		id := acp.ToolCallId(tr.ToolCallID)
@@ -281,7 +304,7 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 			var err error
 			switch p := part.(type) {
 			case message.TextContent:
-				if p.Text == "" {
+				if p.Text == "" || m.IsSummaryMessage {
 					continue
 				}
 				switch m.Role {

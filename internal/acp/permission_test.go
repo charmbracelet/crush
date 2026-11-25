@@ -11,7 +11,21 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/permission"
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/stretchr/testify/require"
 )
+
+func TestExecutionControlSuffix(t *testing.T) {
+	for _, path := range []string{
+		"/repo/.git/hooks/pre-commit",
+		"/repo/.crush/hooks/run.sh",
+		"/repo/.mcp.json",
+		"/repo/crush.json",
+		"/repo/.vscode/settings.json",
+	} {
+		require.NotEmpty(t, executionControlSuffix(path), path)
+	}
+	require.Empty(t, executionControlSuffix("/repo/main.go"))
+}
 
 func TestBuildPermissionOptions(t *testing.T) {
 	opts := buildPermissionOptions("bash")

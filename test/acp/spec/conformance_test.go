@@ -1,8 +1,10 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"io"
 	"log/slog"
@@ -27,8 +29,10 @@ import (
 // --- Stubs ---
 
 type stubCoordinator struct {
-	mu     sync.Mutex
-	result *fantasy.AgentResult
+	mu          sync.Mutex
+	result      *fantasy.AgentResult
+	lastPrompt  string
+	attachments []message.Attachment
 }
 
 func newStubCoordinator(result *fantasy.AgentResult) *stubCoordinator {
@@ -38,6 +42,8 @@ func newStubCoordinator(result *fantasy.AgentResult) *stubCoordinator {
 func (c *stubCoordinator) Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.lastPrompt = prompt
+	c.attachments = append([]message.Attachment(nil), attachments...)
 	if c.result == nil {
 		c.result = &fantasy.AgentResult{
 			Response: fantasy.Response{
@@ -368,6 +374,70 @@ func TestConformancePromptEndTurn(t *testing.T) {
 	}
 	if resp.StopReason != acp.StopReasonEndTurn {
 		t.Errorf("stop reason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	}
+
+	c2aW.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("server did not exit")
+	}
+}
+
+func TestConformancePromptBlobAttachment(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	png := []byte("\x89PNG\r\n\x1a\n")
+	co := newStubCoordinator(nil)
+	serverApp := stubApp(co)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := acpsrv.NewServer(serverApp, log, c2aR, a2cW)
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- srv.Start(ctx)
+	}()
+
+	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+	ns, err := client.NewSession(t.Context(), acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	_, err = client.Prompt(t.Context(), acp.PromptRequest{
+		SessionId: ns.SessionId,
+		Prompt: []acp.ContentBlock{{
+			Resource: &acp.ContentBlockResource{Resource: acp.EmbeddedResourceResource{
+				BlobResourceContents: &acp.BlobResourceContents{
+					Uri:  "file:///image.png",
+					Blob: base64.StdEncoding.EncodeToString(png),
+				},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Prompt with blob failed: %v", err)
+	}
+
+	co.mu.Lock()
+	defer co.mu.Unlock()
+	if len(co.attachments) != 1 {
+		t.Fatalf("attachment count = %d, want 1", len(co.attachments))
+	}
+	if co.attachments[0].MimeType != "image/png" {
+		t.Errorf("mime = %q, want image/png", co.attachments[0].MimeType)
+	}
+	if !bytes.Equal(co.attachments[0].Content, png) {
+		t.Errorf("attachment bytes = %x, want %x", co.attachments[0].Content, png)
 	}
 
 	c2aW.Close()

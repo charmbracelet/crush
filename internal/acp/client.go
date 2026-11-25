@@ -10,11 +10,21 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	acp "github.com/coder/acp-go-sdk"
 )
+
+// ElicitationHandler answers an elicitation/create request from an external
+// Agent. The handler owns all user interaction and validation.
+type ElicitationHandler func(context.Context, acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error)
+
+// PermissionHandler answers a session/request_permission request from an
+// external Agent. Canceling the context means the turn was cancelled.
+type PermissionHandler func(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error)
 
 // ClientOption configures a Client.
 type ClientOption func(*Client)
@@ -29,6 +39,27 @@ func WithAutoAllowPermissions() ClientOption {
 	return func(c *Client) { c.autoAllow = true }
 }
 
+// WithSystemPrompt sets an append-only system prompt for new sessions.
+func WithSystemPrompt(text string) ClientOption {
+	return func(c *Client) { c.systemPrompt = text }
+}
+
+// WithElicitationHandler installs the client-side elicitation UI handler.
+func WithElicitationHandler(handler ElicitationHandler) ClientOption {
+	return func(c *Client) { c.elicitationHandler = handler }
+}
+
+// WithPermissionHandler installs the client-side permission UI handler.
+func WithPermissionHandler(handler PermissionHandler) ClientOption {
+	return func(c *Client) { c.permissionHandler = handler }
+}
+
+type permissionWaiter struct {
+	cancel     context.CancelFunc
+	cancelOnce sync.Once
+	cancelled  chan struct{}
+}
+
 // Client drives an external ACP agent over stdio.
 type Client struct {
 	conn      *acp.ClientSideConnection
@@ -40,6 +71,16 @@ type Client struct {
 	autoAllow bool
 	mu        sync.Mutex
 
+	systemPrompt        string
+	elicitationHandler  ElicitationHandler
+	permissionHandler   PermissionHandler
+	terminals           *terminalRegistry
+	terminalSeq         atomic.Uint64
+	elicitations        map[acp.ElicitationId]struct{}
+	permissionMu        sync.Mutex
+	permissionWaiters   map[acp.SessionId]map[*permissionWaiter]struct{}
+	permissionCancelled map[acp.SessionId]struct{}
+
 	// Per-session update channels.
 	sessMu     sync.Mutex
 	sessionChs map[acp.SessionId]chan acp.SessionUpdate
@@ -50,8 +91,12 @@ type Client struct {
 // cancellation propagate to the agent. Call Start before using other methods.
 func NewClient(ctx context.Context, agentPath string, args []string, opts ...ClientOption) (*Client, error) {
 	c := &Client{
-		cwd:        ".",
-		sessionChs: make(map[acp.SessionId]chan acp.SessionUpdate),
+		cwd:                 ".",
+		sessionChs:          make(map[acp.SessionId]chan acp.SessionUpdate),
+		terminals:           newTerminalRegistry(),
+		elicitations:        make(map[acp.ElicitationId]struct{}),
+		permissionWaiters:   make(map[acp.SessionId]map[*permissionWaiter]struct{}),
+		permissionCancelled: make(map[acp.SessionId]struct{}),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -124,6 +169,7 @@ func (c *Client) Close() error {
 		delete(c.sessionChs, id)
 	}
 	c.sessMu.Unlock()
+	c.cancelPermissionRequests("")
 
 	if c.cmd != nil && c.cmd.Process != nil {
 		if err := c.cmd.Process.Signal(os.Interrupt); err != nil {
@@ -145,6 +191,13 @@ func (c *Client) Initialize(ctx context.Context, req acp.InitializeRequest) (acp
 
 // NewSession creates a new session with the agent.
 func (c *Client) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	c.clearPermissionCancel("")
+	if req.SystemPrompt == nil && c.systemPrompt != "" {
+		req.SystemPrompt = &acp.SystemPrompt{
+			Mode:    acp.SystemPromptModeAppend,
+			Content: []acp.ContentBlock{acp.TextBlock(c.systemPrompt)},
+		}
+	}
 	resp, err := c.conn.NewSession(ctx, req)
 	if err != nil {
 		return acp.NewSessionResponse{}, fmt.Errorf("new session: %w", err)
@@ -153,6 +206,7 @@ func (c *Client) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp
 	ch := make(chan acp.SessionUpdate, 64)
 	c.sessionChs[resp.SessionId] = ch
 	c.sessMu.Unlock()
+	c.clearPermissionCancel(resp.SessionId)
 	c.log.Info("ACP client: new session", "sessionId", resp.SessionId)
 	return resp, nil
 }
@@ -174,16 +228,20 @@ func (c *Client) CloseSession(ctx context.Context, req acp.CloseSessionRequest) 
 		delete(c.sessionChs, req.SessionId)
 	}
 	c.sessMu.Unlock()
+	c.cancelPermissionRequests(req.SessionId)
+	c.clearPermissionCancel(req.SessionId)
 	return nil
 }
 
 // Cancel cancels an ongoing prompt turn for the given session.
 func (c *Client) Cancel(ctx context.Context, req acp.CancelNotification) error {
+	c.cancelPermissionRequests(req.SessionId)
 	return c.conn.Cancel(ctx, req)
 }
 
 // Prompt sends a prompt to the agent and waits for the response.
 func (c *Client) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
+	c.clearPermissionCancel(req.SessionId)
 	resp, err := c.conn.Prompt(ctx, req)
 	if err != nil {
 		return acp.PromptResponse{}, fmt.Errorf("prompt: %w", err)
@@ -211,6 +269,13 @@ type crushClient struct {
 	client *Client
 }
 
+func (c *Client) connDone() <-chan struct{} {
+	if c.conn == nil {
+		return nil
+	}
+	return c.conn.Done()
+}
+
 func (cc *crushClient) SessionUpdate(_ context.Context, params acp.SessionNotification) error {
 	cc.client.sessMu.Lock()
 	ch, ok := cc.client.sessionChs[params.SessionId]
@@ -226,10 +291,75 @@ func (cc *crushClient) SessionUpdate(_ context.Context, params acp.SessionNotifi
 	return nil
 }
 
-func (cc *crushClient) RequestPermission(_ context.Context, params acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	cc.client.log.Info("ACP client: permission requested", "sessionId", params.SessionId, "toolCall", params.ToolCall.Title)
-	if cc.client.autoAllow {
-		cc.client.log.Info("ACP client: auto-allowing permission")
+func (cc *crushClient) RequestPermission(ctx context.Context, params acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return cc.client.requestPermission(ctx, params)
+}
+
+func (c *Client) requestPermission(ctx context.Context, params acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	c.log.Info("ACP client: permission requested", "sessionId", params.SessionId, "toolCall", params.ToolCall.Title)
+	c.permissionMu.Lock()
+	_, cancelled := c.permissionCancelled[params.SessionId]
+	c.permissionMu.Unlock()
+	if cancelled {
+		return cancelledPermission(), nil
+	}
+	if c.permissionHandler == nil {
+		return c.immediatePermission(params), nil
+	}
+
+	handlerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	waiter := &permissionWaiter{cancel: cancel, cancelled: make(chan struct{})}
+	type result struct {
+		resp acp.RequestPermissionResponse
+		err  error
+	}
+	answered := make(chan result, 1)
+
+	c.permissionMu.Lock()
+	if c.permissionWaiters[params.SessionId] == nil {
+		c.permissionWaiters[params.SessionId] = make(map[*permissionWaiter]struct{})
+	}
+	c.permissionWaiters[params.SessionId][waiter] = struct{}{}
+	c.permissionMu.Unlock()
+	defer func() {
+		c.permissionMu.Lock()
+		delete(c.permissionWaiters[params.SessionId], waiter)
+		if len(c.permissionWaiters[params.SessionId]) == 0 {
+			delete(c.permissionWaiters, params.SessionId)
+		}
+		c.permissionMu.Unlock()
+	}()
+
+	go func() {
+		resp, err := c.permissionHandler(handlerCtx, params)
+		answered <- result{resp: resp, err: err}
+	}()
+
+	done := c.connDone()
+	select {
+	case res := <-answered:
+		select {
+		case <-waiter.cancelled:
+			return cancelledPermission(), nil
+		default:
+		}
+		if handlerCtx.Err() != nil {
+			return cancelledPermission(), nil
+		}
+		return res.resp, res.err
+	case <-waiter.cancelled:
+		return cancelledPermission(), nil
+	case <-ctx.Done():
+		return cancelledPermission(), nil
+	case <-done:
+		return cancelledPermission(), nil
+	}
+}
+
+func (c *Client) immediatePermission(params acp.RequestPermissionRequest) acp.RequestPermissionResponse {
+	if c.autoAllow {
+		c.log.Info("ACP client: auto-allowing permission")
 		var chosen acp.PermissionOptionId
 		for _, opt := range params.Options {
 			if opt.Kind == acp.PermissionOptionKindAllowOnce || opt.Kind == acp.PermissionOptionKindAllowAlways {
@@ -239,17 +369,56 @@ func (cc *crushClient) RequestPermission(_ context.Context, params acp.RequestPe
 		}
 		return acp.RequestPermissionResponse{
 			Outcome: acp.NewRequestPermissionOutcomeSelected(chosen),
-		}, nil
+		}
 	}
 	// Default: allow once on first option.
 	if len(params.Options) > 0 {
 		return acp.RequestPermissionResponse{
 			Outcome: acp.NewRequestPermissionOutcomeSelected(params.Options[0].OptionId),
-		}, nil
+		}
 	}
+	return cancelledPermission()
+}
+
+func cancelledPermission() acp.RequestPermissionResponse {
 	return acp.RequestPermissionResponse{
 		Outcome: acp.NewRequestPermissionOutcomeCancelled(),
-	}, nil
+	}
+}
+
+func (c *Client) cancelPermissionRequests(sessionID acp.SessionId) {
+	c.permissionMu.Lock()
+	if sessionID == "" {
+		for id, waiters := range c.permissionWaiters {
+			c.cancelWaitersLocked(waiters)
+			delete(c.permissionWaiters, id)
+		}
+		c.permissionCancelled = make(map[acp.SessionId]struct{})
+	} else {
+		c.cancelWaitersLocked(c.permissionWaiters[sessionID])
+		delete(c.permissionWaiters, sessionID)
+		c.permissionCancelled[sessionID] = struct{}{}
+	}
+	c.permissionMu.Unlock()
+}
+
+func (c *Client) cancelWaitersLocked(waiters map[*permissionWaiter]struct{}) {
+	for waiter := range waiters {
+		waiter.cancelOnce.Do(func() {
+			close(waiter.cancelled)
+			waiter.cancel()
+		})
+	}
+}
+
+func (c *Client) clearPermissionCancel(sessionID acp.SessionId) {
+	c.permissionMu.Lock()
+	if sessionID == "" {
+		c.permissionCancelled = make(map[acp.SessionId]struct{})
+	} else {
+		delete(c.permissionCancelled, sessionID)
+	}
+	c.permissionMu.Unlock()
 }
 
 func (cc *crushClient) ReadTextFile(_ context.Context, params acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
@@ -309,36 +478,103 @@ func (cc *crushClient) WriteTextFile(_ context.Context, params acp.WriteTextFile
 	return acp.WriteTextFileResponse{}, nil
 }
 
-func (cc *crushClient) CreateTerminal(_ context.Context, _ acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
-	return acp.CreateTerminalResponse{}, fmt.Errorf("terminals not supported by Crush ACP client")
+func (cc *crushClient) CreateTerminal(ctx context.Context, params acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
+	cwd := cc.client.cwd
+	if params.Cwd != nil {
+		cwd = *params.Cwd
+	}
+	if !filepath.IsAbs(cwd) {
+		return acp.CreateTerminalResponse{}, acp.NewInvalidParams(map[string]any{"cwd": cwd})
+	}
+	if !withinRoot(cwd, cc.client.cwd) {
+		return acp.CreateTerminalResponse{}, acp.NewInvalidParams(map[string]any{"cwd": cwd})
+	}
+	id := acp.TerminalId(fmt.Sprintf("term-%d", cc.client.terminalSeq.Add(1)))
+	if _, err := cc.client.terminals.create(ctx, id, params.Command, params.Args, params.Env, cwd, params.OutputByteLimit); err != nil {
+		return acp.CreateTerminalResponse{}, err
+	}
+	return acp.CreateTerminalResponse{TerminalId: id}, nil
 }
 
-func (cc *crushClient) KillTerminal(_ context.Context, _ acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
-	return acp.KillTerminalResponse{}, fmt.Errorf("terminals not supported by Crush ACP client")
+func terminalNotFound(id acp.TerminalId) error {
+	return acp.NewRequestError(-32002, "Terminal not found", map[string]any{"terminalId": string(id)})
 }
 
-func (cc *crushClient) TerminalOutput(_ context.Context, _ acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
-	return acp.TerminalOutputResponse{}, fmt.Errorf("terminals not supported by Crush ACP client")
+func withinRoot(target, root string) bool {
+	if root == "" {
+		return true
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, targetAbs)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func (cc *crushClient) WaitForTerminalExit(_ context.Context, _ acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
-	return acp.WaitForTerminalExitResponse{}, fmt.Errorf("terminals not supported by Crush ACP client")
+func (cc *crushClient) KillTerminal(_ context.Context, params acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
+	if !cc.client.terminals.kill(params.TerminalId) {
+		return acp.KillTerminalResponse{}, terminalNotFound(params.TerminalId)
+	}
+	return acp.KillTerminalResponse{}, nil
 }
 
-func (cc *crushClient) ReleaseTerminal(_ context.Context, _ acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
-	return acp.ReleaseTerminalResponse{}, fmt.Errorf("terminals not supported by Crush ACP client")
+func (cc *crushClient) TerminalOutput(_ context.Context, params acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
+	output, truncated, status, ok := cc.client.terminals.output(params.TerminalId)
+	if !ok {
+		return acp.TerminalOutputResponse{}, terminalNotFound(params.TerminalId)
+	}
+	return acp.TerminalOutputResponse{Output: output, Truncated: truncated, ExitStatus: status}, nil
 }
 
-// CreateElicitation answers -32601: Crush advertises no elicitation
-// capability, so an agent that sends this request is calling an unsupported
-// method.
-func (cc *crushClient) CreateElicitation(_ context.Context, _ acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
-	return acp.CreateElicitationResponse{}, acp.NewMethodNotFound("elicitation/create")
+func (cc *crushClient) WaitForTerminalExit(ctx context.Context, params acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
+	code, signal, ok := cc.client.terminals.wait(ctx, params.TerminalId)
+	if !ok {
+		return acp.WaitForTerminalExitResponse{}, terminalNotFound(params.TerminalId)
+	}
+	return acp.WaitForTerminalExitResponse{ExitCode: code, Signal: signal}, nil
 }
 
-// CompleteElicitation acknowledges the end of a URL-based elicitation, which
-// Crush never starts.
-func (cc *crushClient) CompleteElicitation(_ context.Context, _ acp.CompleteElicitationNotification) error {
+func (cc *crushClient) ReleaseTerminal(_ context.Context, params acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
+	if !cc.client.terminals.release(params.TerminalId) {
+		return acp.ReleaseTerminalResponse{}, terminalNotFound(params.TerminalId)
+	}
+	return acp.ReleaseTerminalResponse{}, nil
+}
+
+// CreateElicitation dispatches to the installed CLI handler.
+func (cc *crushClient) CreateElicitation(ctx context.Context, req acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+	if cc.client.elicitationHandler == nil {
+		return acp.CreateElicitationResponse{}, acp.NewMethodNotFound("elicitation/create")
+	}
+	if req.Url != nil {
+		cc.client.sessMu.Lock()
+		if _, exists := cc.client.elicitations[req.Url.ElicitationId]; exists {
+			cc.client.sessMu.Unlock()
+			return acp.CreateElicitationResponse{}, acp.NewInvalidParams(map[string]any{"elicitationId": string(req.Url.ElicitationId)})
+		}
+		cc.client.elicitations[req.Url.ElicitationId] = struct{}{}
+		cc.client.sessMu.Unlock()
+	}
+	return cc.client.elicitationHandler(ctx, req)
+}
+
+// CompleteElicitation acknowledges the end of a URL-based elicitation.
+func (cc *crushClient) CompleteElicitation(_ context.Context, notification acp.CompleteElicitationNotification) error {
+	return cc.client.completeElicitation(notification)
+}
+
+func (c *Client) completeElicitation(notification acp.CompleteElicitationNotification) error {
+	c.sessMu.Lock()
+	delete(c.elicitations, notification.ElicitationId)
+	c.sessMu.Unlock()
 	return nil
 }
 

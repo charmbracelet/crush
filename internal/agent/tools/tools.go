@@ -127,6 +127,20 @@ type rootsContextKey string
 // RootsContextKey is the key for the session's root set in the context.
 const RootsContextKey rootsContextKey = "session_roots"
 
+// systemPromptAppendContextKey carries ACP append-only system instructions.
+type systemPromptAppendContextKey struct{}
+
+// WithSystemPromptAppend adds trusted ACP system instructions to ctx.
+func WithSystemPromptAppend(ctx context.Context, text string) context.Context {
+	return context.WithValue(ctx, systemPromptAppendContextKey{}, text)
+}
+
+// SystemPromptAppend returns ACP system instructions carried by ctx.
+func SystemPromptAppend(ctx context.Context) string {
+	text, _ := ctx.Value(systemPromptAppendContextKey{}).(string)
+	return text
+}
+
 // GetRootsFromContext retrieves the session's effective root set. An empty
 // result means the caller is not root-scoped (a CLI run, a test), and the
 // tools treat every path as in scope.

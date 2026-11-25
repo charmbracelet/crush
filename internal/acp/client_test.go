@@ -7,11 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClientSubscribe(t *testing.T) {
@@ -123,6 +123,34 @@ func TestClientPermissionNoOptions(t *testing.T) {
 	}
 }
 
+func TestClientPermissionCancelledByCancel(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cli := &Client{
+		log:                 log,
+		sessionChs:          make(map[acp.SessionId]chan acp.SessionUpdate),
+		permissionWaiters:   make(map[acp.SessionId]map[*permissionWaiter]struct{}),
+		permissionCancelled: make(map[acp.SessionId]struct{}),
+		permissionHandler: func(ctx context.Context, _ acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+			<-ctx.Done()
+			return acp.RequestPermissionResponse{}, ctx.Err()
+		},
+	}
+	impl := &crushClient{client: cli}
+	started := make(chan struct{})
+	req := acp.RequestPermissionRequest{SessionId: "sess-1"}
+
+	go func() {
+		close(started)
+		_, _ = impl.RequestPermission(context.Background(), req)
+	}()
+	<-started
+	cli.cancelPermissionRequests(req.SessionId)
+
+	resp, err := impl.RequestPermission(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Outcome.Cancelled)
+}
+
 func TestClientReadTextFile(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cli := &Client{log: log}
@@ -208,32 +236,50 @@ func TestClientElicitationUnsupported(t *testing.T) {
 	}
 }
 
+func TestClientElicitationHandler(t *testing.T) {
+	response, err := (&crushClient{client: &Client{
+		elicitationHandler: func(_ context.Context, _ acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+			return acp.CreateElicitationResponse{Cancel: &acp.CreateElicitationCancel{Action: "cancel"}}, nil
+		},
+	}}).CreateElicitation(context.Background(), acp.CreateElicitationRequest{})
+	if err != nil {
+		t.Fatalf("CreateElicitation: %v", err)
+	}
+	if response.Cancel == nil {
+		t.Fatal("expected cancel response")
+	}
+}
+
 func TestClientTerminalMethods(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cli := &Client{log: log}
+	cli := &Client{log: log, cwd: t.TempDir(), terminals: newTerminalRegistry(), elicitations: map[acp.ElicitationId]struct{}{}}
 	impl := &crushClient{client: cli}
 	ctx := context.Background()
 
-	tests := []struct {
-		name string
-		fn   func() error
-	}{
-		{"CreateTerminal", func() error { _, err := impl.CreateTerminal(ctx, acp.CreateTerminalRequest{}); return err }},
-		{"KillTerminal", func() error { _, err := impl.KillTerminal(ctx, acp.KillTerminalRequest{}); return err }},
-		{"TerminalOutput", func() error { _, err := impl.TerminalOutput(ctx, acp.TerminalOutputRequest{}); return err }},
-		{"WaitForTerminalExit", func() error { _, err := impl.WaitForTerminalExit(ctx, acp.WaitForTerminalExitRequest{}); return err }},
-		{"ReleaseTerminal", func() error { _, err := impl.ReleaseTerminal(ctx, acp.ReleaseTerminalRequest{}); return err }},
+	command, args := envPrintCommand("PATH")
+	created, err := impl.CreateTerminal(ctx, acp.CreateTerminalRequest{Command: command, Args: args})
+	if err != nil {
+		t.Fatalf("CreateTerminal: %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.fn()
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if !strings.Contains(err.Error(), "terminals not supported") {
-				t.Fatalf("expected 'terminals not supported' error, got: %v", err)
-			}
-		})
+	if created.TerminalId == "" {
+		t.Fatal("expected terminal id")
+	}
+	_, err = impl.WaitForTerminalExit(ctx, acp.WaitForTerminalExitRequest{TerminalId: created.TerminalId})
+	if err != nil {
+		t.Fatalf("WaitForTerminalExit: %v", err)
+	}
+	output, err := impl.TerminalOutput(ctx, acp.TerminalOutputRequest{TerminalId: created.TerminalId})
+	if err != nil {
+		t.Fatalf("TerminalOutput: %v", err)
+	}
+	if output.Output == "" {
+		t.Fatal("expected terminal output")
+	}
+	if _, err := impl.ReleaseTerminal(ctx, acp.ReleaseTerminalRequest{TerminalId: created.TerminalId}); err != nil {
+		t.Fatalf("ReleaseTerminal: %v", err)
+	}
+	if _, err := impl.TerminalOutput(ctx, acp.TerminalOutputRequest{TerminalId: created.TerminalId}); err == nil {
+		t.Fatal("expected released terminal to be unknown")
 	}
 }
 

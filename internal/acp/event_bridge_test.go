@@ -72,6 +72,59 @@ func TestEventBridge_ClientDisconnect(t *testing.T) {
 	}
 }
 
+func TestEventBridge_CompactionGating(t *testing.T) {
+	summary := message.Message{
+		ID:               "cmp-1",
+		SessionID:        "sess-1",
+		Role:             message.Assistant,
+		Parts:            []message.ContentPart{message.TextContent{Text: "retained"}},
+		IsSummaryMessage: true,
+	}
+	update := compactionUpdateFor(summary)
+	require.NotNil(t, update)
+	require.Equal(t, acp.CompactionId("cmp-1"), update.CompactionId)
+	require.Equal(t, acp.CompactionStatusCompleted, update.Status)
+	summaryText, ok := update.Summary.Value()
+	require.True(t, ok)
+	require.Equal(t, "retained", summaryText[0].Text.Text)
+
+	require.Nil(t, compactionUpdateFor(message.Message{
+		ID:    "plain",
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "plain"}},
+	}))
+}
+
+func TestEventBridge_NoticeGating(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(&app.App{}, log, c2aR, a2cW)
+	bridge := srv.eventBridge
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+	ctx := context.Background()
+
+	bridge.sendTextOrNotice(ctx, "sess-1", acp.NoticeSeverityInfo, "Prompt cancelled", "[Cancelled] done")
+	fallback := <-cc.ch
+	require.NotNil(t, fallback.AgentMessageChunk)
+
+	bridge.noticesEnabled = func() bool { return true }
+	bridge.sendTextOrNotice(ctx, "sess-1", acp.NoticeSeverityInfo, "Prompt cancelled", "[Cancelled] done")
+	notice := <-cc.ch
+	require.NotNil(t, notice.Notice)
+	require.Equal(t, acp.NoticeSeverityInfo, notice.Notice.Severity)
+	require.Equal(t, "Prompt cancelled", notice.Notice.Title)
+}
+
 // TestEventBridge_ToolResultStreaming verifies a tool-role message's results
 // are surfaced on the matching tool_call_update with output content (O9), so a
 // tool-heavy turn no longer appears to stall after the first batch.

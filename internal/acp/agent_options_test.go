@@ -32,6 +32,35 @@ func TestInitializeAdvertisesAdditionalDirectories(t *testing.T) {
 	require.NotNil(t, resp.AgentCapabilities.SessionCapabilities.AdditionalDirectories)
 }
 
+func TestInitializeAdvertisesSystemPromptAppend(t *testing.T) {
+	a := newTestAgent(&stubSessionService{})
+	resp, err := a.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	require.NoError(t, err)
+	require.NotNil(t, resp.AgentCapabilities.SessionCapabilities.SystemPrompt)
+	require.Nil(t, resp.AgentCapabilities.SessionCapabilities.SystemPrompt.Mode)
+}
+
+func TestValidateSystemPromptRejectsUnsupportedValues(t *testing.T) {
+	text, err := validateSystemPrompt(&acp.SystemPrompt{
+		Mode:    acp.SystemPromptModeAppend,
+		Content: []acp.ContentBlock{acp.TextBlock("trusted")},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "trusted", text)
+
+	_, err = validateSystemPrompt(&acp.SystemPrompt{
+		Mode:    acp.SystemPromptModeOverride,
+		Content: []acp.ContentBlock{acp.TextBlock("trusted")},
+	})
+	var reqErr *acp.RequestError
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32602, reqErr.Code)
+
+	_, err = validateSystemPrompt(&acp.SystemPrompt{Mode: acp.SystemPromptModeAppend})
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32602, reqErr.Code)
+}
+
 func TestInitializeAdvertisesMCPHttpAndSSE(t *testing.T) {
 	a := newTestAgent(&stubSessionService{})
 	resp, err := a.Initialize(context.Background(), acp.InitializeRequest{
@@ -90,6 +119,18 @@ func TestValidateCwdRequiresAbsolute(t *testing.T) {
 	var reqErr *acp.RequestError
 	require.ErrorAs(t, err, &reqErr)
 	require.Equal(t, -32602, reqErr.Code)
+}
+
+func TestListSessionsEchoesMeta(t *testing.T) {
+	a := newTestAgent(&stubSessionService{})
+	_, err := a.NewSession(context.Background(), acp.NewSessionRequest{Cwd: "/workspace"})
+	require.NoError(t, err)
+
+	meta, err := acp.NewMeta(map[string]any{"traceparent": "00-abc-123-01"})
+	require.NoError(t, err)
+	got, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{Meta: meta})
+	require.NoError(t, err)
+	require.Equal(t, meta, got.Meta)
 }
 
 func TestListSessionsRejectsRelativeCwd(t *testing.T) {

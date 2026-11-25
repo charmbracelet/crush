@@ -74,6 +74,9 @@ type eventBridge struct {
 	log    *slog.Logger
 	cancel context.CancelFunc
 
+	noticesEnabled    func() bool
+	compactionEnabled func() bool
+
 	// mu guards the per-message tracking maps below. Message events carry a
 	// whole-message snapshot rather than a delta, so the difference against the
 	// last snapshot is the new content.
@@ -289,7 +292,27 @@ func (b *eventBridge) titleChanged(s session.Session) bool {
 	return seen && last != s.Title
 }
 
+func compactionUpdateFor(m message.Message) *acp.SessionCompactionUpdate {
+	text := m.Content().Text
+	if !m.IsSummaryMessage || text == "" {
+		return nil
+	}
+	return &acp.SessionCompactionUpdate{
+		CompactionId: acp.CompactionId(m.ID),
+		Status:       acp.CompactionStatusCompleted,
+		Summary:      acp.PatchSet([]acp.ContentBlock{acp.TextBlock(text)}),
+	}
+}
+
 func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
+	if update := compactionUpdateFor(m); update != nil {
+		if b.compactionAllowed() {
+			if err := b.conn.SessionUpdate(ctx, b.note(acp.SessionId(m.SessionID), acp.SessionUpdate{CompactionUpdate: update})); err != nil {
+				b.log.Warn("Failed to send compaction update", "error", err)
+			}
+		}
+		return
+	}
 	b.streamToolResults(ctx, m)
 	if m.Role != message.Assistant || m.SessionID == "" {
 		return
@@ -777,13 +800,13 @@ func (b *eventBridge) handleNotification(ctx context.Context, n notify.Notificat
 	switch n.Type {
 	case notify.TypeAgentError:
 		b.log.Info("ACP: agent error", "sessionId", n.SessionID, "message", n.Message)
-		b.sendText(ctx, sessionID, "[Error] "+n.Message)
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityError, "Agent error", "[Error] "+n.Message)
 	case notify.TypeAgentFinished:
 		b.log.Info("ACP: agent finished", "sessionId", n.SessionID)
 		// No explicit update needed - prompt response handles completion
 	case notify.TypeReAuthenticate:
 		b.log.Info("ACP: re-auth required", "sessionId", n.SessionID, "provider", n.ProviderID)
-		b.sendText(ctx, sessionID, "[Auth Required] Please re-authenticate with "+n.ProviderID)
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityWarning, "Authentication required", "[Auth Required] Please re-authenticate with "+n.ProviderID)
 	default:
 		b.log.Debug("ACP: unknown notification type", "type", n.Type)
 	}
@@ -799,9 +822,9 @@ func (b *eventBridge) handleRunComplete(ctx context.Context, rc notify.RunComple
 
 	switch {
 	case rc.Cancelled:
-		b.sendText(ctx, sessionID, "[Cancelled] The operation was cancelled.")
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityInfo, "Prompt cancelled", "[Cancelled] The operation was cancelled.")
 	case rc.Error != "":
-		b.sendText(ctx, sessionID, "[Error] "+rc.Error)
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityError, "Agent error", "[Error] "+rc.Error)
 	}
 
 	b.usageUpdate(ctx, rc.SessionID)
@@ -817,6 +840,35 @@ func (b *eventBridge) sendText(ctx context.Context, sessionID acp.SessionId, tex
 	if err := b.conn.SessionUpdate(ctx, b.note(sessionID, acp.UpdateAgentMessageText(text))); err != nil {
 		b.log.Warn("Failed to send session update", "error", err)
 	}
+}
+
+func (b *eventBridge) noticesAllowed() bool {
+	return b.noticesEnabled != nil && b.noticesEnabled()
+}
+
+func (b *eventBridge) compactionAllowed() bool {
+	return b.compactionEnabled != nil && b.compactionEnabled()
+}
+
+func (b *eventBridge) sendNotice(ctx context.Context, sessionID acp.SessionId, severity acp.NoticeSeverity, title, description string) {
+	update := acp.SessionUpdate{Notice: &acp.SessionUpdateNotice{
+		Severity: severity,
+		Title:    title,
+	}}
+	if description != "" {
+		update.Notice.Description = acp.Ptr(description)
+	}
+	if err := b.conn.SessionUpdate(ctx, b.note(sessionID, update)); err != nil {
+		b.log.Warn("Failed to send notice update", "error", err)
+	}
+}
+
+func (b *eventBridge) sendTextOrNotice(ctx context.Context, sessionID acp.SessionId, severity acp.NoticeSeverity, title, fallback string) {
+	if b.noticesAllowed() {
+		b.sendNotice(ctx, sessionID, severity, title, fallback)
+		return
+	}
+	b.sendText(ctx, sessionID, fallback)
 }
 
 // usageUpdate emits a SessionUsageUpdate reporting the session's cumulative

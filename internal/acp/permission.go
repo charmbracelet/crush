@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/permission"
@@ -60,7 +62,7 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 	}
 
 	// Build the tool call update for the permission request.
-	title := fmt.Sprintf("%s: %s", req.ToolName, req.Description)
+	title := fmt.Sprintf("%s: %s%s", req.ToolName, req.Description, executionControlSuffix(req.Path))
 	toolCallUpdate := acp.ToolCallUpdate{
 		ToolCallId: acp.ToolCallId(req.ToolCallID),
 		Title:      acp.PatchSet(title),
@@ -141,6 +143,28 @@ func (b *permissionBridge) pushToolCallStatus(ctx context.Context, sessionID, to
 	if err := b.conn.SessionUpdate(ctx, note); err != nil {
 		b.log.Warn("Failed to send tool call status update", "error", err)
 	}
+}
+
+// executionControlSuffix labels writes to files that can change what runs or
+// what gets approved. This is display-only; permission behaviour is unchanged.
+func executionControlSuffix(path string) string {
+	clean := filepath.ToSlash(strings.ToLower(path))
+	base := filepath.Base(clean)
+	controlFiles := map[string]struct{}{
+		"crush.json":    {},
+		".mcp.json":     {},
+		"mcp.json":      {},
+		"settings.json": {},
+	}
+	if _, ok := controlFiles[base]; ok {
+		return " [execution/approval config]"
+	}
+	for _, marker := range []string{"/.git/hooks/", "/.crush/", "/.vscode/", "/.idea/"} {
+		if strings.Contains(clean, marker) {
+			return " [execution/approval config]"
+		}
+	}
+	return ""
 }
 
 // buildPermissionOptions creates ACP permission options for the tool being

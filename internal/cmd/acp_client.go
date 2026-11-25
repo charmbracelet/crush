@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
@@ -14,6 +13,8 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/spf13/cobra"
 )
+
+var acpConnectSystemPrompt string
 
 var acpConnectCmd = &cobra.Command{
 	Use:   "connect <agent-binary> [args...]",
@@ -30,6 +31,7 @@ Example:
 }
 
 func init() {
+	acpConnectCmd.Flags().StringVar(&acpConnectSystemPrompt, "system-prompt", "", "append trusted instructions to the external agent's system prompt")
 	acpCmd.AddCommand(acpConnectCmd)
 }
 
@@ -50,9 +52,17 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
+	systemPrompt := acpConnectSystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = os.Getenv("CRUSH_ACP_SYSTEM_PROMPT")
+	}
+	input := newLineInput(os.Stdin)
+
 	cli, err := acp.NewClient(ctx, agentPath, agentArgs,
 		acp.WithCWD(cwd),
-		acp.WithAutoAllowPermissions(),
+		acp.WithPermissionHandler(newPermissionHandler(input)),
+		acp.WithSystemPrompt(systemPrompt),
+		acp.WithElicitationHandler(newElicitationHandler(input)),
 	)
 	if err != nil {
 		return fmt.Errorf("create client: %w", err)
@@ -79,13 +89,20 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 	initResp, err := cli.Initialize(ctx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		ClientCapabilities: acpsdk.ClientCapabilities{
-			Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+			Fs:       acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+			Terminal: true,
+			Elicitation: &acpsdk.ElicitationCapabilities{
+				Form: &acpsdk.ElicitationFormCapabilities{},
+				Url:  &acpsdk.ElicitationUrlCapabilities{},
+			},
 			// Ask for boolean config options so the server offers
 			// thinking as a toggle rather than a two-item select.
 			Session: &acpsdk.ClientSessionCapabilities{
 				ConfigOptions: &acpsdk.SessionConfigOptionsCapabilities{
 					Boolean: &acpsdk.BooleanConfigOptionCapabilities{},
 				},
+				Notices:    &acpsdk.NoticeCapabilities{},
+				Compaction: &acpsdk.CompactionCapabilities{},
 			},
 		},
 	})
@@ -93,7 +110,7 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("initialize: %w", err)
 	}
 	fmt.Fprintf(os.Stdout, "Connected to %s v%s (protocol %v)\n\n",
-		initResp.AgentInfo.Name, initResp.AgentInfo.Version, initResp.ProtocolVersion)
+		safeTerminalText(initResp.AgentInfo.Name), safeTerminalText(initResp.AgentInfo.Version), initResp.ProtocolVersion)
 
 	// Create session.
 	ns, err := cli.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: cwd})
@@ -102,7 +119,7 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 	}
 	defer cli.CloseSession(ctx, acpsdk.CloseSessionRequest{SessionId: ns.SessionId})
 
-	fmt.Fprintf(os.Stdout, "Session: %s\n\n", ns.SessionId)
+	fmt.Fprintf(os.Stdout, "Session: %s\n\n", safeTerminalText(string(ns.SessionId)))
 
 	// Drain session/update notifications (streaming chunks, tool calls) so the
 	// user sees output as it arrives instead of only the final stop reason.
@@ -117,18 +134,22 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Interactive prompt loop.
-	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Fprintf(os.Stdout, "> ")
-		if !scanner.Scan() {
+		prompt, ok := input.readLine("> ")
+		if !ok {
 			break
 		}
-		prompt := strings.TrimSpace(scanner.Text())
 		if prompt == "" || prompt == "exit" || prompt == "quit" {
 			break
 		}
 		if prompt == "help" {
-			fmt.Fprintln(os.Stdout, "Commands: exit, quit, help")
+			fmt.Fprintln(os.Stdout, "Commands: exit, quit, help, cancel")
+			continue
+		}
+		if prompt == "cancel" {
+			if err := cli.Cancel(context.Background(), acpsdk.CancelNotification{SessionId: ns.SessionId}); err != nil {
+				fmt.Fprintf(os.Stdout, "Cancel failed: %v\n\n", err)
+			}
 			continue
 		}
 
@@ -140,14 +161,10 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 			if ctx.Err() != nil {
 				break
 			}
-			fmt.Fprintf(os.Stdout, "Error: %v\n\n", err)
+			fmt.Fprintf(os.Stdout, "Error: %s\n\n", safeTerminalText(err.Error()))
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "\n[stop: %s]\n\n", resp.StopReason)
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Warn("stdin read error", "err", err)
+		fmt.Fprintf(os.Stdout, "\n[stop: %s]\n\n", safeTerminalText(string(resp.StopReason)))
 	}
 
 	// Wait for connection to close.
@@ -169,17 +186,36 @@ func renderUpdate(u acpsdk.SessionUpdate) {
 	switch {
 	case u.AgentMessageChunk != nil:
 		if t := u.AgentMessageChunk.Content.Text; t != nil {
-			fmt.Fprint(os.Stdout, t.Text)
+			fmt.Fprint(os.Stdout, safeTerminalText(t.Text))
 		}
 	case u.AgentThoughtChunk != nil:
 		if t := u.AgentThoughtChunk.Content.Text; t != nil {
-			fmt.Fprint(os.Stderr, t.Text)
+			fmt.Fprint(os.Stderr, safeTerminalText(t.Text))
 		}
 	case u.ToolCall != nil:
 		title := u.ToolCall.Title
 		if u.ToolCall.Name != nil && *u.ToolCall.Name != "" {
 			title = *u.ToolCall.Name + ": " + title
 		}
-		fmt.Fprintf(os.Stderr, "\n[tool: %s]\n", title)
+		fmt.Fprintf(os.Stderr, "\n[tool: %s]\n", safeTerminalText(title))
+	case u.Notice != nil:
+		description := ""
+		if u.Notice.Description != nil {
+			description = ": " + *u.Notice.Description
+		}
+		fmt.Fprintf(os.Stderr, "\n[notice: %s] %s%s\n", safeTerminalText(string(u.Notice.Severity)), safeTerminalText(u.Notice.Title), safeTerminalText(description))
+	case u.CompactionUpdate != nil:
+		fmt.Fprintf(os.Stderr, "\n[compaction: %s] %s\n", safeTerminalText(string(u.CompactionUpdate.CompactionId)), safeTerminalText(string(u.CompactionUpdate.Status)))
+		if summary, ok := u.CompactionUpdate.Summary.Value(); ok {
+			for _, block := range summary {
+				if block.Text != nil {
+					fmt.Fprintln(os.Stderr, safeTerminalText(block.Text.Text))
+				}
+			}
+		}
+	case u.CompactionSummaryChunk != nil:
+		if text := u.CompactionSummaryChunk.Content.Text; text != nil {
+			fmt.Fprint(os.Stderr, safeTerminalText(text.Text))
+		}
 	}
 }

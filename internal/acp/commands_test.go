@@ -7,11 +7,24 @@ import (
 
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/skills"
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/stretchr/testify/require"
 )
 
 func newResolverAgent() *crushAgent {
 	return &crushAgent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+}
+
+func TestFilterSessionMCPPrompts(t *testing.T) {
+	prompts := []commands.MCPPrompt{
+		{ID: "config:prompt", ClientID: "config-server"},
+		{ID: "acp:sess-1:prompt", ClientID: "acp:sess-1:server"},
+		{ID: "acp:sess-2:prompt", ClientID: "acp:sess-2:server"},
+	}
+	got := filterSessionMCPPrompts(prompts, acp.SessionId("sess-1"))
+	require.Len(t, got, 2)
+	require.Equal(t, "config:prompt", got[0].ID)
+	require.Equal(t, "acp:sess-1:prompt", got[1].ID)
 }
 
 func TestSplitCommand(t *testing.T) {

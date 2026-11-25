@@ -11,10 +11,10 @@ func TestAuthSpecKindAndFlow(t *testing.T) {
 
 	// A spec with no kind is an OAuth spec: the block's presence is the
 	// signal that the provider signs in rather than takes a key.
-	require.True(t, (&AuthSpec{}).UsesOAuth())
-	require.True(t, (&AuthSpec{Kind: "OAuth"}).UsesOAuth())
-	require.False(t, (&AuthSpec{Kind: AuthKindAPIKey}).UsesOAuth())
-	require.False(t, (*AuthSpec)(nil).UsesOAuth())
+	require.True(t, (&AuthSpec{}).IsOAuth())
+	require.True(t, (&AuthSpec{Kind: "OAuth"}).IsOAuth())
+	require.False(t, (&AuthSpec{Kind: AuthKindAPIKey}).IsOAuth())
+	require.False(t, (*AuthSpec)(nil).IsOAuth())
 
 	require.Equal(t, AuthFlowAuto, (&AuthSpec{}).FlowMode())
 	require.Equal(t, AuthFlowBrowser, (&AuthSpec{Flow: "authorization_code"}).FlowMode())

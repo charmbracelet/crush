@@ -35,26 +35,16 @@ type DeviceFlow struct {
 	code      DeviceCode
 }
 
-// StartDevice returns a flow that requests a device code on Start.
-func StartDevice(spec *oauth.AuthSpec) *DeviceFlow {
-	return &DeviceFlow{spec: spec}
-}
-
-// Start requests the device authorization and returns the verification URL
-// with the user code to show the user.
-func (f *DeviceFlow) Start(ctx context.Context) (string, string, error) {
-	endpoints, err := Resolve(ctx, f.spec)
-	if err != nil {
-		return "", "", err
+// Start requests the device authorization and returns the prompt carrying
+// the verification URL and the user code to show.
+func (f *DeviceFlow) Start(ctx context.Context) (Prompt, error) {
+	if err := f.endpoints.ensure(ctx, f.spec, GrantDevice); err != nil {
+		return Prompt{}, err
 	}
-	if endpoints.DeviceAuthURL == "" {
-		return "", "", fmt.Errorf("authorization server %s does not offer a device flow", f.spec.Issuer)
-	}
-	f.endpoints = endpoints
 
 	code, err := f.requestDeviceCode(ctx)
 	if err != nil {
-		return "", "", err
+		return Prompt{}, err
 	}
 	f.code = code
 
@@ -64,7 +54,13 @@ func (f *DeviceFlow) Start(ctx context.Context) (string, string, error) {
 	if code.VerificationURIComplete != "" {
 		verifyURL = code.VerificationURIComplete
 	}
-	return verifyURL, code.UserCode, nil
+	return Prompt{
+		URL:        verifyURL,
+		UserCode:   code.UserCode,
+		DeviceCode: code.DeviceCode,
+		ExpiresIn:  code.ExpiresIn,
+		Interval:   code.Interval,
+	}, nil
 }
 
 func (f *DeviceFlow) requestDeviceCode(ctx context.Context) (DeviceCode, error) {
@@ -126,11 +122,6 @@ func (f *DeviceFlow) Wait(ctx context.Context) (*oauth.Token, error) {
 		}
 	}
 }
-
-// Authorization returns the device authorization granted by Start, which
-// carries the code the caller must show and the polling hints the server
-// advertised.
-func (f *DeviceFlow) Authorization() DeviceCode { return f.code }
 
 // Close is a no-op: the device flow holds no local resources.
 func (f *DeviceFlow) Close() {}

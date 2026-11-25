@@ -5,6 +5,7 @@ import (
 
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
@@ -87,7 +88,7 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 }
 
 // ListSessionHistory returns the history items for a session.
-func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID string) (any, error) {
+func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID string) ([]history.File, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err

@@ -1553,6 +1553,10 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		w.ws.PermissionMode = e.Payload.Mode
 		w.mu.Unlock()
 		return nil
+	case pubsub.Event[proto.ClientSession]:
+		// Which session each client views is for host applications; the
+		// TUI does not show it.
+		return nil
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil

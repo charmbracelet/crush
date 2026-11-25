@@ -4063,7 +4063,6 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	switch m.state {
 	case uiInitialize:
-		binds = append(binds, k.Quit)
 	case uiChat:
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
@@ -4179,10 +4178,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 	switch m.state {
 	case uiInitialize:
-		binds = append(binds,
-			[]key.Binding{
-				k.Quit,
-			})
 	case uiChat:
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {

@@ -88,8 +88,7 @@ for a server that publishes RFC 8414 metadata; the rest tune the flow:
 `--oauth-device-url`, `--oauth-redirect-uri`, `--oauth-callback-port N`,
 `--oauth-param KEY VALUE` (repeatable), `--oauth-secret-basic BOOL`,
 `--oauth-kind oauth|api_key`, `--oauth-token-header KEY VALUE` (repeatable,
-headers the token endpoint demands — some servers reject an unrecognized
-User-Agent with "invalid request format"), `--oauth-token-encoding
+headers the token endpoint needs), `--oauth-token-encoding
 form|json` (json also sends the flow's state in the code exchange).
 
 Gateway flags — `--gateway-request JQ` and `--gateway-response JQ` rewrite a

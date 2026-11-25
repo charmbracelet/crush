@@ -127,7 +127,7 @@ func (s *AuthSpec) Usable() bool {
 // "resetTime".
 type UsageSpec struct {
 	// URL of the quota endpoint. Required.
-	URL string `json:"url" jsonschema:"required,description=URL of the endpoint that reports remaining quota,format=uri,example=https://api.example.com/v1internal:retrieveUserQuotaSummary"`
+	URL string `json:"url" jsonschema:"required,description=URL of the endpoint that reports remaining quota,format=uri,example=https://api.example.com/v1/quota"`
 
 	// Method defaults to GET. Providers taking a JSON body usually want POST
 	// with an empty Body.
@@ -161,7 +161,7 @@ type UsageSpec struct {
 	// from, so a display can show the limits that apply to the model in
 	// use rather than every plan limit. Values match a substring of the
 	// group label, case-insensitively.
-	ModelGroups map[string]string `json:"model_groups,omitempty" jsonschema:"description=Model id prefix to group label mapping,example=gemini=Gemini"`
+	ModelGroups map[string]string `json:"model_groups,omitempty" jsonschema:"description=Model id prefix to group label mapping,example=fast=Fast models"`
 
 	// Label, Remaining, and Reset name the fields inside each meter.
 	// Remaining is a fraction of the allowance left (1 untouched, 0 spent);

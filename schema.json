@@ -1482,7 +1482,7 @@
           "format": "uri",
           "description": "URL of the endpoint that reports remaining quota",
           "examples": [
-            "https://api.example.com/v1internal:retrieveUserQuotaSummary"
+            "https://api.example.com/v1/quota"
           ]
         },
         "method": {

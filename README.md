@@ -836,75 +836,51 @@ model add custom-anthropic/claude-sonnet-4-20250514 \
   --price-cache-hit 0.3
 ```
 
-#### Provider Plugins
+#### Plugins
 
-A provider plugin is a Bash script that declares a provider with the same
-crushrc builtins, so a new provider needs no Go code and no Crush release. Drop
-a `*.sh` file into a plugins directory and Crush runs it at config load:
-
-Both directories also run the scripts one level down, which is where an
-installed repository lives. `crush plugin install` fetches one from GitHub
-rather than making you copy files:
+A plugin is a Bash script that adds providers or tools to Crush, using the
+same commands as a `crushrc`. Drop it into `~/.config/crush/plugins/` (or
+`.crush/plugins/` in a project) and Crush runs it on startup:
 
 ```bash
-crush plugin install example/crush-plugins
-```
-
-The plugins of a repository are the non-hidden `*.sh` files at its root; the
-rest of the repository is the author's own business. Every install records the
-exact commit its files came from, so `crush plugin update` reports the move from
-one commit to the next and deletes plugins the repository has dropped. An
-install you edited locally is left alone until you `trust` those edits or pass
-`--force`. `GITHUB_TOKEN`, or `GH_TOKEN`, is sent when set, which is how a
-private repository installs.
-
-Crush does not sign, sandbox, or review plugins, and neither does the install:
-it prints the commit to read and then runs what it fetched as Bash, with your
-shell privileges.
-
-Key-based providers work exactly like the examples above:
-
-```bash
-# .crush/plugins/example.sh
+# ~/.config/crush/plugins/example.sh
 provider add example \
-  --type openai-compat \
+  --type completions \
   --base-url "https://api.example.com/v1" \
   --api-key "$EXAMPLE_API_KEY"
 model add example/code-1 --name "Code 1"
 ```
 
-OAuth sign-in needs the authorization server and the client, after which
-`crush login example` — and the models dialog — run the flow for you:
+Providers you sign in to work too. Declare the OAuth server with the
+`--oauth-*` flags and `crush login example` takes care of the rest, including
+refreshing tokens. Plugins can also report how much of a plan's quota is left,
+which `crush usage` and the sidebar show.
+
+Plugins can give the agent new tools too. Each tool is backed by a shell
+command, so the agent can talk to your issue tracker, an internal API, or any
+CLI you already use:
 
 ```bash
-provider add example \
-  --type openai-compat \
-  --base-url "https://api.example.com/v1" \
-  --oauth-issuer "https://auth.example.com" \
-  --oauth-client-id "crush" \
-  --oauth-scope openid \
-  --oauth-scope offline_access
+tool add jira_search \
+  --description "Search Jira issues with a JQL query" \
+  --param jql "The JQL query" --required jql \
+  --command 'jira issue list --jql "$jql"'
 ```
 
-Crush discovers the authorization and token endpoints from the issuer's
-well-known documents (RFC 8414) and supports the browser flow (PKCE plus a
-loopback redirect) and the device flow (RFC 8628); choose with
-`--oauth-flow auto|browser|device`, defaulting to auto. Tokens refresh
-automatically, exactly like the built-in subscription providers. When the server
-does not publish its endpoints, or registers a fixed redirect, declare them with
-`--oauth-auth-url`, `--oauth-token-url`, `--oauth-device-url`, and
-`--oauth-redirect-uri`.
+Plugins published on GitHub install with one command:
 
-Plugins are trusted code that runs at load time with your shell privileges,
-whether you dropped the file in yourself or installed it from a repository — so
-review one before you use it.
-
-```text
-$ crush usage
-AI Subscription
-  Models · Weekly Limit Remaining: 99% left · resets in 6d 22h
-  Models · Five Hour Limit Remaining: 99% left · resets in 3h 57m
+```bash
+crush plugin install example/crush-plugins
+crush plugin update
 ```
+
+> [!WARNING]
+> Plugins run as regular Bash with your permissions every time Crush starts.
+> Crush doesn't sandbox or review them, so only install plugins you trust and
+> read them first.
+
+See [docs/plugins](docs/plugins/README.md) for installing, writing, and
+publishing plugins.
 
 ### Amazon Bedrock
 

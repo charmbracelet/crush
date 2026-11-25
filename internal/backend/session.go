@@ -155,7 +155,11 @@ func (b *Backend) SetMCPServerConfigDisabled(ctx context.Context, workspaceID, n
 	if err != nil {
 		return err
 	}
-	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled, override)
+	if err := mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled, override); err != nil {
+		return err
+	}
+	announceConfigChanged(ws)
+	return nil
 }
 
 // SkillsDisabled returns the skills disabled for the given workspace's
@@ -199,7 +203,11 @@ func (b *Backend) SetSkillConfigDisabled(ctx context.Context, workspaceID, name 
 		return err
 	}
 
-	return ws.Cfg.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled)
+	if err := ws.Cfg.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled); err != nil {
+		return err
+	}
+	announceConfigChanged(ws)
+	return nil
 }
 
 // StartMCPServer starts the named MCP server for the given workspace even

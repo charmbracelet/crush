@@ -896,7 +896,11 @@ func (w *ClientWorkspace) MCPSetServerDisabled(ctx context.Context, name string,
 }
 
 func (w *ClientWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
-	return w.client.SetMCPServerConfigDisabled(ctx, w.workspaceID(), name, disabled)
+	err := w.client.SetMCPServerConfigDisabled(ctx, w.workspaceID(), name, disabled)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
 }
 
 func (w *ClientWorkspace) SkillsDisabled(ctx context.Context) ([]string, error) {
@@ -912,7 +916,11 @@ func (w *ClientWorkspace) SkillsEnabled(ctx context.Context) ([]string, error) {
 }
 
 func (w *ClientWorkspace) SkillSetConfigDisabled(ctx context.Context, name string, disabled bool) error {
-	return w.client.SetSkillConfigDisabled(ctx, w.workspaceID(), name, disabled)
+	err := w.client.SetSkillConfigDisabled(ctx, w.workspaceID(), name, disabled)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
 }
 
 func (w *ClientWorkspace) MCPStartServer(ctx context.Context, name string) error {

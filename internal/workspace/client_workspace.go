@@ -1191,6 +1191,7 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 		Debug:          ws.Debug,
 		PermissionMode: ws.PermissionMode,
 		Channels:       ws.Channels,
+		Prompts:        ws.Prompts,
 		Env:            ws.Env,
 		Version:        version.Version,
 	}

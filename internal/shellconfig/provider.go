@@ -79,6 +79,7 @@ var providerAddFlags = []flagSpec{
 	{name: "--oauth-client-id", child: "auth", jsonKey: "client_id", kind: flagString, op: opSetChildValue},
 	{name: "--oauth-client-secret", child: "auth", jsonKey: "client_secret", kind: flagString, op: opSetChildValue},
 	{name: "--oauth-scope", child: "auth", jsonKey: "scopes", kind: flagString, op: opAppendChild},
+	{name: "--oauth-refresh-scope", child: "auth", jsonKey: "refresh_scopes", kind: flagString, op: opAppendChild},
 	{name: "--oauth-auth-url", child: "auth", jsonKey: "authorize_url", kind: flagString, op: opSetChildValue},
 	{name: "--oauth-token-url", child: "auth", jsonKey: "token_url", kind: flagString, op: opSetChildValue},
 	{name: "--oauth-device-url", child: "auth", jsonKey: "device_auth_url", kind: flagString, op: opSetChildValue},
@@ -124,7 +125,7 @@ var providerAddFlags = []flagSpec{
 
 func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON] [--aws-auth-refresh CMD] [--oauth-issuer URL] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-flow auto|browser|device] [--oauth-auth-url URL] [--oauth-token-url URL] [--oauth-device-url URL] [--oauth-redirect-uri URI] [--oauth-callback-port N] [--oauth-param KEY VALUE]")
+		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON] [--aws-auth-refresh CMD] [--oauth-issuer URL] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-refresh-scope SCOPE] [--oauth-flow auto|browser|device] [--oauth-auth-url URL] [--oauth-token-url URL] [--oauth-device-url URL] [--oauth-redirect-uri URI] [--oauth-callback-port N] [--oauth-param KEY VALUE]")
 	}
 	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)

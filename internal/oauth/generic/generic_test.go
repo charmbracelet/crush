@@ -97,6 +97,67 @@ func TestRefreshToken(t *testing.T) {
 	require.Equal(t, "example-cli/2.1.0", ua)
 }
 
+// A refresh names the declared refresh scopes rather than the authorization
+// set. Anthropic's token endpoint answers the wider set with invalid_scope,
+// which would end every subscription session when its first token expires.
+func TestRefreshTokenSendsRefreshScopes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		spec oauth.AuthSpec
+		want string
+	}{
+		{
+			name: "json falls back to scopes",
+			spec: oauth.AuthSpec{TokenEncoding: "json", Scopes: []string{"a", "b"}},
+			want: "a b",
+		},
+		{
+			name: "json prefers refresh scopes",
+			spec: oauth.AuthSpec{TokenEncoding: "json", Scopes: []string{"org", "a", "b"}, RefreshScopes: []string{"a", "b"}},
+			want: "a b",
+		},
+		{
+			name: "form omits scopes by default",
+			spec: oauth.AuthSpec{Scopes: []string{"a", "b"}},
+			want: "",
+		},
+		{
+			name: "form sends declared refresh scopes",
+			spec: oauth.AuthSpec{Scopes: []string{"a", "b"}, RefreshScopes: []string{"a"}},
+			want: "a",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var scope string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Content-Type") == "application/json" {
+					var body map[string]string
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+					scope = body["scope"]
+				} else {
+					require.NoError(t, r.ParseForm())
+					scope = r.PostForm.Get("scope")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+			}))
+			defer server.Close()
+
+			spec := tt.spec
+			spec.ClientID = "crush"
+			spec.TokenURL = server.URL + "/token"
+			_, err := RefreshToken(context.Background(), &spec, "old-refresh")
+			require.NoError(t, err)
+			require.Equal(t, tt.want, scope)
+		})
+	}
+}
+
 // A provider that returns an ID token labels the signed-in account, which is
 // what the UI shows beside the provider.
 func TestTokenCarriesAccountFromIDToken(t *testing.T) {

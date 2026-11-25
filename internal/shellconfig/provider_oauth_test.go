@@ -20,6 +20,7 @@ func TestProviderOAuthFlags(t *testing.T) {
   --oauth-flow device \
   --oauth-scope openid \
   --oauth-scope offline_access \
+  --oauth-refresh-scope offline_access \
   --oauth-redirect-uri "http://127.0.0.1:8979/callback" \
   --oauth-callback-port 8979 \
   --oauth-param audience "https://api.example.com" \
@@ -43,6 +44,7 @@ func TestProviderOAuthFlags(t *testing.T) {
 
 	scopes := auth["scopes"].([]any)
 	require.Equal(t, []any{"openid", "offline_access"}, scopes)
+	require.Equal(t, []any{"offline_access"}, auth["refresh_scopes"])
 }
 
 // A provider whose token endpoint only answers a request identifying the

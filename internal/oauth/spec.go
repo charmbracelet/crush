@@ -43,6 +43,13 @@ type AuthSpec struct {
 	// tokens behind offline_access need it listed explicitly.
 	Scopes []string `json:"scopes,omitempty" jsonschema:"description=OAuth scopes to request,example=offline_access"`
 
+	// RefreshScopes are named on a refresh in place of Scopes. A refresh
+	// cannot widen what a token was granted, and some servers reject one
+	// that names a scope the authorization asked for but the account never
+	// received, so a provider whose consent screen grants a subset declares
+	// that subset here.
+	RefreshScopes []string `json:"refresh_scopes,omitempty" jsonschema:"description=OAuth scopes sent when refreshing a token instead of scopes"`
+
 	// Endpoint URLs. Any left empty are discovered from Issuer.
 	AuthorizeURL  string `json:"authorize_url,omitempty" jsonschema:"description=Authorization endpoint URL,format=uri"`
 	TokenURL      string `json:"token_url,omitempty" jsonschema:"description=Token endpoint URL,format=uri"`
@@ -85,6 +92,23 @@ func (s *AuthSpec) UsesOAuth() bool {
 		return false
 	}
 	return s.Kind == "" || strings.EqualFold(s.Kind, AuthKindOAuth)
+}
+
+// RefreshScopeList returns the scopes a refresh names. Declared refresh
+// scopes are always sent. Otherwise the authorization scopes are repeated,
+// but only to a JSON token endpoint: RFC 6749 servers treat an omitted scope
+// as the original grant, while the JSON-shaped ones expect it named.
+func (s *AuthSpec) RefreshScopeList() []string {
+	if s == nil {
+		return nil
+	}
+	if len(s.RefreshScopes) > 0 {
+		return s.RefreshScopes
+	}
+	if s.UsesJSONToken() {
+		return s.Scopes
+	}
+	return nil
 }
 
 // UsesJSONToken reports whether the token endpoint takes JSON bodies.

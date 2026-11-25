@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -308,6 +309,24 @@ func TestTranslateEvent_HostTheme(t *testing.T) {
 	got, ok = out.(HostThemeEvent)
 	require.True(t, ok, "expected HostThemeEvent, got %T", out)
 	require.Nil(t, got.Theme)
+}
+
+// TestTranslateEvent_ClientSessionIsQuiet verifies that the events telling
+// which session each client views are dropped without a warning: the
+// server sends them to every client whenever any client switches sessions.
+func TestTranslateEvent_ClientSessionIsQuiet(t *testing.T) {
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	out := w.translateEvent(pubsub.Event[proto.ClientSession]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.ClientSession{ClientID: "c1", SessionID: "s1"},
+	})
+	require.Nil(t, out)
+	require.Empty(t, logs.String())
 }
 
 func TestTranslateReauthenticateEvent(t *testing.T) {

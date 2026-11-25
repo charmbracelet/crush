@@ -166,11 +166,11 @@ func runPluginInstall(cmd *cobra.Command, args []string) error {
 	out := cmd.OutOrStdout()
 	switch {
 	case res.UpToDate:
-		fmt.Fprintf(out, "%s is already up to date at %s\n", src, res.Manifest.ShortCommit())
+		fmt.Fprintf(out, "%s is already up to date at %s\n", src, plugins.ShortSHA(res.Manifest.Commit))
 	case res.Previous != "":
-		fmt.Fprintf(out, "Updated %s: %s → %s\n", src, shortSHA(res.Previous), res.Manifest.ShortCommit())
+		fmt.Fprintf(out, "Updated %s: %s → %s\n", src, plugins.ShortSHA(res.Previous), plugins.ShortSHA(res.Manifest.Commit))
 	default:
-		fmt.Fprintf(out, "Installed %s at %s\n", src, res.Manifest.ShortCommit())
+		fmt.Fprintf(out, "Installed %s at %s\n", src, plugins.ShortSHA(res.Manifest.Commit))
 	}
 	if !res.UpToDate {
 		printFileChanges(out, res)
@@ -239,10 +239,10 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		if res.UpToDate {
-			fmt.Fprintf(out, "%s (%s) is up to date at %s\n", src, target.Scope, res.Manifest.ShortCommit())
+			fmt.Fprintf(out, "%s (%s) is up to date at %s\n", src, target.Scope, plugins.ShortSHA(res.Manifest.Commit))
 			continue
 		}
-		fmt.Fprintf(out, "%s (%s): %s → %s\n", src, target.Scope, shortSHA(res.Previous), res.Manifest.ShortCommit())
+		fmt.Fprintf(out, "%s (%s): %s → %s\n", src, target.Scope, plugins.ShortSHA(res.Previous), plugins.ShortSHA(res.Manifest.Commit))
 		printFileChanges(out, res)
 		reviewed = append(reviewed, res.Manifest.CommitURL)
 	}
@@ -299,7 +299,7 @@ func runPluginList(cmd *cobra.Command, args []string) error {
 		row := pluginRow{cells: [6]string{
 			install.Manifest.Source,
 			install.Manifest.Ref,
-			install.Manifest.ShortCommit(),
+			plugins.ShortSHA(install.Manifest.Commit),
 			humanTime(install.Manifest.UpdatedAt),
 			string(install.Scope),
 			"",
@@ -354,7 +354,7 @@ func runPluginUninstall(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		fmt.Fprintf(out, "Removed %s (%s) at %s from %s\n",
-			src, target.Scope, m.ShortCommit(), home.Short(target.Root))
+			src, target.Scope, plugins.ShortSHA(m.Commit), home.Short(target.Root))
 	}
 	return nil
 }
@@ -457,13 +457,6 @@ func printTrustNote(out io.Writer, commits []string) {
 		}
 		fmt.Fprintf(out, "  %s\n", commitStyle().Render(url))
 	}
-}
-
-func shortSHA(sha string) string {
-	if len(sha) <= 8 {
-		return sha
-	}
-	return sha[:8]
 }
 
 func errorText(err error) string {

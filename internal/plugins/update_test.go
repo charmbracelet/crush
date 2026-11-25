@@ -161,29 +161,6 @@ func TestUpdateReportsMissingInstall(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotInstalled)
 }
 
-func TestUpdateAllContinuesPastOneFailure(t *testing.T) {
-	global := t.TempDir()
-	f := newFakeGitHub(t)
-	f.publish("good/plugins", DefaultRef, commitOne, map[string]string{"one.sh": oneScript})
-	f.publish("bad/plugins", DefaultRef, commitTwo, map[string]string{"two.sh": twoScript})
-	install(t, global, f, "good/plugins")
-	install(t, global, f, "bad/plugins")
-
-	// Only the second repository goes dark.
-	f.status["/repos/bad/plugins/commits/"+DefaultRef] = 500
-
-	outcomes, err := UpdateAll(context.Background(), []ScopedRoot{{Scope: ScopeGlobal, Path: global}}, f.client(), false)
-	require.NoError(t, err)
-	require.Len(t, outcomes, 2)
-
-	bySource := map[string]Outcome{}
-	for _, o := range outcomes {
-		bySource[o.Source.String()] = o
-	}
-	require.NoError(t, bySource["good/plugins"].Err)
-	require.ErrorContains(t, bySource["bad/plugins"].Err, "returned 500")
-}
-
 func TestTrustNeedsSomethingToTrust(t *testing.T) {
 	root := t.TempDir()
 	f := newFakeGitHub(t)

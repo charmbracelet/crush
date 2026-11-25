@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,10 +16,20 @@ import (
 
 const acpLLMDocIndexURL = "https://agentclientprotocol.com/llms.txt"
 
-func fetchACPDocs() error {
+// get issues a GET with the caller's context, so a cancelled run does not leave
+// the download loop hanging on an in-flight request.
+func get(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
+func fetchACPDocs(ctx context.Context) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	resp, err := client.Get(acpLLMDocIndexURL)
+	resp, err := get(ctx, client, acpLLMDocIndexURL)
 	if err != nil {
 		return fmt.Errorf("fetching LLM index: %w", err)
 	}
@@ -79,7 +90,7 @@ func fetchACPDocs() error {
 			continue
 		}
 
-		docResp, err := client.Get(acpDoc)
+		docResp, err := get(ctx, client, acpDoc)
 		if err != nil {
 			fmt.Printf("\n[%d/%d] SKIP download %s: %v\n", i+1, len(acpDocs), acpDoc, err)
 			skipped++
@@ -110,7 +121,7 @@ func fetchACPDocs() error {
 }
 
 func main() {
-	if err := fetchACPDocs(); err != nil {
+	if err := fetchACPDocs(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -45,9 +45,10 @@ type Client struct {
 	sessionChs map[acp.SessionId]chan acp.SessionUpdate
 }
 
-// NewClient spawns an external ACP agent process and returns a Client ready
-// to drive it. Call Start before using other methods.
-func NewClient(agentPath string, args []string, opts ...ClientOption) (*Client, error) {
+// NewClient prepares an external ACP agent process and returns a Client ready
+// to drive it. The context bounds the subprocess, so both the caller and its
+// cancellation propagate to the agent. Call Start before using other methods.
+func NewClient(ctx context.Context, agentPath string, args []string, opts ...ClientOption) (*Client, error) {
 	c := &Client{
 		cwd:        ".",
 		sessionChs: make(map[acp.SessionId]chan acp.SessionUpdate),
@@ -56,7 +57,7 @@ func NewClient(agentPath string, args []string, opts ...ClientOption) (*Client, 
 		opt(c)
 	}
 
-	cmd := exec.Command(agentPath, args...)
+	cmd := exec.CommandContext(ctx, agentPath, args...)
 	cmd.Stderr = os.Stderr
 
 	in, err := cmd.StdinPipe()

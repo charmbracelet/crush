@@ -134,12 +134,15 @@ func (s *stubMessageStore) FlushAll(_ context.Context) error { return nil }
 func (s *stubSessionService) MCPDisabledServers(_ context.Context) ([]string, error) {
 	return nil, nil
 }
+
 func (s *stubSessionService) MCPServersEnabled(_ context.Context) ([]string, error) {
 	return nil, nil
 }
+
 func (s *stubSessionService) SetMCPServerDisabled(_ context.Context, _ string, _ bool) error {
 	return nil
 }
+
 func (s *stubSessionService) SetChannel(_ context.Context, sessionID, _ string) (session.Session, error) {
 	return session.Session{ID: sessionID}, nil
 }

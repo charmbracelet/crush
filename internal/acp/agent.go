@@ -1200,7 +1200,7 @@ func buildPrompt(blocks []acp.ContentBlock) (string, []message.Attachment) {
 			if label == "" {
 				label = "unknown type"
 			}
-			sb.WriteString(fmt.Sprintf("[resource: %s: %d bytes of %s]", blob.Uri, len(data), label))
+			fmt.Fprintf(&sb, "[resource: %s: %d bytes of %s]", blob.Uri, len(data), label)
 		}
 	}
 	return sb.String(), attachments

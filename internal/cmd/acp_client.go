@@ -47,7 +47,10 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 	log := slog.Default()
 	log.Info("starting ACP client", "agent", agentPath, "args", agentArgs)
 
-	cli, err := acp.NewClient(agentPath, agentArgs,
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
+
+	cli, err := acp.NewClient(ctx, agentPath, agentArgs,
 		acp.WithCWD(cwd),
 		acp.WithAutoAllowPermissions(),
 	)
@@ -55,9 +58,6 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("create client: %w", err)
 	}
 	defer cli.Close()
-
-	ctx, cancel := context.WithCancel(cmd.Context())
-	defer cancel()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

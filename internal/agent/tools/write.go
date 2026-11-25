@@ -81,7 +81,7 @@ func NewWriteTool(
 						ToolName:    WriteToolName,
 						Action:      "write",
 						Description: fmt.Sprintf("Write file outside the session root set: %s", filePath),
-						Params:      WritePermissionsParams{
+						Params: WritePermissionsParams{
 							FilePath:   filePath,
 							OldContent: "",
 							NewContent: params.Content,

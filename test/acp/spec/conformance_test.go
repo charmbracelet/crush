@@ -1167,6 +1167,7 @@ func (s *stubPermSvc) SetPermissionMode(_ permission.PermissionMode) {}
 func (s *stubPermSvc) PermissionMode() permission.PermissionMode {
 	return permission.PermissionModeNormal
 }
+
 func (s *stubPermSvc) SubscribeModeChanges(_ context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
 	return make(chan pubsub.Event[permission.ModeChangedEvent])
 }

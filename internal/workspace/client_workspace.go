@@ -286,8 +286,8 @@ func (w *ClientWorkspace) AgentRunChannel(ctx context.Context, channel, sessionI
 	return errors.New("channel-originated runs are injected server-side in client/server mode")
 }
 
-func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), _ bool) (proto.ShellCommandResponse, error) {
-	return w.client.RunShellCommand(ctx, w.workspaceID(), sessionID, command, termWidth)
+func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), isFirstMessage bool) (proto.ShellCommandResponse, error) {
+	return w.client.RunShellCommand(ctx, w.workspaceID(), sessionID, command, termWidth, isFirstMessage)
 }
 
 func (w *ClientWorkspace) AgentCancel(sessionID string) {

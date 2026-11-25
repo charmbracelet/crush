@@ -192,6 +192,17 @@ func (s *service) GetLast(ctx context.Context) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	if dbSession.ParentSessionID.Valid {
+		// ListSessions returns only top-level sessions, newest first.
+		topLevelSessions, err := s.q.ListSessions(ctx)
+		if err != nil {
+			return Session{}, err
+		}
+		if len(topLevelSessions) == 0 {
+			return Session{}, sql.ErrNoRows
+		}
+		dbSession = topLevelSessions[0]
+	}
 	session := s.fromDBItem(dbSession)
 	s.applyEstimatedUsageState(&session)
 	return session, nil

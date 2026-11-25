@@ -263,19 +263,17 @@ parameter such as `audience` are covered by `--oauth-redirect-uri`,
 `--oauth-param`. Confidential clients whose server expects HTTP Basic auth
 set `--oauth-secret-basic true`.
 
-Some token endpoints only answer a request identifying the client they know,
-down to its User-Agent, and reject anything else with an opaque "invalid
-request format". `--oauth-token-header KEY VALUE` (repeatable) declares the
-headers those calls carry, so the plugin supplies the identity rather than
-Crush. A server that takes JSON bodies instead of the RFC 6749 form encoding
+Some token endpoints need extra headers on every call, such as a tenant or an
+API version. `--oauth-token-header KEY VALUE` (repeatable) declares them. A
+server that takes JSON bodies instead of the RFC 6749 form encoding
 sets `--oauth-token-encoding json`; with JSON, the authorization-code exchange
 also carries the flow's state, which those servers expect:
 
 ```bash
-provider add example-sub \
-  --type openai-compat \
+provider add example \
+  --type completions \
   --base-url "https://api.example.com/v1" \
-  --oauth-token-header User-Agent "example-cli/2.1.0" \
+  --oauth-token-header X-Tenant "example-tenant" \
   --oauth-token-encoding json
 ```
 
@@ -311,9 +309,9 @@ provider add example \
 
 ```text
 $ crush usage
-Google AI Subscription
-  Gemini Models · Weekly Limit Remaining: 99% left · resets in 6d 22h
-  Gemini Models · Five Hour Limit Remaining: 99% left · resets in 3h 57m
+Example Plan
+  Standard Models · Weekly Limit Remaining: 99% left · resets in 6d 22h
+  Standard Models · Five Hour Limit Remaining: 99% left · resets in 3h 57m
 ```
 
 The response is walked with [gjson](https://github.com/tidwall/gjson) paths.
@@ -334,8 +332,7 @@ that field with `--usage-spent-percent`, as a whole percentage from 0 to 100,
 and the meter shows its complement. The unit is in the flag name because the
 number alone cannot carry it: a plan 1% spent and a plan fully spent are both
 written as `1`. The provider's credential (its login token or API key) and
-`--extra-header` values are sent with the request, which matters for gateways
-that only answer a request identifying a supported client.
+`--extra-header` values are sent with the request.
 
 The same figures appear in the UI while the model is in use: the header
 shows a compact `◆ 5h 99% · weekly 99%` for the current model, and the
@@ -348,8 +345,8 @@ display shows the two limits that apply rather than every limit on the plan:
 provider add example \
   --usage-url "https://api.example.com/quota" \
   --usage-groups groups \
-  --usage-model-group gemini "Gemini" \
-  --usage-model-group cld "Claude"
+  --usage-model-group fast "Fast models" \
+  --usage-model-group pro "Pro models"
 ```
 
 A provider with one plan-wide allowance needs no mapping at all: every meter
@@ -375,12 +372,16 @@ and returns any of `url` (the request is re-addressed, and the Host header with
 it), `headers` to set, `drop_headers` to remove, and `body` to replace:
 
 ```bash
-provider add example   --type google   --base-url "https://api.example.com/"   --gateway-request '
-      .url as $u | .body as $b | .token as $t | .request_id as $id
-      | {url: ("https://gateway.example.com/v1internal" + ($u | capture(":/(?<v>[a-zA-Z]+)$").v)),
+provider add example \
+  --type google \
+  --base-url "https://api.example.com/" \
+  --gateway-request '
+      .body as $b | .token as $t | .request_id as $id
+      | {url: "https://gateway.example.com/v1/generate",
          headers: {Authorization: ("Bearer " + $t), "Content-Type": "application/json"},
-         drop_headers: ["x-goog-api-key"],
-         body: {model: $b.model, requestId: $id, request: $b}}'   --gateway-response '(.body.response // .body)'
+         drop_headers: ["x-api-key"],
+         body: {model: $b.model, requestId: $id, request: $b}}' \
+  --gateway-response '(.body.response // .body)'
 ```
 
 The response program runs once per reply: for a plain body it receives
@@ -404,9 +405,8 @@ with a per-request id, cannot do either in plain jq. Catalog programs speak the
 same dialect.
 
 `--gateway-http1 true` stops the transport negotiating HTTP/2, which Go does
-by default against servers that offer it. A provider being addressed as some
-other client's own is usually expected to sound like it, and the JS runtimes
-most of these clients ship on speak HTTP/1.1.
+by default against servers that offer it. Use it for a gateway that only works
+over HTTP/1.1.
 
 #### Model catalog
 
@@ -424,9 +424,9 @@ objects in the same shape a config file uses for a model — `id`, `name`,
 entry with no id is skipped.
 
 ```bash
-provider add example --type anthropic --base-url "https://api.anthropic.com" \
+provider add example --type messages --base-url "https://api.example.com" \
   --catalog-url "/v1/models" \
-  --catalog-header anthropic-version "2023-06-01" \
+  --catalog-header X-Api-Version "2025-01-01" \
   --catalog-program '
     .data | map({
       id,
@@ -453,7 +453,7 @@ default effort costs you nothing else about it:
 
 ```bash
 provider add example --catalog-url "/v1/models" --catalog-program '…'
-model add example/claude-opus-5-5 --reasoning-effort medium
+model add example/big-model --reasoning-effort medium
 ```
 
 Booleans are the exception: a declaration can add a capability, not veto one,
@@ -482,8 +482,8 @@ yourself — a plugin is Bash, so it can fetch a price list and pass the flags:
 provider add example --flat-rate true --usage-url "https://api.example.com/quota"
 
 # Prices are just configuration: fetch them at load time if you have a source.
-price=$(curl -fsSL "https://example.com/prices/gemini-3.8-flash.json" | jq -r .input)
-model add example/gemini-3.8-flash --name "Gemini 3.8 Flash" --price-input "$price"
+price=$(curl -fsSL "https://example.com/prices/code-1.json" | jq -r .input)
+model add example/code-1 --name "Code 1" --price-input "$price"
 ```
 
 ### plugins
@@ -502,6 +502,9 @@ overrides a global one, and your own crushrc overrides both, so a plugin never
 traps a project. A failing plugin fails the load, exactly like a failing
 crushrc — and like a crushrc, a plugin is trusted code with your shell
 privileges: review it before you install it.
+
+For a gentler walkthrough of writing and installing plugins, see
+[docs/plugins](../plugins/README.md).
 
 `crush plugin` installs them from GitHub instead of by hand:
 
@@ -526,11 +529,6 @@ A provider that declares an OAuth flow is a sign-in candidate until
 `crush login <id>` stores its token: it appears in the model picker but is
 not treated as a configured provider, so Crush asks you to authenticate
 rather than selecting it with no credential.
-
-One declared this way can carry any OAuth flow and quota report: for
-instance a Google AI subscription (Antigravity) provider, with Google's
-OAuth client, the gateway's models, and the client secret supplied through
-an environment variable the plugin expands.
 
 ### model
 

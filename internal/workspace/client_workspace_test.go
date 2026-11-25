@@ -893,6 +893,38 @@ func TestClientWorkspace_RecoversFromWorkspaceGone(t *testing.T) {
 	}
 }
 
+// TestClientWorkspace_ReportsLandingScreenOnAttach covers a window that
+// opens on the landing screen: it must tell the server it views no session
+// as soon as its event stream attaches. The server sends a client that never
+// reported a session the permission and question prompts of every session.
+func TestClientWorkspace_ReportsLandingScreenOnAttach(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	srv := &recoveryServer{liveID: "ws-1"}
+	c := srv.start(t)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/landing"})
+
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(func(tea.Msg) {})
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		var posts []string
+		srv.snapshot(func(s *recoveryServer) { posts = append(posts, s.sessionPosts...) })
+		return len(posts) > 0 && posts[0] == ""
+	}, 3*time.Second, 5*time.Millisecond,
+		"the first attach must report the landing screen")
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
 // TestClientWorkspace_ResyncsAfterPlainStreamDrop covers the quieter
 // failure: the stream closes and the very next subscribe succeeds. That
 // used to be treated as a non-event, so the TUI silently showed state

@@ -3,8 +3,10 @@ package model
 import (
 	"context"
 	"image"
+	"slices"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
@@ -508,6 +510,27 @@ func TestToggleSidebarKeyBinding(t *testing.T) {
 		}
 	}
 	require.Contains(t, fullHelp, "toggle sidebar")
+}
+
+func TestInitializeHelpListsQuitOnce(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.keyMap = DefaultKeyMap()
+	u.attachments = attachments.New(nil, attachments.Keymap{})
+	u.state = uiInitialize
+
+	quits := func(binds []key.Binding) int {
+		n := 0
+		for _, b := range binds {
+			if b.Help().Desc == "quit" {
+				n++
+			}
+		}
+		return n
+	}
+	require.Equal(t, 1, quits(u.ShortHelp()))
+	require.Equal(t, 1, quits(slices.Concat(u.FullHelp()...)))
 }
 
 func TestHandlePlanHandoff_NoMarkerNoInline(t *testing.T) {

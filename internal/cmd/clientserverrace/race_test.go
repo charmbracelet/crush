@@ -5,6 +5,9 @@
 // It lives in its own directory so it can build even if other test
 // files in internal/cmd are temporarily broken — this test only needs
 // the binary, not the cmd package.
+//
+// The one-time build gets five minutes; set CRUSH_RACE_BUILD_TIMEOUT to
+// a positive Go duration (e.g. "90s") to change that budget.
 package clientserverrace_test
 
 import (
@@ -21,6 +24,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // readinessErrSubstr is the user-visible error string emitted by
@@ -40,6 +45,34 @@ const numClients = 8
 // subscribing to server events) and we'll cancel it. The race we care
 // about is observable strictly within ensureServer.
 const clientTimeout = 15 * time.Second
+
+func TestBuildTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "Default", value: "", want: 5 * time.Minute},
+		{name: "Positive", value: "90s", want: 90 * time.Second},
+		{name: "Malformed", value: "soon", wantErr: true},
+		{name: "Zero", value: "0s", wantErr: true},
+		{name: "Negative", value: "-1m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CRUSH_RACE_BUILD_TIMEOUT", tt.value)
+
+			got, err := buildTimeout()
+			if tt.wantErr {
+				require.ErrorContains(t, err, "CRUSH_RACE_BUILD_TIMEOUT")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestClientServerSpawnRace(t *testing.T) {
 	if testing.Short() {
@@ -280,11 +313,32 @@ func repoRootFromTest(t *testing.T) string {
 	}
 }
 
+func buildTimeout() (time.Duration, error) {
+	const env = "CRUSH_RACE_BUILD_TIMEOUT"
+	v := os.Getenv(env)
+	if v == "" {
+		return 5 * time.Minute, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a Go duration (e.g. \"90s\"): %w", env, v, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s=%q must be a positive duration", env, v)
+	}
+	return d, nil
+}
+
 // buildCrushBinary builds the crush binary once at the start of the
 // test and returns the absolute path. Subsequent t.Cleanup removes
 // the built artefact.
 func buildCrushBinary(t *testing.T, repoRoot string) string {
 	t.Helper()
+
+	timeout, err := buildTimeout()
+	if err != nil {
+		t.Fatalf("invalid build timeout: %v", err)
+	}
 
 	binDir, err := os.MkdirTemp("", "crush-race-bin-")
 	if err != nil {
@@ -294,7 +348,7 @@ func buildCrushBinary(t *testing.T, repoRoot string) string {
 
 	binPath := filepath.Join(binDir, "crush")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")

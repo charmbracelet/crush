@@ -72,6 +72,13 @@
           "type": "array",
           "description": "OAuth scopes to request"
         },
+        "refresh_scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "OAuth scopes sent when refreshing a token instead of scopes"
+        },
         "authorize_url": {
           "type": "string",
           "format": "uri",

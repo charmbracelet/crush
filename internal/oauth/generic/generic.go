@@ -171,8 +171,8 @@ func RefreshToken(ctx context.Context, spec *oauth.AuthSpec, refreshToken string
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 	}
-	if spec.UsesJSONToken() && len(spec.Scopes) > 0 {
-		vals.Set("scope", strings.Join(spec.Scopes, " "))
+	if scopes := spec.RefreshScopeList(); len(scopes) > 0 {
+		vals.Set("scope", strings.Join(scopes, " "))
 	}
 	token, err := requestToken(ctx, spec, endpoints.TokenURL, vals)
 	if err != nil {

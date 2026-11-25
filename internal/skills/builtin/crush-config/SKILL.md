@@ -84,6 +84,8 @@ OAuth sign-in flags — any of them marks the provider as one `crush login
 <id>` can authenticate. `--oauth-issuer` plus `--oauth-client-id` are enough
 for a server that publishes RFC 8414 metadata; the rest tune the flow:
 `--oauth-flow auto|browser|device`, `--oauth-scope S` (repeatable),
+`--oauth-refresh-scope S` (repeatable; the scopes a refresh names when
+they differ from what sign-in requests),
 `--oauth-client-secret`, `--oauth-auth-url`, `--oauth-token-url`,
 `--oauth-device-url`, `--oauth-redirect-uri`, `--oauth-callback-port N`,
 `--oauth-param KEY VALUE` (repeatable), `--oauth-secret-basic BOOL`,

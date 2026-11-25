@@ -166,6 +166,7 @@ Flags:
       --oauth-client-id string      OAuth client ID
       --oauth-client-secret string  OAuth client secret (confidential clients)
       --oauth-scope string          request a scope (repeatable)
+      --oauth-refresh-scope string  scope a refresh names instead (repeatable)
       --oauth-auth-url URL          authorization endpoint
       --oauth-token-url URL         token endpoint
       --oauth-device-url URL        device authorization endpoint (RFC 8628)

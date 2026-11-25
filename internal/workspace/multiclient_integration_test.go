@@ -2,8 +2,12 @@ package workspace_test
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -181,6 +185,80 @@ loop:
 		}
 	}
 	require.True(t, gotConfigChanged, "expected ConfigChanged event over SSE")
+}
+
+// TestClientWorkspace_GlobalTogglesRefreshCaches covers the Global scope
+// of the skill and MCP toggle dialogs. The toggling client must read its
+// change back as soon as the call returns, or the dialog re-reads the
+// stale config and flips the row back, and a sibling client must pick it
+// up from the ConfigChanged event.
+func TestClientWorkspace_GlobalTogglesRefreshCaches(t *testing.T) {
+	const name = "toggle-probe"
+	tests := []struct {
+		name     string
+		toggle   func(context.Context, *workspace.ClientWorkspace) error
+		disabled func(*config.Config) bool
+	}{
+		{
+			name: "skill",
+			toggle: func(ctx context.Context, w *workspace.ClientWorkspace) error {
+				return w.SkillSetConfigDisabled(ctx, name, true)
+			},
+			disabled: func(cfg *config.Config) bool {
+				return slices.Contains(cfg.Options.DisabledSkills, name)
+			},
+		},
+		{
+			name: "mcp",
+			toggle: func(ctx context.Context, w *workspace.ClientWorkspace) error {
+				return w.MCPSetServerConfigDisabled(ctx, name, true)
+			},
+			disabled: func(cfg *config.Config) bool {
+				return cfg.MCP[name].Disabled
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xdgIsolate(t)
+			t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+			// The command does not exist, so startup only records an
+			// error and no MCP server ever runs.
+			globalCfg := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "crush", "crush.json")
+			require.NoError(t, os.MkdirAll(filepath.Dir(globalCfg), 0o755))
+			require.NoError(t, os.WriteFile(globalCfg, fmt.Appendf(nil,
+				`{"mcp": {%q: {"type": "stdio", "command": "crush-toggle-probe-missing"}}}`, name), 0o644))
+
+			rt := newRuntimeServer(t)
+			cwd, dataDir := t.TempDir(), t.TempDir()
+			cA, cB := rt.newClient(t, cwd), rt.newClient(t, cwd)
+			ctx := t.Context()
+
+			wsProtoA, err := cA.CreateWorkspace(ctx, proto.Workspace{Path: cwd, DataDir: dataDir})
+			require.NoError(t, err)
+			wsProtoB, err := cB.CreateWorkspace(ctx, proto.Workspace{Path: cwd, DataDir: dataDir})
+			require.NoError(t, err)
+			require.Equal(t, wsProtoA.ID, wsProtoB.ID)
+			wsA := workspace.NewClientWorkspace(cA, *wsProtoA)
+			wsB := workspace.NewClientWorkspace(cB, *wsProtoB)
+
+			// Only B listens, so A can see its own toggle only through
+			// the refresh that follows the call.
+			evc, err := cB.SubscribeEvents(ctx, wsProtoB.ID)
+			require.NoError(t, err)
+			go wsB.ConsumeEventsForTest(evc, func(tea.Msg) {})
+
+			require.False(t, tt.disabled(wsA.Config()))
+			require.False(t, tt.disabled(wsB.Config()))
+
+			require.NoError(t, tt.toggle(ctx, wsA))
+			require.True(t, tt.disabled(wsA.Config()),
+				"the toggling client must see its global toggle at once")
+			require.Eventually(t, func() bool { return tt.disabled(wsB.Config()) },
+				3*time.Second, 25*time.Millisecond,
+				"a sibling client must see the global toggle via ConfigChanged")
+		})
+	}
 }
 
 // -- Concurrent session lifecycle --

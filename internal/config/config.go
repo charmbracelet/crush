@@ -208,7 +208,7 @@ func (c *ProviderConfig) HasAPIKey(resolver VariableResolver) bool {
 // UsesOAuth reports whether the provider signs in through an OAuth flow
 // declared in its config rather than a static API key.
 func (c *ProviderConfig) UsesOAuth() bool {
-	return c != nil && c.Auth.UsesOAuth()
+	return c != nil && c.Auth.IsOAuth()
 }
 
 type MCPType string

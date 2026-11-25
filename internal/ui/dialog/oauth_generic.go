@@ -2,7 +2,8 @@ package dialog
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -25,22 +26,37 @@ func NewOAuthGeneric(
 	modelType config.SelectedModelType,
 	auth *oauth.AuthSpec,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, modelType, &OAuthGeneric{
-		spec:    auth,
-		display: provider.Name,
-	})
+	return newOAuth(com, isOnboarding, provider, model, modelType, newOAuthGeneric(auth, provider.Name))
 }
 
 // OAuthGeneric drives a spec-declared flow through the shared OAuth dialog.
+// The dialog's lifetime is one context, made with the dialog: cancelling it
+// aborts discovery, polling and pasted-code exchange, and closes the flow
+// however far along it got. No command writes a field another one reads.
 type OAuthGeneric struct {
-	spec       *oauth.AuthSpec
-	display    string
-	browser    *generic.BrowserFlow
-	device     *generic.DeviceFlow
-	cancelFunc context.CancelFunc
+	spec    *oauth.AuthSpec
+	display string
+	ctx     context.Context
+	cancel  context.CancelFunc
+	// start runs the flow once; every command that needs the flow calls it
+	// and gets the same result.
+	start func() (*startedFlow, error)
+}
+
+// startedFlow is a running flow with the prompt that opened it.
+type startedFlow struct {
+	flow   generic.Flow
+	prompt generic.Prompt
 }
 
 var _ OAuthProvider = (*OAuthGeneric)(nil)
+
+func newOAuthGeneric(spec *oauth.AuthSpec, display string) *OAuthGeneric {
+	m := &OAuthGeneric{spec: spec, display: display}
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+	m.start = sync.OnceValues(m.startFlow)
+	return m
+}
 
 func (m *OAuthGeneric) name() string {
 	if m.display != "" {
@@ -49,102 +65,56 @@ func (m *OAuthGeneric) name() string {
 	return "the provider"
 }
 
-// initiateAuth starts the declared grant. A browser flow is opened first,
-// because it needs a local listener that may fail, and the device flow
-// takes over when it does.
-func (m *OAuthGeneric) initiateAuth() tea.Msg {
-	if m.spec.FlowMode() == oauth.AuthFlowDevice {
-		return m.startDevice(context.Background())
-	}
-
-	browser, err := generic.StartBrowser(m.spec, m.name())
-	if err != nil {
-		if m.spec.FlowMode() == oauth.AuthFlowBrowser {
-			return ActionOAuthErrored{Error: err}
-		}
-		// No loopback listener available: the device flow needs no
-		// callback, so it can carry the sign-in.
-		return m.startDevice(context.Background())
-	}
-	m.browser = browser
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+// startFlow starts the grant the spec selects; generic owns the fallback.
+func (m *OAuthGeneric) startFlow() (*startedFlow, error) {
+	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
-	startURL, _, err := browser.Start(ctx)
+	flow, prompt, err := generic.StartFlow(ctx, m.spec, m.name())
 	if err != nil {
+		return nil, err
+	}
+	// A flow outliving its dialog would keep serving its callback port.
+	context.AfterFunc(m.ctx, flow.Close)
+	return &startedFlow{flow: flow, prompt: prompt}, nil
+}
+
+func (m *OAuthGeneric) initiateAuth() tea.Msg {
+	started, err := m.start()
+	if err != nil {
+		if m.ctx.Err() != nil {
+			return nil // dismissed, don't report error.
+		}
 		return ActionOAuthErrored{Error: err}
 	}
-	return ActionInitiateOAuth{VerificationURL: startURL}
-}
-
-// startDevice requests a device authorization and shows its code.
-func (m *OAuthGeneric) startDevice(ctx context.Context) tea.Msg {
-	flow := generic.StartDevice(m.spec)
-	verifyURL, userCode, err := flow.Start(ctx)
-	if err != nil {
-		return ActionOAuthErrored{
-			Error: fmt.Errorf("failed to start authorization: %w", err),
-		}
-	}
-	m.device = flow
-	authorization := flow.Authorization()
+	prompt := started.prompt
 	return ActionInitiateOAuth{
-		DeviceCode:      authorization.DeviceCode,
-		UserCode:        userCode,
-		VerificationURL: verifyURL,
-		ExpiresIn:       authorization.ExpiresIn,
-		Interval:        authorization.Interval,
+		DeviceCode:      prompt.DeviceCode,
+		UserCode:        prompt.UserCode,
+		VerificationURL: prompt.URL,
+		ExpiresIn:       prompt.ExpiresIn,
+		Interval:        prompt.Interval,
 	}
 }
 
-func (m *OAuthGeneric) startPolling(deviceCode string, expiresIn int) tea.Cmd {
+func (m *OAuthGeneric) startPolling(string, int) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancelFunc = cancel
-
-		if deviceCode != "" {
-			if m.device == nil {
-				return ActionOAuthErrored{Error: fmt.Errorf("no device flow in progress")}
-			}
-			token, err := m.device.Wait(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil // cancelled, don't report error.
-				}
-				return ActionOAuthErrored{Error: err}
-			}
-			return ActionCompleteOAuth{Token: token}
-		}
-
-		if m.browser == nil {
-			return ActionOAuthErrored{Error: fmt.Errorf("no browser flow in progress")}
-		}
-		token, err := m.browser.Wait(ctx)
-		if err == nil {
-			return ActionCompleteOAuth{Token: token}
-		}
-		if ctx.Err() != nil {
-			return nil // cancelled, don't report error.
-		}
-		if m.spec.FlowMode() == oauth.AuthFlowBrowser {
+		started, err := m.start()
+		if err != nil {
 			return ActionOAuthErrored{Error: err}
 		}
-
-		// The browser callback never landed: offer the device flow, whose
-		// code the user enters on the provider's verification page.
-		m.browser.Close()
-		m.browser = nil
-		return m.startDevice(ctx)
+		token, err := started.flow.Wait(m.ctx)
+		if err != nil {
+			if m.ctx.Err() != nil || errors.Is(err, generic.ErrFlowClosed) {
+				return nil // cancelled, don't report error.
+			}
+			return ActionOAuthErrored{Error: err}
+		}
+		return ActionCompleteOAuth{Token: token}
 	}
 }
 
 func (m *OAuthGeneric) stopPolling() tea.Msg {
-	if m.cancelFunc != nil {
-		m.cancelFunc()
-	}
-	if m.browser != nil {
-		m.browser.Close()
-	}
+	m.cancel()
 	return nil
 }
 
@@ -156,15 +126,17 @@ func (m *OAuthGeneric) supportsCodeEntry() bool {
 
 func (m *OAuthGeneric) submitCode(input string) tea.Cmd {
 	return func() tea.Msg {
-		if m.browser == nil {
-			return ActionOAuthErrored{Error: fmt.Errorf("no browser flow in progress")}
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancelFunc = cancel
-
-		token, err := m.browser.CompleteWithCode(ctx, input)
+		started, err := m.start()
 		if err != nil {
-			if ctx.Err() != nil {
+			return ActionOAuthErrored{Error: err}
+		}
+		completer, ok := started.flow.(generic.CodeCompleter)
+		if !ok {
+			return ActionOAuthErrored{Error: errors.New("this sign-in has no code to paste")}
+		}
+		token, err := completer.CompleteWithCode(m.ctx, input)
+		if err != nil {
+			if m.ctx.Err() != nil {
 				return nil // cancelled, don't report error.
 			}
 			return ActionOAuthErrored{Error: err}

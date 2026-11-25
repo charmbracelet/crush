@@ -5,6 +5,7 @@
 package generic
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,14 +38,40 @@ type metadata struct {
 	DeviceAuthorizationEndpoint string `json:"device_authorization_endpoint"`
 }
 
-// Resolve returns the endpoints for the spec. Fields set on the spec win;
-// missing ones are discovered from the issuer's well-known documents.
-// Resolve returns the endpoints for the spec. Fields set on the spec win;
-// missing ones are discovered from the issuer's well-known documents. Only
-// the token endpoint is required outright: a refresh needs nothing else,
-// while the flows report a missing authorization or device endpoint when
-// they start.
-func Resolve(ctx context.Context, spec *oauth.AuthSpec) (Endpoints, error) {
+// Grant is the operation endpoints are resolved for; each needs a different
+// subset, and only that subset is ever discovered.
+type Grant int
+
+const (
+	// GrantRefresh needs only the token endpoint.
+	GrantRefresh Grant = iota
+	// GrantBrowser needs the authorization and token endpoints.
+	GrantBrowser
+	// GrantDevice needs the device authorization and token endpoints.
+	GrantDevice
+	// GrantAuto needs the token endpoint and either grant's endpoint.
+	GrantAuto
+)
+
+// missing names the configuration the grant still lacks, or "" when the
+// endpoints cover it.
+func (e Endpoints) missing(grant Grant) string {
+	switch {
+	case e.TokenURL == "":
+		return "token_url"
+	case grant == GrantBrowser && e.AuthorizeURL == "":
+		return "authorize_url"
+	case grant == GrantDevice && e.DeviceAuthURL == "":
+		return "device_auth_url"
+	case grant == GrantAuto && e.AuthorizeURL == "" && e.DeviceAuthURL == "":
+		return "authorize_url or device_auth_url"
+	}
+	return ""
+}
+
+// Resolve returns the endpoints the grant needs. Fields set on the spec win,
+// and the issuer is only consulted when they do not cover the grant.
+func Resolve(ctx context.Context, spec *oauth.AuthSpec, grant Grant) (Endpoints, error) {
 	if spec == nil {
 		return Endpoints{}, errNoSpec
 	}
@@ -53,43 +80,38 @@ func Resolve(ctx context.Context, spec *oauth.AuthSpec) (Endpoints, error) {
 		TokenURL:      spec.TokenURL,
 		DeviceAuthURL: spec.DeviceAuthURL,
 	}
-	if endpoints.TokenURL != "" &&
-		(endpoints.AuthorizeURL != "" || endpoints.DeviceAuthURL != "") {
+	gap := endpoints.missing(grant)
+	if gap == "" {
 		return endpoints, nil
 	}
-
-	// Without an issuer there is nothing to look up, so the written-down
-	// endpoints are all there is.
 	if spec.Issuer == "" {
-		if endpoints.TokenURL == "" {
-			return Endpoints{}, fmt.Errorf(
-				"provider OAuth configuration needs an issuer or explicit token and authorization URLs",
-			)
-		}
-		return endpoints, nil
+		return Endpoints{}, fmt.Errorf("provider OAuth configuration needs an issuer or an explicit %s", gap)
 	}
 
 	meta, err := discover(ctx, spec.Issuer)
 	if err != nil {
 		return Endpoints{}, err
 	}
-	endpoints.AuthorizeURL = or(endpoints.AuthorizeURL, meta.AuthorizationEndpoint)
-	endpoints.TokenURL = or(endpoints.TokenURL, meta.TokenEndpoint)
-	endpoints.DeviceAuthURL = or(endpoints.DeviceAuthURL, meta.DeviceAuthorizationEndpoint)
-
-	if endpoints.TokenURL == "" {
-		return Endpoints{}, fmt.Errorf(
-			"authorization server %s did not publish a token endpoint", spec.Issuer,
-		)
+	endpoints.AuthorizeURL = cmp.Or(endpoints.AuthorizeURL, meta.AuthorizationEndpoint)
+	endpoints.TokenURL = cmp.Or(endpoints.TokenURL, meta.TokenEndpoint)
+	endpoints.DeviceAuthURL = cmp.Or(endpoints.DeviceAuthURL, meta.DeviceAuthorizationEndpoint)
+	if gap := endpoints.missing(grant); gap != "" {
+		return Endpoints{}, fmt.Errorf("authorization server %s publishes nothing for %s; set it explicitly", spec.Issuer, gap)
 	}
 	return endpoints, nil
 }
 
-func or(value, fallback string) string {
-	if value != "" {
-		return value
+// ensure fills e from the spec unless it already covers the grant.
+func (e *Endpoints) ensure(ctx context.Context, spec *oauth.AuthSpec, grant Grant) error {
+	if e.missing(grant) == "" {
+		return nil
 	}
-	return fallback
+	resolved, err := Resolve(ctx, spec, grant)
+	if err != nil {
+		return err
+	}
+	*e = resolved
+	return nil
 }
 
 // discoveryPaths are the well-known documents tried, in order, for an
@@ -156,14 +178,14 @@ func metadataURLs(issuer string) []string {
 	return urls
 }
 
-// deviceCodeFields are the extra form fields the device grant needs.
+// deviceGrant is the RFC 8628 grant type the device flow polls with.
 const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code"
 
 // RefreshToken exchanges a refresh token for a fresh access token,
 // resolving endpoints from the spec when necessary. Servers that do not
 // rotate refresh tokens keep the previous one.
 func RefreshToken(ctx context.Context, spec *oauth.AuthSpec, refreshToken string) (*oauth.Token, error) {
-	endpoints, err := Resolve(ctx, spec)
+	endpoints, err := Resolve(ctx, spec, GrantRefresh)
 	if err != nil {
 		return nil, err
 	}

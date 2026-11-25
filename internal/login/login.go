@@ -81,11 +81,46 @@ func Run(ctx context.Context, platform string) (*oauth.Token, error) {
 // config, which is how a provider added by a plugin signs in: same prompts,
 // no Crush release. The flow is chosen from the spec's declared mode.
 func RunOAuth(ctx context.Context, title string, spec *oauth.AuthSpec) (*oauth.Token, error) {
-	f, err := generic.StartFlow(spec, title)
+	return run(ctx, title, "Starting authorization...", func() flow {
+		return &specFlow{spec: spec, title: title}
+	})
+}
+
+// specFlow adapts a spec-declared flow to the login UIs: generic picks the
+// grant, falling back as needed, and reports what to show.
+type specFlow struct {
+	spec  *oauth.AuthSpec
+	title string
+	f     generic.Flow
+}
+
+func (f *specFlow) Start(ctx context.Context) (string, string, error) {
+	started, prompt, err := generic.StartFlow(ctx, f.spec, f.title)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
-	return run(ctx, title, "Starting authorization...", func() flow { return f })
+	f.f = started
+	return prompt.URL, prompt.UserCode, nil
+}
+
+func (f *specFlow) Wait(ctx context.Context) (*oauth.Token, error) {
+	return f.f.Wait(ctx)
+}
+
+// CompleteWithCode finishes a browser flow with a pasted code; the device
+// grant has nothing to paste.
+func (f *specFlow) CompleteWithCode(ctx context.Context, input string) (*oauth.Token, error) {
+	completer, ok := f.f.(generic.CodeCompleter)
+	if !ok {
+		return nil, errors.New("this sign-in has no code to paste")
+	}
+	return completer.CompleteWithCode(ctx, input)
+}
+
+func (f *specFlow) Close() {
+	if f.f != nil {
+		f.f.Close()
+	}
 }
 
 // run drives a flow with whichever interface fits the terminal.

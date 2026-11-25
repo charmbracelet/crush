@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/callback"
@@ -25,6 +26,9 @@ const (
 	defaultCallbackPath = "/callback"
 	startPath           = "/auth/start"
 )
+
+// ErrFlowClosed is returned by Wait when the flow is closed while waiting.
+var ErrFlowClosed = errors.New("authorization flow closed")
 
 // BrowserFlow runs the authorization code flow with PKCE for a spec-driven
 // provider: it serves the loopback redirect while the user authorizes in
@@ -42,13 +46,16 @@ type BrowserFlow struct {
 	listener    net.Listener
 	server      *http.Server
 	result      chan *http.Request
+	serve       sync.Once
+	closeOnce   sync.Once
+	closed      chan struct{}
 }
 
-// StartBrowser opens the loopback callback listener for the spec and
-// returns a flow whose Start builds the authorization URL.
-func StartBrowser(spec *oauth.AuthSpec, subject string) (*BrowserFlow, error) {
+// newBrowserFlow binds the callback listener, reusing endpoints already
+// resolved for the grant; requests are only served once Start has run.
+func newBrowserFlow(spec *oauth.AuthSpec, subject string, endpoints Endpoints) (*BrowserFlow, error) {
 	if spec == nil {
-		return nil, errors.New("provider has no OAuth configuration")
+		return nil, errNoSpec
 	}
 
 	verifier, err := randomToken(64)
@@ -77,12 +84,14 @@ func StartBrowser(spec *oauth.AuthSpec, subject string) (*BrowserFlow, error) {
 	flow := &BrowserFlow{
 		spec:        spec,
 		subject:     subject,
+		endpoints:   endpoints,
 		verifier:    verifier,
 		challenge:   challengeS256(verifier),
 		state:       state,
 		redirectURI: fmt.Sprintf("http://%s%s", net.JoinHostPort(host, fmt.Sprint(bound.Port)), path),
 		listener:    listener,
 		result:      make(chan *http.Request, 1),
+		closed:      make(chan struct{}),
 	}
 
 	mux := http.NewServeMux()
@@ -90,14 +99,6 @@ func StartBrowser(spec *oauth.AuthSpec, subject string) (*BrowserFlow, error) {
 	mux.HandleFunc(path, flow.handleCallback)
 	flow.server = &http.Server{Handler: mux}
 	flow.startURL = fmt.Sprintf("http://%s%s", net.JoinHostPort(host, fmt.Sprint(bound.Port)), startPath)
-
-	go func() {
-		// Serve until Close. The error is ignored: a listener closed
-		// mid-flow reports ErrServerClosed, and the browser already has
-		// the landing page it needs.
-		_ = flow.server.Serve(listener)
-	}()
-
 	return flow, nil
 }
 
@@ -109,7 +110,7 @@ func callbackTarget(spec *oauth.AuthSpec) (host string, port int, path string, e
 	port = spec.CallbackPort
 	if spec.RedirectURI != "" {
 		u, parseErr := url.Parse(spec.RedirectURI)
-		if parseErr != nil || u.Scheme != "http" || u.Hostname() == "" {
+		if parseErr != nil || u.Scheme != "http" || !isLoopback(u.Hostname()) {
 			return "", 0, "", fmt.Errorf("invalid redirect_uri %q: must be an http loopback URL", spec.RedirectURI)
 		}
 		host = u.Hostname()
@@ -126,17 +127,16 @@ func callbackTarget(spec *oauth.AuthSpec) (host string, port int, path string, e
 	return host, port, path, nil
 }
 
-// Start resolves the authorization endpoints and returns the browser URL
-// the user opens. The device flow is the only one that shows a user code,
-// so the second return value is always empty here.
-func (f *BrowserFlow) Start(ctx context.Context) (string, string, error) {
-	endpoints, err := Resolve(ctx, f.spec)
-	if err != nil {
-		return "", "", err
-	}
-	f.endpoints = endpoints
-	if endpoints.AuthorizeURL == "" {
-		return "", "", fmt.Errorf("authorization server %s does not offer a browser flow", f.spec.Issuer)
+// isLoopback reports whether a redirect host stays on this machine.
+func isLoopback(host string) bool {
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
+// Start resolves the authorization endpoints, begins serving the callback,
+// and returns the prompt whose URL the user opens.
+func (f *BrowserFlow) Start(ctx context.Context) (Prompt, error) {
+	if err := f.endpoints.ensure(ctx, f.spec, GrantBrowser); err != nil {
+		return Prompt{}, err
 	}
 
 	vals := authorizeValues(f.spec)
@@ -145,12 +145,14 @@ func (f *BrowserFlow) Start(ctx context.Context) (string, string, error) {
 	vals.Set("code_challenge", f.challenge)
 	vals.Set("code_challenge_method", "S256")
 	vals.Set("state", f.state)
-	f.authURL = endpoints.AuthorizeURL + "?" + vals.Encode()
+	f.authURL = f.endpoints.AuthorizeURL + "?" + vals.Encode()
+	// Serving waits for authURL so the handoff page never continues to "".
+	f.serve.Do(func() { go func() { _ = f.server.Serve(f.listener) }() })
 
 	// The handoff page opens the consent screen in a tab that can close
 	// itself once the callback lands, the same trick the built-in
 	// providers use.
-	return f.startURL, "", nil
+	return Prompt{URL: f.startURL}, nil
 }
 
 // URL returns the raw authorization URL.
@@ -166,6 +168,8 @@ func (f *BrowserFlow) Wait(ctx context.Context) (*oauth.Token, error) {
 	var req *http.Request
 	select {
 	case req = <-f.result:
+	case <-f.closed:
+		return nil, ErrFlowClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -218,12 +222,8 @@ func (f *BrowserFlow) CompleteWithCode(ctx context.Context, input string) (*oaut
 }
 
 func (f *BrowserFlow) exchange(ctx context.Context, code string) (*oauth.Token, error) {
-	if f.endpoints.TokenURL == "" {
-		endpoints, err := Resolve(ctx, f.spec)
-		if err != nil {
-			return nil, err
-		}
-		f.endpoints = endpoints
+	if err := f.endpoints.ensure(ctx, f.spec, GrantBrowser); err != nil {
+		return nil, err
 	}
 	token, err := ExchangeCode(ctx, f.spec, f.endpoints.TokenURL, code, f.redirectURI, f.verifier, f.state)
 	if err != nil {
@@ -232,12 +232,15 @@ func (f *BrowserFlow) exchange(ctx context.Context, code string) (*oauth.Token, 
 	return token, nil
 }
 
-// Close shuts down the callback listener. It is safe to call multiple
-// times.
+// Close shuts down the callback listener and wakes Wait with
+// [ErrFlowClosed]. It is safe to call multiple times.
 func (f *BrowserFlow) Close() {
-	if f.server != nil {
+	f.closeOnce.Do(func() {
+		close(f.closed)
 		_ = f.server.Close()
-	}
+		// A flow closed before Start never handed the listener to the server.
+		_ = f.listener.Close()
+	})
 }
 
 // handleStart serves the handoff page that opens the authorization URL in a

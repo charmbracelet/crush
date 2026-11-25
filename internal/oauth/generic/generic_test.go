@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,49 +19,189 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolvePrefersExplicitEndpoints(t *testing.T) {
-	t.Parallel()
-
-	endpoints, err := Resolve(context.Background(), &oauth.AuthSpec{
-		AuthorizeURL:  "https://auth.example.com/authorize",
-		TokenURL:      "https://auth.example.com/token",
-		DeviceAuthURL: "https://auth.example.com/device",
-	})
-	require.NoError(t, err)
-	require.Equal(t, "https://auth.example.com/token", endpoints.TokenURL)
-	require.Equal(t, "https://auth.example.com/device", endpoints.DeviceAuthURL)
+// issuerServer publishes metadata and counts how often it is asked for it.
+func issuerServer(t *testing.T, meta string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/.well-known/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, meta)
+	}))
+	t.Cleanup(server.Close)
+	return server, &hits
 }
 
-func TestResolveDiscoversFromIssuer(t *testing.T) {
+func TestResolve(t *testing.T) {
 	t.Parallel()
 
-	var path string
+	const (
+		authorize = "https://auth.example.com/authorize"
+		token     = "https://auth.example.com/token"
+		device    = "https://auth.example.com/device"
+	)
+	full := `{"authorization_endpoint":"` + authorize + `","token_endpoint":"` + token + `","device_authorization_endpoint":"` + device + `"}`
+	deviceOnly := `{"token_endpoint":"` + token + `","device_authorization_endpoint":"` + device + `"}`
+
+	tests := []struct {
+		name      string
+		spec      oauth.AuthSpec
+		meta      string
+		noIssuer  bool
+		grant     Grant
+		want      Endpoints
+		discovers bool
+		err       string
+	}{
+		{
+			name:  "refresh with an explicit token url skips discovery",
+			spec:  oauth.AuthSpec{TokenURL: token},
+			meta:  full,
+			grant: GrantRefresh,
+			want:  Endpoints{TokenURL: token},
+		},
+		{
+			name:  "browser with explicit endpoints skips discovery",
+			spec:  oauth.AuthSpec{AuthorizeURL: authorize, TokenURL: token},
+			meta:  full,
+			grant: GrantBrowser,
+			want:  Endpoints{AuthorizeURL: authorize, TokenURL: token},
+		},
+		{
+			name:      "browser discovers the authorize url when only the device url is explicit",
+			spec:      oauth.AuthSpec{TokenURL: token, DeviceAuthURL: device},
+			meta:      full,
+			grant:     GrantBrowser,
+			want:      Endpoints{AuthorizeURL: authorize, TokenURL: token, DeviceAuthURL: device},
+			discovers: true,
+		},
+		{
+			name:      "device discovers the device url when only the authorize url is explicit",
+			spec:      oauth.AuthSpec{AuthorizeURL: authorize, TokenURL: token},
+			meta:      full,
+			grant:     GrantDevice,
+			want:      Endpoints{AuthorizeURL: authorize, TokenURL: token, DeviceAuthURL: device},
+			discovers: true,
+		},
+		{
+			name:  "auto is covered by either grant endpoint",
+			spec:  oauth.AuthSpec{TokenURL: token, DeviceAuthURL: device},
+			meta:  full,
+			grant: GrantAuto,
+			want:  Endpoints{TokenURL: token, DeviceAuthURL: device},
+		},
+		{
+			name:      "everything discovered from the issuer",
+			meta:      full,
+			grant:     GrantAuto,
+			want:      Endpoints{AuthorizeURL: authorize, TokenURL: token, DeviceAuthURL: device},
+			discovers: true,
+		},
+		{
+			name:      "an issuer without the endpoint the grant needs",
+			meta:      deviceOnly,
+			grant:     GrantBrowser,
+			discovers: true,
+			err:       "publishes nothing for authorize_url",
+		},
+		{
+			name:     "no issuer and no token url",
+			noIssuer: true,
+			grant:    GrantRefresh,
+			err:      "needs an issuer or an explicit token_url",
+		},
+		{
+			name:     "no issuer and no device url",
+			spec:     oauth.AuthSpec{TokenURL: token},
+			noIssuer: true,
+			grant:    GrantDevice,
+			err:      "needs an issuer or an explicit device_auth_url",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server, hits := issuerServer(t, tt.meta)
+			spec := tt.spec
+			if !tt.noIssuer {
+				spec.Issuer = server.URL
+			}
+			got, err := Resolve(context.Background(), &spec, tt.grant)
+			require.Equal(t, tt.discovers, hits.Load() > 0, "discovery requests: %d", hits.Load())
+			if tt.err != "" {
+				require.ErrorContains(t, err, tt.err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// An issuer that is down must not break a refresh whose token URL is written
+// down: the refresh never needed the issuer.
+func TestRefreshTokenWithExplicitTokenURLSkipsDiscovery(t *testing.T) {
+	t.Parallel()
+
+	var discovered atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
+		if r.URL.Path != "/token" {
+			discovered.Add(1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{
-			"authorization_endpoint": "https://auth.example.com/authorize",
-			"token_endpoint": "https://auth.example.com/token",
-			"device_authorization_endpoint": "https://auth.example.com/device"
-		}`)
+		fmt.Fprint(w, `{"access_token":"fresh","expires_in":60}`)
 	}))
 	defer server.Close()
 
-	endpoints, err := Resolve(context.Background(), &oauth.AuthSpec{
+	token, err := RefreshToken(context.Background(), &oauth.AuthSpec{
+		ClientID: "crush",
 		Issuer:   server.URL,
-		TokenURL: "https://auth.example.com/token",
-	})
+		TokenURL: server.URL + "/token",
+	}, "old-refresh")
 	require.NoError(t, err)
-	require.Equal(t, "/.well-known/oauth-authorization-server", path)
-	require.Equal(t, "https://auth.example.com/authorize", endpoints.AuthorizeURL)
-	require.Equal(t, "https://auth.example.com/device", endpoints.DeviceAuthURL)
+	require.Equal(t, "fresh", token.AccessToken)
+	require.Zero(t, discovered.Load())
 }
 
-func TestResolveWithoutEndpointsOrIssuerFails(t *testing.T) {
+// An issuer that only offers the device grant gets the device flow in auto
+// mode, without opening a listener, and is asked for its metadata once.
+func TestStartFlowAutoPicksDeviceForDeviceOnlyIssuer(t *testing.T) {
 	t.Parallel()
 
-	_, err := Resolve(context.Background(), &oauth.AuthSpec{ClientID: "crush"})
-	require.ErrorContains(t, err, "needs an issuer or explicit token and authorization URLs")
+	var discovered atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			discovered.Add(1)
+			fmt.Fprintf(w, `{"token_endpoint":%q,"device_authorization_endpoint":%q}`, server.URL+"/token", server.URL+"/device")
+		case "/device":
+			fmt.Fprint(w, `{"device_code":"dc","user_code":"ABCD","verification_uri":"https://example.com/activate","expires_in":60}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	flow, prompt, err := StartFlow(context.Background(), &oauth.AuthSpec{ClientID: "crush", Issuer: server.URL}, "Example")
+	require.NoError(t, err)
+	defer flow.Close()
+	require.IsType(t, &DeviceFlow{}, flow)
+	require.Equal(t, Prompt{
+		URL:        "https://example.com/activate",
+		UserCode:   "ABCD",
+		DeviceCode: "dc",
+		ExpiresIn:  60,
+	}, prompt)
+	require.Equal(t, int32(1), discovered.Load(), "auto mode resolves once")
 }
 
 func TestRefreshToken(t *testing.T) {
@@ -202,11 +343,11 @@ func TestGoogleSubscriptionAuthorizeRequest(t *testing.T) {
 		ExtraParams:  map[string]string{"access_type": "offline", "prompt": "consent"},
 	}
 
-	flow, err := StartBrowser(spec, "Google AI Subscription")
+	flow, err := newBrowserFlow(spec, "Google AI Subscription", Endpoints{})
 	require.NoError(t, err)
 	defer flow.Close()
 
-	_, _, err = flow.Start(context.Background())
+	_, err = flow.Start(context.Background())
 	require.NoError(t, err)
 
 	parsed, err := url.Parse(flow.URL())
@@ -307,14 +448,14 @@ func TestBrowserFlow(t *testing.T) {
 		TokenURL:     server.URL + "/token",
 	}
 
-	flow, err := StartBrowser(spec, "Example")
+	flow, err := newBrowserFlow(spec, "Example", Endpoints{})
 	require.NoError(t, err)
 	defer flow.Close()
 
-	startURL, userCode, err := flow.Start(context.Background())
+	prompt, err := flow.Start(context.Background())
 	require.NoError(t, err)
-	require.Empty(t, userCode, "the browser flow shows no code")
-	require.Contains(t, startURL, "/auth/start")
+	require.Empty(t, prompt.UserCode, "the browser flow shows no code")
+	require.Contains(t, prompt.URL, "/auth/start")
 
 	authURL, err := url.Parse(flow.URL())
 	require.NoError(t, err)
@@ -368,15 +509,15 @@ func TestBrowserFlowStateMismatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow, err := StartBrowser(&oauth.AuthSpec{
+	flow, err := newBrowserFlow(&oauth.AuthSpec{
 		ClientID:     "crush",
 		AuthorizeURL: server.URL + "/authorize",
 		TokenURL:     server.URL + "/token",
-	}, "Example")
+	}, "Example", Endpoints{})
 	require.NoError(t, err)
 	defer flow.Close()
 
-	_, _, err = flow.Start(context.Background())
+	_, err = flow.Start(context.Background())
 	require.NoError(t, err)
 
 	resp, err := get(t, flow.RedirectURI()+"?code=abc&state=forged")
@@ -403,15 +544,15 @@ func TestBrowserFlowCompleteWithCode(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow, err := StartBrowser(&oauth.AuthSpec{
+	flow, err := newBrowserFlow(&oauth.AuthSpec{
 		ClientID:     "crush",
 		AuthorizeURL: server.URL + "/authorize",
 		TokenURL:     server.URL + "/token",
-	}, "Example")
+	}, "Example", Endpoints{})
 	require.NoError(t, err)
 	defer flow.Close()
 
-	_, _, err = flow.Start(context.Background())
+	_, err = flow.Start(context.Background())
 	require.NoError(t, err)
 
 	// A bare code has no state to check, matching the paste fallback the
@@ -454,17 +595,20 @@ func TestDeviceFlow(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow := StartDevice(&oauth.AuthSpec{
+	flow := &DeviceFlow{spec: &oauth.AuthSpec{
 		ClientID:      "crush",
 		AuthorizeURL:  server.URL + "/authorize",
 		TokenURL:      server.URL + "/token",
 		DeviceAuthURL: server.URL + "/device",
-	})
+	}}
 
-	verifyURL, userCode, err := flow.Start(context.Background())
+	prompt, err := flow.Start(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "https://example.com/activate", verifyURL)
-	require.Equal(t, "ABCD-1234", userCode)
+	require.Equal(t, "https://example.com/activate", prompt.URL)
+	require.Equal(t, "ABCD-1234", prompt.UserCode)
+	require.Equal(t, "dc", prompt.DeviceCode)
+	require.Equal(t, 600, prompt.ExpiresIn)
+	require.Equal(t, 1, prompt.Interval)
 
 	token, err := flow.Wait(context.Background())
 	require.NoError(t, err)
@@ -487,12 +631,12 @@ func TestDeviceFlowDenied(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow := StartDevice(&oauth.AuthSpec{
+	flow := &DeviceFlow{spec: &oauth.AuthSpec{
 		ClientID:      "crush",
 		TokenURL:      server.URL + "/token",
 		DeviceAuthURL: server.URL + "/device",
-	})
-	_, _, err := flow.Start(context.Background())
+	}}
+	_, err := flow.Start(context.Background())
 	require.NoError(t, err)
 
 	_, err = flow.Wait(context.Background())
@@ -502,18 +646,124 @@ func TestDeviceFlowDenied(t *testing.T) {
 func TestStartFlowSelectsDeclaredMode(t *testing.T) {
 	t.Parallel()
 
-	device, err := StartFlow(&oauth.AuthSpec{
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_code":"dc","user_code":"ABCD","verification_uri":"https://example.com/activate"}`)
+	}))
+	defer server.Close()
+
+	device, _, err := StartFlow(context.Background(), &oauth.AuthSpec{
 		Flow:          oauth.AuthFlowDevice,
 		ClientID:      "crush",
-		TokenURL:      "https://auth.example.com/token",
-		DeviceAuthURL: "https://auth.example.com/device",
+		TokenURL:      server.URL + "/token",
+		DeviceAuthURL: server.URL + "/device",
 	}, "Example")
 	require.NoError(t, err)
-	_, isDevice := device.(*DeviceFlow)
-	require.True(t, isDevice, "an explicit device spec must not start a listener")
+	defer device.Close()
+	require.IsType(t, &DeviceFlow{}, device, "an explicit device spec must not start a listener")
 
-	_, err = StartFlow(nil, "Example")
-	require.True(t, errors.Is(err, errNoSpec))
+	_, _, err = StartFlow(context.Background(), nil, "Example")
+	require.ErrorIs(t, err, errNoSpec)
+}
+
+// startBrowserFlow starts a browser flow against fixed endpoints.
+func startBrowserFlow(t *testing.T) *BrowserFlow {
+	t.Helper()
+	flow, err := newBrowserFlow(&oauth.AuthSpec{
+		ClientID:     "crush",
+		AuthorizeURL: "https://auth.example.com/authorize",
+		TokenURL:     "https://auth.example.com/token",
+	}, "Example", Endpoints{})
+	require.NoError(t, err)
+	t.Cleanup(flow.Close)
+	return flow
+}
+
+func TestBrowserFlowCloseWakesWait(t *testing.T) {
+	t.Parallel()
+
+	for _, started := range []bool{true, false} {
+		t.Run(fmt.Sprintf("started=%v", started), func(t *testing.T) {
+			t.Parallel()
+
+			flow := startBrowserFlow(t)
+			if started {
+				_, err := flow.Start(context.Background())
+				require.NoError(t, err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := flow.Wait(context.Background())
+				done <- err
+			}()
+
+			flow.Close()
+			flow.Close()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, ErrFlowClosed)
+			case <-time.After(5 * time.Second):
+				t.Fatal("Wait did not return after Close")
+			}
+		})
+	}
+}
+
+// The handoff page continues to the authorization URL, so it must not be
+// served before Start has built one.
+func TestBrowserFlowServesOnlyAfterStart(t *testing.T) {
+	t.Parallel()
+
+	flow := startBrowserFlow(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, flow.startURL, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test reaches its own loopback listener
+	if err == nil {
+		resp.Body.Close()
+	}
+	require.Error(t, err, "the handoff page must not answer before Start")
+
+	_, err = flow.Start(context.Background())
+	require.NoError(t, err)
+	resp, err = get(t, flow.startURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "auth.example.com/authorize")
+}
+
+func TestCallbackTargetRequiresLoopback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		redirect string
+		host     string
+		ok       bool
+	}{
+		{redirect: "http://127.0.0.1:8979/callback", host: "127.0.0.1", ok: true},
+		{redirect: "http://[::1]:8979/callback", host: "::1", ok: true},
+		{redirect: "http://localhost/oauth2callback", host: "localhost", ok: true},
+		{redirect: "http://example.com/callback"},
+		{redirect: "http://0.0.0.0:8979/callback"},
+		{redirect: "http://192.168.1.2:8979/callback"},
+		{redirect: "https://localhost/callback"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.redirect, func(t *testing.T) {
+			t.Parallel()
+
+			host, _, _, err := callbackTarget(&oauth.AuthSpec{RedirectURI: tt.redirect})
+			if !tt.ok {
+				require.ErrorContains(t, err, "must be an http loopback URL")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.host, host)
+		})
+	}
 }
 
 func TestMetadataURLs(t *testing.T) {
@@ -553,15 +803,15 @@ func TestBrowserFlowAcceptsAbsentState(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow, err := StartBrowser(&oauth.AuthSpec{
+	flow, err := newBrowserFlow(&oauth.AuthSpec{
 		ClientID:     "crush",
 		AuthorizeURL: server.URL + "/authorize",
 		TokenURL:     server.URL + "/token",
-	}, "Claude")
+	}, "Claude", Endpoints{})
 	require.NoError(t, err)
 	defer flow.Close()
 
-	_, _, err = flow.Start(context.Background())
+	_, err = flow.Start(context.Background())
 	require.NoError(t, err)
 
 	resp, err := get(t, flow.RedirectURI()+"?code=real-code")
@@ -623,4 +873,114 @@ func get(t *testing.T, rawURL string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, rawURL, nil)
 	require.NoError(t, err)
 	return http.DefaultClient.Do(req) //nolint:gosec // test reaches its own loopback listener
+}
+
+// busyPort holds a loopback port so a browser flow cannot bind it.
+func busyPort(t *testing.T) int {
+	t.Helper()
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// In auto mode a callback that cannot bind falls back to the device grant
+// with the already resolved endpoints, and a device grant that is missing or
+// fails reports the bind error alongside its own.
+func TestStartFlowAutoFallbackReportsBothErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name       string
+		deviceURL  func(serverURL string) string
+		wantDevice bool
+		wantErrs   []string
+	}{
+		{
+			name:       "device grant available",
+			deviceURL:  func(s string) string { return s + "/device" },
+			wantDevice: true,
+		},
+		{
+			name:      "device grant unpublished",
+			deviceURL: func(string) string { return "" },
+			wantErrs:  []string{"listen OAuth callback", "no device_auth_url"},
+		},
+		{
+			name:      "device grant rejected",
+			deviceURL: func(s string) string { return s + "/broken" },
+			wantErrs:  []string{"listen OAuth callback", "request device code"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var discovered atomic.Int32
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/.well-known/oauth-authorization-server":
+					discovered.Add(1)
+					fmt.Fprintf(w, `{"authorization_endpoint":%q,"token_endpoint":%q,"device_authorization_endpoint":%q}`,
+						server.URL+"/authorize", server.URL+"/token", tt.deviceURL(server.URL))
+				case "/device":
+					fmt.Fprint(w, `{"device_code":"dc","user_code":"ABCD","verification_uri":"https://example.com/activate"}`)
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}))
+			defer server.Close()
+
+			flow, prompt, err := StartFlow(context.Background(), &oauth.AuthSpec{
+				ClientID:     "crush",
+				Issuer:       server.URL,
+				CallbackPort: busyPort(t),
+			}, "Example")
+			require.Equal(t, int32(1), discovered.Load(), "the fallback reuses the resolved endpoints")
+			if tt.wantDevice {
+				require.NoError(t, err)
+				defer flow.Close()
+				require.IsType(t, &DeviceFlow{}, flow)
+				require.Equal(t, "ABCD", prompt.UserCode)
+				return
+			}
+			require.Error(t, err)
+			for _, want := range tt.wantErrs {
+				require.ErrorContains(t, err, want)
+			}
+		})
+	}
+}
+
+// A denied consent comes back from Wait as the real error: the browser flow
+// that started is never swapped for a device prompt.
+func TestStartFlowDeniedConsentIsAnError(t *testing.T) {
+	t.Parallel()
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/.well-known/oauth-authorization-server" {
+			fmt.Fprintf(w, `{"authorization_endpoint":%q,"token_endpoint":%q,"device_authorization_endpoint":%q}`,
+				server.URL+"/authorize", server.URL+"/token", server.URL+"/device")
+			return
+		}
+		t.Errorf("unexpected request to %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	flow, prompt, err := StartFlow(context.Background(), &oauth.AuthSpec{ClientID: "crush", Issuer: server.URL}, "Example")
+	require.NoError(t, err)
+	defer flow.Close()
+	browser, ok := flow.(*BrowserFlow)
+	require.True(t, ok, "got %T", flow)
+	require.Empty(t, prompt.UserCode)
+
+	resp, err := get(t, browser.RedirectURI()+"?error=access_denied&error_description=nope")
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	_, err = flow.Wait(context.Background())
+	require.ErrorContains(t, err, "access_denied")
 }

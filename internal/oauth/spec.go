@@ -85,9 +85,9 @@ type AuthSpec struct {
 	ClientSecretBasic bool `json:"client_secret_basic,omitempty" jsonschema:"description=Send client credentials using HTTP Basic auth instead of in the request body"`
 }
 
-// UsesOAuth reports whether the spec describes an OAuth flow. A nil spec or
-// an explicit api_key kind means the provider uses a static key.
-func (s *AuthSpec) UsesOAuth() bool {
+// IsOAuth reports whether the spec declares an OAuth flow. A nil spec or an
+// explicit api_key kind means the provider uses a static key.
+func (s *AuthSpec) IsOAuth() bool {
 	if s == nil {
 		return false
 	}

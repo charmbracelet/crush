@@ -207,6 +207,13 @@ option reset <list-key>    # clear a list option back to empty
   `{{range .ContextFiles}}<file path="{{.Path}}">{{.Content}}</file>{{end}}`
   loop (copy the blocks from the built-in `coder.md.tpl`) to keep them. For
   one run, use `crush --prompt coder=./file.md.tpl` instead.
+- **Experimental** (unfinished, may change or disappear in any release):
+  `option experimental client-server BOOL` runs the agent in a background
+  server the TUI attaches to; `option experimental server-ready-timeout N`,
+  `server-idle-timeout N` (default 60), and `server-detach-grace N` (default
+  10) are in seconds. The env vars `CRUSH_CLIENT_SERVER`,
+  `CRUSH_SERVER_READY_TIMEOUT`, `CRUSH_SERVER_IDLE_TIMEOUT`, and
+  `CRUSH_SERVER_DETACH_GRACE` take priority when set.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).

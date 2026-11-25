@@ -58,7 +58,7 @@ var logsCmd = &cobra.Command{
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
 		logsFiles := []string{filepath.Join(cfg.Config().Options.DataDirectory, "logs", "crush.log")}
-		if useClientServer(cmd) {
+		if cmd.Flags().Changed("host") || clientServerEnabled(cfg.Config().Options.Experimental) {
 			// The agent runs in the server, which keeps its own log, and
 			// clients log their startup next to it.
 			hostURL, err := server.ParseHostURL(clientHost)

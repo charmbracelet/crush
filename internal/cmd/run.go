@@ -101,9 +101,14 @@ crush run --continue "Follow up on your last response"
 			event.SetContinueLastSession(true)
 		}
 
+		clientServer, store, err := clientServerMode(cmd)
+		if err != nil {
+			return err
+		}
+
 		// Only attach to a server that is already running; a one-shot
 		// run should not leave a detached server behind.
-		if useClientServer(cmd) && serverRunning(ctx) {
+		if clientServer && serverRunning(ctx) {
 			c, ws, cleanup, err := connectToServer(cmd)
 			if err != nil {
 				return err
@@ -140,7 +145,7 @@ crush run --continue "Follow up on your last response"
 			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, reasoningEffort, quiet || verbose, sessionID, useLast)
 		}
 
-		ws, cleanup, err := setupLocalWorkspace(cmd)
+		ws, cleanup, err := setupLocalWorkspace(cmd, store)
 		if err != nil {
 			return err
 		}

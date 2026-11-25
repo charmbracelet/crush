@@ -260,9 +260,10 @@ func isSafeReadOnly(command string, extra []safeCommand) bool {
 // single plain command run by bare name is keyed by its program name, so
 // approving `git commit -m x` approves every later `git` call. Anything else
 // (lists, pipes, redirections, env assignments, non-literal words, a path
-// such as ./git, a program that runs other code such as bash or npm, or a
-// command flagged dangerous) is keyed by the exact command text, so one
-// approval cannot widen into something the user never saw.
+// such as ./git, a program that runs other code such as bash or npm, a call
+// told to run another command such as `git -c core.pager=...`, or a command
+// flagged dangerous) is keyed by the exact command text, so one approval
+// cannot widen into something the user never saw.
 func bashGrantKey(command string, dangerous bool) string {
 	if dangerous {
 		return command
@@ -295,10 +296,85 @@ func bashGrantKey(command string, dangerous bool) string {
 		return command
 	}
 	name = shell.NormalizeCommandName(name)
-	if runsArbitraryCode(name) {
+	if runsArbitraryCode(name) || runsCodeViaArgs(name, argv[1:]) {
 		return command
 	}
 	return name
+}
+
+// codeRunnerFlags are flags that make an otherwise ordinary program run a
+// command it was handed, such as `rsync -e 'sh -c ...'`.
+var codeRunnerFlags = map[string][]string{
+	"rsync": {"-e", "--rsh", "--rsync-path"},
+	"tar":   {"-I", "-F", "--use-compress-program", "--to-command", "--checkpoint-action", "--info-script", "--new-volume-script"},
+	"fd":    {"-x", "-X", "--exec", "--exec-batch"},
+	"rg":    {"--pre"},
+	"sort":  {"--compress-program"},
+	"scp":   {"-S"},
+}
+
+// gitRunFlags are git subcommand flags that run a program: the ones already
+// kept off the safe list, plus rebase's and difftool's command options.
+var gitRunFlags = append(slices.Clone(gitCodeExecFlags), "-x", "--extcmd")
+
+// gitGlobalRunFlags are git options, given before the subcommand, that set
+// config or the helper directory, either of which can name a program to run.
+var gitGlobalRunFlags = []string{"-c", "--config-env", "--exec-path"}
+
+// gitGlobalValueFlags are git options that take the next word as a value.
+var gitGlobalValueFlags = []string{"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--attr-source"}
+
+// runsCodeViaArgs reports whether a program that is ordinarily fine to
+// approve for the session has been told by its arguments to run another
+// command, so approving the program must not approve this call.
+func runsCodeViaArgs(name string, args []string) bool {
+	if name != "git" {
+		return hasRunFlag(args, codeRunnerFlags[name])
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if isFlag(arg) {
+			if slices.Contains(gitGlobalRunFlags, flagName(arg)) {
+				return true
+			}
+			if slices.Contains(gitGlobalValueFlags, arg) {
+				i++
+			}
+			continue
+		}
+		rest := args[i+1:]
+		switch arg {
+		// Config can define aliases, pagers and hooks that run commands,
+		// and the tools below run commands by design.
+		case "config", "filter-branch", "difftool", "mergetool":
+			return true
+		case "bisect":
+			return slices.Contains(rest, "run")
+		case "submodule":
+			return slices.Contains(rest, "foreach")
+		}
+		return hasRunFlag(rest, gitRunFlags)
+	}
+	return false
+}
+
+// hasRunFlag reports whether any flag in args is, or abbreviates, one of
+// run. getopt and git both accept an unambiguous prefix of a long option, so
+// `--use-compress=x` means `--use-compress-program=x`.
+func hasRunFlag(args, run []string) bool {
+	for _, arg := range args {
+		if !isFlag(arg) {
+			continue
+		}
+		if flagDenied(arg, run) {
+			return true
+		}
+		name := flagName(arg)
+		if strings.HasPrefix(name, "--") && slices.ContainsFunc(run, func(r string) bool { return strings.HasPrefix(r, name) }) {
+			return true
+		}
+	}
+	return false
 }
 
 // codeRunners are programs whose arguments are themselves code: approving

@@ -592,12 +592,27 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 
 	// Retiring the client releases every claim it holds, so it covers
 	// workspaces this process created but never learned the ID of.
-	cleanup := func() {
-		if err := c.RetireClient(context.Background()); err != nil {
-			_ = c.DeleteWorkspace(context.Background(), ws.ID)
-		}
-	}
+	cleanup := func() { sayGoodbye(c, ws.ID) }
 	return c, ws, cleanup, nil
+}
+
+// goodbyeTimeout bounds the goodbye a command sends the server on exit. The
+// client sets no request timeout of its own, and by then the root signal
+// handler swallows Ctrl+C, so a server that accepts the request and never
+// answers would hang the exit forever. Giving up is safe: the server
+// releases a client that left without a goodbye once its grace runs out. A
+// var, not a const, so tests can shrink it.
+var goodbyeTimeout = 5 * time.Second
+
+// sayGoodbye releases every claim this process holds on the server,
+// falling back to releasing workspaceID on a server that cannot retire
+// clients.
+func sayGoodbye(c *client.Client, workspaceID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), goodbyeTimeout)
+	defer cancel()
+	if err := c.RetireClient(ctx); err != nil {
+		_ = c.DeleteWorkspace(ctx, workspaceID)
+	}
 }
 
 // maxStaleServerRetries bounds how many times workspace creation may be

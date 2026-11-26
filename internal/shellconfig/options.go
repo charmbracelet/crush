@@ -257,7 +257,7 @@ func optionPrompt(options map[string]any, args []string, stderr io.Writer) error
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) != 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|nerd-fonts|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|nerd-fonts|scrollbar|completions-max-depth|completions-max-items|exit-banner|editor-mode> <value>")
 	}
 
 	key := args[2]
@@ -280,6 +280,11 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 			return usage(stderr, fmt.Sprintf("option ui exit-banner expects default, compact, or none, got %q", value))
 		}
 		ui["exit_banner"] = value
+	case "editor-mode":
+		if value != "emacs" && value != "vim" && value != "helix" {
+			return usage(stderr, fmt.Sprintf("option ui editor-mode expects emacs, vim, or helix, got %q", value))
+		}
+		ui["editor_mode"] = value
 	case "completions-max-depth", "completions-max-items":
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 0 {

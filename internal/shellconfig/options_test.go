@@ -180,6 +180,26 @@ func TestOption_UIExitBanner(t *testing.T) {
 	require.Contains(t, err.Error(), "expects default, compact, or none")
 }
 
+func TestOption_UIEditorMode(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	for _, mode := range []string{"emacs", "vim", "helix"} {
+		jsonBytes, err := LoadShellConfig(t.Context(), path, []byte("option ui editor-mode "+mode))
+		require.NoError(t, err)
+
+		var result map[string]any
+		require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+		ui := result["options"].(map[string]any)["tui"].(map[string]any)
+		require.Equal(t, mode, ui["editor_mode"])
+	}
+
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui editor-mode bogus`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects emacs, vim, or helix")
+}
+
 func TestOption_UINerdFonts(t *testing.T) {
 	t.Parallel()
 

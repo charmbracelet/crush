@@ -52,7 +52,10 @@ var (
 
 // DefaultCreateGrace is the window in which a client must open an SSE
 // stream after creating a workspace before its creation hold is
-// released. Exposed as a package variable so tests can shorten it.
+// released. An explicitly started server disables this and its other
+// automatic workspace reaping with [Backend.DisableWorkspaceAutoClose],
+// allowing work to continue headlessly after the creating client exits.
+// Exposed as a package variable so tests can shorten it.
 var DefaultCreateGrace = 30 * time.Second
 
 // DefaultIdleShutdownDelay is how long the server stays alive after its
@@ -116,6 +119,19 @@ type Backend struct {
 	// waiting out lingerDelay before it shuts the server down. It is
 	// guarded by mu and cancelled the moment a new create arrives.
 	shutdownTimer *time.Timer
+	// idleShutdown, when true (the default), lets the server shut itself
+	// down once it goes idle: the arm at startup and the linger after the
+	// last workspace leaves both stop it. It is cleared on a server
+	// started explicitly with `crush server`, which runs until it is
+	// stopped; one spawned on demand by a client keeps the default.
+	// Guarded by mu.
+	idleShutdown bool
+	// autoClose, when true (the default), lets client claims expire and
+	// releases workspaces once their last claim is gone. It is cleared on
+	// a server started explicitly with `crush server`, where a headless
+	// caller may exit after starting work that must keep running. Guarded
+	// by mu.
+	autoClose bool
 	// closing latches the decision to exit. Every site that commits to
 	// a shutdown sets it while still holding mu, because shutdownFn has
 	// to run unlocked; CreateWorkspace refuses once it is set. That
@@ -317,15 +333,17 @@ func (w *Workspace) Shutdown() {
 // canceled); see [Backend.startChannelRouter].
 func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) *Backend {
 	b := &Backend{
-		workspaces:  csync.NewMap[string, *Workspace](),
-		pathIndex:   make(map[string]string),
-		retired:     make(map[string]struct{}),
-		cfg:         cfg,
-		ctx:         ctx,
-		shutdownFn:  shutdownFn,
-		createGrace: DefaultCreateGrace,
-		lingerDelay: idleShutdownDelayFromEnv(),
-		detachGrace: durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+		workspaces:   csync.NewMap[string, *Workspace](),
+		pathIndex:    make(map[string]string),
+		retired:      make(map[string]struct{}),
+		cfg:          cfg,
+		ctx:          ctx,
+		shutdownFn:   shutdownFn,
+		createGrace:  DefaultCreateGrace,
+		lingerDelay:  idleShutdownDelayFromEnv(),
+		detachGrace:  durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+		idleShutdown: true,
+		autoClose:    true,
 	}
 	b.startChannelRouter()
 	return b
@@ -374,6 +392,32 @@ func (b *Backend) SetIdleShutdownDelay(d time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.lingerDelay = d
+}
+
+// DisableIdleShutdown turns off the automatic idle shutdown: the server
+// keeps running with no workspaces and no creates in flight until it is
+// stopped explicitly. A server spawned on demand by a client shuts down
+// once its client is gone, but one started explicitly with `crush server`
+// was asked for on purpose. Intended to be called before the server starts
+// serving.
+func (b *Backend) DisableIdleShutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.idleShutdown = false
+	b.cancelShutdownLocked()
+}
+
+// DisableWorkspaceAutoClose keeps hosted workspaces open after their
+// client claims go away. Creation holds no longer expire, interrupted
+// streams no longer tear the workspace down, and retired clients do not
+// release their claims. Workspaces remain hosted until they are deleted
+// explicitly or the server shuts down, which is what an explicitly
+// started server needs for headless work. Intended to be called before
+// the server starts serving.
+func (b *Backend) DisableWorkspaceAutoClose() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.autoClose = false
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -702,6 +746,9 @@ func (b *Backend) admitLocked(clientID string) error {
 // first and this call releases its claim, or it arrives later and is
 // refused, registering nothing.
 //
+// When workspace auto-close is disabled, the client's claims are still
+// released, but its workspaces and their runs keep going for headless work.
+//
 // Idempotent. Lock order is the canonical b.mu -> ws.clientsMu; teardowns
 // for workspaces the client was last on run after b.mu is released and
 // re-check under both locks.
@@ -715,6 +762,7 @@ func (b *Backend) RetireClient(clientID string) error {
 		b.retired = make(map[string]struct{})
 	}
 	b.retired[clientID] = struct{}{}
+	autoClose := b.autoClose
 	var orphaned []*Workspace
 	viewing := make(map[*Workspace]string)
 	for _, ws := range b.workspaces.Seq2() {
@@ -733,6 +781,9 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.mu.Unlock()
 
+	if !autoClose {
+		return nil
+	}
 	for ws, sessionID := range viewing {
 		ws.cancelUnwatchedRun(sessionID)
 	}
@@ -807,17 +858,41 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 	viewing := cs.currentSessionID
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
+	b.claimEnded(ws, viewing, teardown)
+}
+
+// claimEnded cancels the run a departed client was viewing if nobody else
+// views it, and tears the workspace down once no claims are left. With
+// workspace auto-close disabled it does neither: the workspace and its
+// runs belong to the server and carry on headless.
+func (b *Backend) claimEnded(ws *Workspace, viewing string, teardown bool) {
+	b.mu.Lock()
+	autoClose := b.autoClose
+	b.mu.Unlock()
+	if !autoClose {
+		return
+	}
 	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
 }
 
+// releaseHoldLocked releases a client's claim on an explicit delete. With
+// workspace auto-close disabled, a workspace left with no clients is closed
+// by a delete from any client, since none holds it any more.
 func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
 	if !ok {
+		unclaimed := len(ws.clients) == 0
 		ws.clientsMu.Unlock()
+		b.mu.Lock()
+		autoClose := b.autoClose
+		b.mu.Unlock()
+		if unclaimed && !autoClose {
+			b.teardown(ws)
+		}
 		return
 	}
 	if cs.holdTimer != nil {
@@ -875,10 +950,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 		}
 	}
 	ws.clientsMu.Unlock()
-	ws.cancelUnwatchedRun(viewing)
-	if teardown {
-		b.teardown(ws)
-	}
+	b.claimEnded(ws, viewing, teardown)
 }
 
 // cancelUnwatchedRun cancels the run in sessionID unless a client left on
@@ -1048,7 +1120,7 @@ func (b *Backend) unregisterLocked(ws *Workspace) bool {
 // Returning true also latches [Backend.closing], since the caller has to
 // release b.mu before it can run shutdownFn.
 func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
-	if b.shutdownFn == nil || b.closing {
+	if b.shutdownFn == nil || b.closing || !b.idleShutdown {
 		return false
 	}
 	if b.workspaces.Len() != 0 || b.pending != 0 {
@@ -1078,7 +1150,7 @@ func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
 func (b *Backend) ArmIdleShutdown() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.shutdownFn == nil || b.closing || b.shutdownTimer != nil {
+	if b.shutdownFn == nil || b.closing || b.shutdownTimer != nil || !b.idleShutdown {
 		return
 	}
 	if b.workspaces.Len() != 0 || b.pending != 0 {
@@ -1310,8 +1382,16 @@ func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 // under the lock creates and teardowns take, closes that window: the answer
 // is atomic, and granting it latches the decision so creates arriving
 // afterwards are refused.
+//
+// A server started explicitly always declines: the user asked for it, and
+// the replacement a client spawns would not keep running the way it does.
 func (b *Backend) ShutdownIfIdle() bool {
 	b.mu.Lock()
+	if !b.idleShutdown {
+		b.mu.Unlock()
+		slog.Warn("Refusing shutdown request: the server was started explicitly")
+		return false
+	}
 	live, pending := b.workspaces.Len(), b.pending
 	idle := live == 0 && pending == 0
 	if idle {

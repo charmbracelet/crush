@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -98,24 +99,94 @@ func init() {
 	sessionCmd.AddCommand(sessionRenameCmd)
 }
 
-type sessionServices struct {
-	sessions session.Service
-	messages message.Service
-	cfg      *config.ConfigStore
+// sessionStore is where the session commands find sessions: the server in
+// client/server mode, so it can tell open clients about changes, or else
+// the project's database.
+type sessionStore interface {
+	sessionFinder
+	DeleteSession(ctx context.Context, id string) error
+	RenameSession(ctx context.Context, sess session.Session, title string) error
+	ListMessages(ctx context.Context, sessionID string) ([]message.Message, error)
+	Config() *config.Config
 }
 
-func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
+// sessionFinder looks sessions up for [resolveSessionID].
+type sessionFinder interface {
+	GetSession(ctx context.Context, id string) (session.Session, error)
+	ListSessions(ctx context.Context) ([]session.Session, error)
+}
+
+// localSessionStore reads and changes the project's database directly.
+type localSessionStore struct {
+	sessions session.Service
+	messages message.Service
+	cfg      *config.Config
+}
+
+func (s localSessionStore) GetSession(ctx context.Context, id string) (session.Session, error) {
+	return s.sessions.Get(ctx, id)
+}
+
+func (s localSessionStore) ListSessions(ctx context.Context) ([]session.Session, error) {
+	return s.sessions.List(ctx)
+}
+
+func (s localSessionStore) DeleteSession(ctx context.Context, id string) error {
+	return s.sessions.Delete(ctx, id)
+}
+
+func (s localSessionStore) RenameSession(ctx context.Context, sess session.Session, title string) error {
+	return s.sessions.Rename(ctx, sess.ID, title)
+}
+
+func (s localSessionStore) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	return s.messages.List(ctx, sessionID)
+}
+
+func (s localSessionStore) Config() *config.Config {
+	return s.cfg
+}
+
+// serverSessionStore goes through the server. The API has no rename, so a
+// rename saves the session with its new title, as the TUI does.
+type serverSessionStore struct {
+	*workspace.ClientWorkspace
+}
+
+func (s serverSessionStore) RenameSession(ctx context.Context, sess session.Session, title string) error {
+	sess.Title = title
+	_, err := s.SaveSession(ctx, sess)
+	return err
+}
+
+func sessionSetup(cmd *cobra.Command) (context.Context, sessionStore, func(), error) {
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
-	cwd, err := ResolveCwd(cmd)
+	clientServer, cfg, err := clientServerMode(cmd)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	cfg, err := config.Init(cmd.Context(), cwd, dataDir, false)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
+	// Like `crush run`, only use a server that is already up rather than
+	// leave one behind for a one-off command.
+	if clientServer && serverRunning(ctx) {
+		c, ws, cleanup, err := connectToServer(cmd)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return ctx, serverSessionStore{workspace.NewClientWorkspace(c, *ws)}, cleanup, nil
+	}
+
+	if cfg == nil {
+		cwd, err := ResolveCwd(cmd)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		cfg, err = config.Init(cmd.Context(), cwd, dataDir, false)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
+		}
 	}
 	if dataDir == "" {
 		dataDir = cfg.Config().Options.DataDirectory
@@ -130,12 +201,12 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	}
 
 	queries := db.New(conn)
-	svc := &sessionServices{
+	store := localSessionStore{
 		sessions: session.NewService(queries, conn),
 		messages: message.NewService(queries),
-		cfg:      cfg,
+		cfg:      cfg.Config(),
 	}
-	return ctx, svc, func() { conn.Close() }, nil
+	return ctx, store, func() { conn.Close() }, nil
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
@@ -149,7 +220,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 
 	event.SessionListed(sessionListJSON)
 
-	list, err := svc.sessions.List(ctx)
+	list, err := svc.ListSessions(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
@@ -219,14 +290,14 @@ type sessionMutationResult struct {
 
 // resolveSessionID resolves a session ID that can be a UUID, full hash, or hash prefix.
 // Returns an error if the prefix is ambiguous (matches multiple sessions).
-func resolveSessionID(ctx context.Context, svc session.Service, id string) (session.Session, error) {
+func resolveSessionID(ctx context.Context, svc sessionFinder, id string) (session.Session, error) {
 	// Try direct UUID lookup first
-	if s, err := svc.Get(ctx, id); err == nil {
+	if s, err := svc.GetSession(ctx, id); err == nil {
 		return s, nil
 	}
 
 	// List all sessions and check for hash matches
-	sessions, err := svc.List(ctx)
+	sessions, err := svc.ListSessions(ctx)
 	if err != nil {
 		return session.Session{}, err
 	}
@@ -273,12 +344,12 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 
 	event.SessionShown(sessionShowJSON)
 
-	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
+	sess, err := resolveSessionID(ctx, svc, args[0])
 	if err != nil {
 		return err
 	}
 
-	msgs, err := svc.messages.List(ctx, sess.ID)
+	msgs, err := svc.ListMessages(ctx, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -287,7 +358,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	if sessionShowJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
+	return outputSessionHuman(ctx, svc.Config(), sess, msgPtrs)
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
@@ -301,12 +372,12 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 
 	event.SessionDeletedCommand(sessionDeleteJSON)
 
-	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
+	sess, err := resolveSessionID(ctx, svc, args[0])
 	if err != nil {
 		return err
 	}
 
-	if err := svc.sessions.Delete(ctx, sess.ID); err != nil {
+	if err := svc.DeleteSession(ctx, sess.ID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 
@@ -337,13 +408,13 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 
 	event.SessionRenamed(sessionRenameJSON)
 
-	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
+	sess, err := resolveSessionID(ctx, svc, args[0])
 	if err != nil {
 		return err
 	}
 
 	newTitle := strings.Join(args[1:], " ")
-	if err := svc.sessions.Rename(ctx, sess.ID, newTitle); err != nil {
+	if err := svc.RenameSession(ctx, sess, newTitle); err != nil {
 		return fmt.Errorf("failed to rename session: %w", err)
 	}
 
@@ -374,7 +445,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 
 	event.SessionLastShown(sessionLastJSON)
 
-	list, err := svc.sessions.List(ctx)
+	list, err := svc.ListSessions(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
@@ -385,7 +456,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 
 	sess := list[0]
 
-	msgs, err := svc.messages.List(ctx, sess.ID)
+	msgs, err := svc.ListMessages(ctx, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -394,7 +465,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	if sessionLastJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
+	return outputSessionHuman(ctx, svc.Config(), sess, msgPtrs)
 }
 
 const (
@@ -444,8 +515,8 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 	return enc.Encode(output)
 }
 
-func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
-	styles := common.ThemeStylesFromConfig(cfg.Config())
+func outputSessionHuman(ctx context.Context, cfg *config.Config, sess session.Session, msgs []*message.Message) error {
+	styles := common.ThemeStylesFromConfig(cfg)
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth

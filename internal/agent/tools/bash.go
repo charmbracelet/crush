@@ -38,6 +38,10 @@ type BashPermissionsParams struct {
 	WorkingDir          string `json:"working_dir"`
 	RunInBackground     bool   `json:"run_in_background"`
 	AutoBackgroundAfter int    `json:"auto_background_after"`
+	// SessionProgram is set when "allow for session" would approve every
+	// later call of this program rather than only this exact command, so
+	// the prompt can say so.
+	SessionProgram string `json:"session_program,omitempty"`
 }
 
 type BashResponseMetadata struct {
@@ -259,7 +263,7 @@ func blockFuncs(blocked []string) []shell.BlockFunc {
 // NewBashTool returns the bash tool. Every shell it starts is tagged with
 // shellOwner, so the owner can stop them with
 // [shell.BackgroundShellManager.KillOwned].
-func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int, perms *config.Permissions, shellOwner any, progress pubsub.Publisher[ToolProgress]) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int, coreutils shell.CoreutilsMode, perms *config.Permissions, shellOwner any, progress pubsub.Publisher[ToolProgress]) fantasy.AgentTool {
 	blocked := resolveBlockedCommands(perms)
 	userSafe := userSafeCommands(perms)
 	return fantasy.NewAgentTool(
@@ -290,6 +294,22 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 					return fantasy.NewTextErrorResponse(yoloBlockedMessage(check.Reason)), nil
 				}
 
+				// Path is only the working directory here, so key the
+				// session grant to the program being run, or to the exact
+				// command when a program-wide grant would be too broad.
+				grantKey := bashGrantKey(params.Command, check.Matched)
+				permParams := BashPermissionsParams{
+					Description:         params.Description,
+					Command:             params.Command,
+					WorkingDir:          params.WorkingDir,
+					RunInBackground:     params.RunInBackground,
+					AutoBackgroundAfter: params.AutoBackgroundAfter,
+				}
+				description := fmt.Sprintf("Execute command: %s", params.Command)
+				if grantKey != params.Command {
+					permParams.SessionProgram = grantKey
+					description += fmt.Sprintf(" (allow for session allows every `%s` command)", grantKey)
+				}
 				p, err := permissions.Request(
 					ctx,
 					permission.CreatePermissionRequest{
@@ -298,15 +318,10 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 						ToolCallID:  call.ID,
 						ToolName:    BashToolName,
 						Action:      "execute",
-						Description: fmt.Sprintf("Execute command: %s", params.Command),
-						Params:      BashPermissionsParams(params),
+						Description: description,
+						Params:      permParams,
 						Danger:      check.Reason,
-						// Path is only the working directory here, so a
-						// session grant keyed on it alone would turn one
-						// approval of `ls` into standing approval for every
-						// later command run in that directory. Key it to the
-						// command the user was actually shown.
-						GrantKey: params.Command,
+						GrantKey:    grantKey,
 					},
 				)
 				if err != nil {
@@ -323,7 +338,7 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 				blocksToUse = blockFuncs(blocked)
 			}
 			reporter := newProgressReporter(progress, sessionID, call.ID)
-			return executeBashCommand(ctx, params, execWorkingDir, spillDir, blocksToUse, maxBackgroundJobs, shellOwner, reporter)
+			return executeBashCommand(ctx, params, execWorkingDir, spillDir, blocksToUse, maxBackgroundJobs, coreutils, shellOwner, reporter)
 		},
 	)
 }
@@ -333,13 +348,13 @@ func yoloBlockedMessage(command string) string {
 	return fmt.Sprintf("blocked: %s is a dangerous command, and yolo mode blocks dangerous commands without asking. Tell the user: they can switch to normal mode to be asked about it, use sysadmin mode to allow it, or mark it safe with `permissions safe`.", command)
 }
 
-func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, spillDir string, blockFuncsToUse []shell.BlockFunc, maxBackgroundJobs int, shellOwner any, progress *progressReporter) (fantasy.ToolResponse, error) {
+func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, spillDir string, blockFuncsToUse []shell.BlockFunc, maxBackgroundJobs int, coreutils shell.CoreutilsMode, shellOwner any, progress *progressReporter) (fantasy.ToolResponse, error) {
 	// If explicitly requested as background, start immediately with detached context
 	if params.RunInBackground {
 		startTime := time.Now()
 		bgManager := shell.GetBackgroundShellManager()
 		// Use background context so it continues after tool returns
-		bgShell, err := bgManager.Start(context.Background(), shellOwner, execWorkingDir, blockFuncsToUse, params.Command, params.Description, maxBackgroundJobs)
+		bgShell, err := bgManager.Start(context.Background(), shellOwner, execWorkingDir, blockFuncsToUse, coreutils, params.Command, params.Description, maxBackgroundJobs)
 		if err != nil {
 			return fantasy.NewTextErrorResponse("Failed to start background shell: " + err.Error()), nil
 		}
@@ -393,7 +408,7 @@ func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, 
 
 	// Start with detached context so it can survive if moved to background
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(context.Background(), shellOwner, execWorkingDir, blockFuncsToUse, params.Command, params.Description, maxBackgroundJobs)
+	bgShell, err := bgManager.Start(context.Background(), shellOwner, execWorkingDir, blockFuncsToUse, coreutils, params.Command, params.Description, maxBackgroundJobs)
 	if err != nil {
 		return fantasy.NewTextErrorResponse("Failed to start shell: " + err.Error()), nil
 	}

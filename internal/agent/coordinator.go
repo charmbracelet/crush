@@ -110,6 +110,8 @@ func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) str
 
 type Coordinator interface {
 	SetMainAgent(agentName string) error
+	// MainAgent names the current main agent, as last set by SetMainAgent.
+	MainAgent() string
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -364,6 +366,12 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	c.mainAgent = agent
 	c.mainAgentName = agentName
 	return nil
+}
+
+// MainAgent implements Coordinator.
+func (c *coordinator) MainAgent() string {
+	_, name := c.activeAgent()
+	return name
 }
 
 // Run implements Coordinator.
@@ -1129,7 +1137,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Permissions, c.shellOwner, c.toolProgress),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Options.GetCoreutils(), c.cfg.Config().Permissions, c.shellOwner, c.toolProgress),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory, c.toolProgress),

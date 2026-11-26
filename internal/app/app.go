@@ -129,7 +129,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 	hookRunner := hooks.NewRunner(func() map[string][]config.HookConfig {
 		return store.Config().Hooks
-	}, store.WorkingDir(), store.WorkingDir())
+	}, store.WorkingDir(), store.WorkingDir(), hooks.WithCoreutils(func() shell.CoreutilsMode {
+		return store.Config().Options.GetCoreutils()
+	}))
 
 	permSvc := permission.NewPermissionService(store.WorkingDir(), allowedTools, permissionHooks{hookRunner})
 	if store.Overrides().PermissionMode != permission.PermissionModeNormal {

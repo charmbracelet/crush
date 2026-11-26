@@ -1092,7 +1092,13 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 
 func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
-	mcpCtx, cancel := context.WithCancel(ctx)
+	// The session lives until Close, not until ctx ends: callers pass
+	// short-lived contexts (an HTTP request in client/server mode, the tool
+	// call that renews a dead session), and a stdio server is killed when
+	// mcpCtx ends. ctx can still abort the session while it is being set up.
+	mcpCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(ctx, cancel)
+	defer stop()
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
 	transport, oauthHandler, err := createTransport(mcpCtx, cfg, name, m, resolver)

@@ -294,8 +294,15 @@ func buildCrushBinary(t *testing.T, repoRoot string) string {
 
 	binPath := filepath.Join(binDir, "crush")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	// A cold build takes minutes on a slow CI runner, so it gets the time
+	// the test run has left, less a moment to report a failure, rather
+	// than a fixed budget a busy runner overruns.
+	ctx := context.Background()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline.Add(-30*time.Second))
+		defer cancel()
+	}
 
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
 	cmd.Dir = repoRoot

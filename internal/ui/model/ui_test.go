@@ -3,8 +3,10 @@ package model
 import (
 	"context"
 	"image"
+	"slices"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
@@ -510,6 +512,27 @@ func TestToggleSidebarKeyBinding(t *testing.T) {
 	require.Contains(t, fullHelp, "toggle sidebar")
 }
 
+func TestInitializeHelpListsQuitOnce(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.keyMap = DefaultKeyMap()
+	u.attachments = attachments.New(nil, attachments.Keymap{})
+	u.state = uiInitialize
+
+	quits := func(binds []key.Binding) int {
+		n := 0
+		for _, b := range binds {
+			if b.Help().Desc == "quit" {
+				n++
+			}
+		}
+		return n
+	}
+	require.Equal(t, 1, quits(u.ShortHelp()))
+	require.Equal(t, 1, quits(slices.Concat(u.FullHelp()...)))
+}
+
 func TestHandlePlanHandoff_NoMarkerNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
@@ -900,6 +923,82 @@ func TestResetPlanModeState_NoopInCodeMode(t *testing.T) {
 	require.Nil(t, cmd)
 	require.Equal(t, uiInputModeCode, u.mode)
 	require.Empty(t, ws.setMainCalledWith)
+}
+
+// probeMainAgent applies a busy probe result reporting agent as the
+// workspace's main agent, which is how another client's switch arrives.
+func probeMainAgent(u *UI, agent string) []tea.Cmd {
+	return u.applyBusyState(busyStateMsg{
+		gen:   u.busyFetchGen,
+		ready: true,
+		model: workspace.AgentModel{Agent: agent},
+	})
+}
+
+// Every client of a server workspace shares its main agent, so a switch to
+// or from plan mode in one client must show in the others, or they would
+// run the plan agent while claiming code mode (and the other way round).
+func TestBusyProbeFollowsMainAgent(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.mode = uiInputModeCode
+	u.textarea.SetWidth(40)
+	u.textarea.Focus()
+
+	require.Empty(t, probeMainAgent(u, config.AgentPlan), "following must not switch the agent")
+	require.Equal(t, uiInputModePlan, u.mode)
+	require.Contains(t, u.textarea.View(), "⏸")
+	require.Nil(t, u.activeInline, "following must not open the plan handoff")
+
+	require.Empty(t, probeMainAgent(u, config.AgentCoder), "following must not switch the agent")
+	require.Equal(t, uiInputModeCode, u.mode)
+	require.NotContains(t, u.textarea.View(), "⏸")
+
+	// A server too old to report the agent leaves the mode alone.
+	u.mode = uiInputModePlan
+	probeMainAgent(u, "")
+	require.Equal(t, uiInputModePlan, u.mode)
+	require.Empty(t, ws.setMainCalledWith)
+}
+
+// This client's own switch owns the mode until it lands, and a probe that
+// read the agent before it landed must not switch the mode back.
+func TestBusyProbeDoesNotOverrideLocalModeSwitch(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.mode = uiInputModeCode
+	stale := busyStateMsg{
+		gen:   u.busyFetchGen,
+		ready: true,
+		model: workspace.AgentModel{Agent: config.AgentCoder},
+	}
+
+	cmd := u.setInputMode(uiInputModePlan)
+	probeMainAgent(u, config.AgentPlan)
+	require.Equal(t, uiInputModeCode, u.mode, "the switch in flight owns the mode")
+
+	applyModeSwitchMsg(u, cmd)
+	require.Equal(t, uiInputModePlan, u.mode)
+	require.Equal(t, config.AgentPlan, ws.setMainCalledWith)
+
+	u.applyBusyState(stale)
+	require.Equal(t, uiInputModePlan, u.mode, "a probe from before the switch must not undo it")
+}
+
+// Leaving a session ends plan mode this client turned on, but not plan mode
+// it only follows: the agent is shared, so switching it back would end
+// planning in the client that turned it on.
+func TestResetPlanModeState_KeepsFollowedPlanMode(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.mode = uiInputModeCode
+	probeMainAgent(u, config.AgentPlan)
+	u.setPlanReadyPending("sess-1")
+
+	require.Nil(t, u.resetPlanModeState())
+	require.Equal(t, uiInputModePlan, u.mode)
+	require.Empty(t, ws.setMainCalledWith)
+	require.Empty(t, u.planReadySessionID, "the session's pending plan is still dropped")
 }
 
 func TestPlanHandoffExplicitPermissionMode(t *testing.T) {

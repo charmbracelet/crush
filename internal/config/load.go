@@ -293,6 +293,10 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		return nil, fmt.Errorf("invalid prompt configuration: %w", err)
 	}
 
+	if err := cfg.ValidateCoreutils(); err != nil {
+		return nil, fmt.Errorf("invalid coreutils configuration: %w", err)
+	}
+
 	if !isInsideWorktree(workingDir) {
 		const depth = 2
 		const items = 100
@@ -1587,6 +1591,20 @@ func (c *Config) ValidatePrompts() error {
 		return nil
 	}
 	return ValidatePromptNames(c.Options.Prompts)
+}
+
+// ValidateCoreutils rejects coreutils modes the shell does not know, so a
+// typo fails at startup instead of silently falling back to a default.
+func (c *Config) ValidateCoreutils() error {
+	if c.Options == nil {
+		return nil
+	}
+	switch c.Options.Coreutils {
+	case "", CoreutilsTurtle, CoreutilsSystem, CoreutilsAuto, CoreutilsOff:
+		return nil
+	default:
+		return fmt.Errorf("unknown coreutils mode %q, expected turtle, system, auto, or off", string(c.Options.Coreutils))
+	}
 }
 
 // ValidatePromptNames rejects any key in prompts that is not a built-in

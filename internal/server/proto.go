@@ -399,7 +399,11 @@ func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, history)
+	files := make([]proto.File, len(history))
+	for i, f := range history {
+		files[i] = fileToProto(f)
+	}
+	jsonEncode(w, files)
 }
 
 // handleGetWorkspaceSessionMessages returns all messages for a session.
@@ -418,14 +422,14 @@ func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, 
 func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	var sess session.Session
+	var sess proto.Session
 	if err := json.NewDecoder(r.Body).Decode(&sess); err != nil {
 		c.server.logError(r, "Failed to decode request", "error", err)
 		jsonError(w, http.StatusBadRequest, "failed to decode request")
 		return
 	}
 
-	saved, err := c.backend.SaveSession(r.Context(), id, sess)
+	saved, err := c.backend.SaveSession(r.Context(), id, protoToSession(sess))
 	if err != nil {
 		c.handleError(w, r, err)
 		return

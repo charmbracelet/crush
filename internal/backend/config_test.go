@@ -2,10 +2,14 @@ package backend
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -112,6 +116,23 @@ func TestSetProviderAPIKey_PublishesConfigChanged(t *testing.T) {
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
+// TestSetProviderAPIKey_WakesReauthWait verifies that signing in again
+// through the server releases a run that waits for the user to
+// re-authenticate, as it does in local mode.
+func TestSetProviderAPIKey_WakesReauthWait(t *testing.T) {
+	b, ws, _ := newPublishingWorkspace(t)
+
+	waited := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		waited <- ws.Cfg.WaitForTokenChange(ctx, "openai")
+	}()
+
+	require.NoError(t, b.SetProviderAPIKey(ws.ID, config.ScopeGlobal, "openai", "new-key"))
+	require.NoError(t, <-waited)
+}
+
 func TestMarkProjectInitialized_PublishesConfigChanged(t *testing.T) {
 	b, ws, evc := newPublishingWorkspace(t)
 
@@ -182,6 +203,42 @@ func TestDisableDockerMCP_PublishesConfigChanged(t *testing.T) {
 
 	require.NoError(t, b.DisableDockerMCP(ws.ID))
 	awaitConfigChanged(t, evc, ws.ID)
+}
+
+// TestGlobalToggles_KeepRepositoryMCPOverrides guards the global skill and
+// MCP toggles against reconciling MCP servers, which local mode never
+// does: a reconcile ignores the repository-scoped toggles and would
+// restart a server disabled for this repository.
+func TestGlobalToggles_KeepRepositoryMCPOverrides(t *testing.T) {
+	xdgIsolated(t)
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+	const name = "override-probe"
+	// The command does not exist, so a start only records an error.
+	cwd := t.TempDir()
+	cfg := fmt.Sprintf(`{"mcp": {%q: {"type": "stdio", "command": "crush-override-probe-missing"}}}`, name)
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, "crush.json"), []byte(cfg), 0o644))
+	b := New(t.Context(), nil, func() {})
+	t.Cleanup(func() { drainBackend(t, b) })
+	ws, _, err := b.CreateWorkspace(protoWS(cwd, t.TempDir(), newClientID(t)))
+	require.NoError(t, err)
+	evc := ws.Events(t.Context())
+
+	state := func() mcptools.State {
+		info, _ := mcptools.GetState(name)
+		return info.State
+	}
+	require.Eventually(t, func() bool { return state() == mcptools.StateError },
+		5*time.Second, 10*time.Millisecond, "the startup attempt never settled")
+	require.NoError(t, b.SetMCPServerDisabled(t.Context(), ws.ID, name, true))
+	require.Equal(t, mcptools.StateDisabled, state())
+
+	require.NoError(t, b.SetSkillConfigDisabled(t.Context(), ws.ID, "some-skill", true))
+	awaitConfigChanged(t, evc, ws.ID)
+	require.NoError(t, b.SetMCPServerConfigDisabled(t.Context(), ws.ID, name, false))
+	awaitConfigChanged(t, evc, ws.ID)
+	require.Never(t, func() bool { return state() != mcptools.StateDisabled },
+		300*time.Millisecond, 10*time.Millisecond,
+		"a global toggle restarted a server disabled for this repository")
 }
 
 // drainEvents reads from evc until quiet for the given window. Used

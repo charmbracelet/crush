@@ -198,6 +198,33 @@ func TestOption_UINerdFonts(t *testing.T) {
 	require.Contains(t, err.Error(), "nerd-fonts expects true/false")
 }
 
+func TestOption_Experimental(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`
+option experimental client-server true
+option experimental server-ready-timeout 30
+option experimental server-idle-timeout 0
+option experimental server-detach-grace 5
+`))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	exp := result["options"].(map[string]any)["experimental"].(map[string]any)
+	require.Equal(t, true, exp["client_server"])
+	require.EqualValues(t, 30, exp["server_ready_timeout"])
+	require.EqualValues(t, 0, exp["server_idle_timeout"])
+	require.EqualValues(t, 5, exp["server_detach_grace"])
+
+	_, err = LoadShellConfig(t.Context(), path, []byte(`option experimental server-idle-timeout -1`))
+	require.Error(t, err)
+	_, err = LoadShellConfig(t.Context(), path, []byte(`option experimental bogus 1`))
+	require.Error(t, err)
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

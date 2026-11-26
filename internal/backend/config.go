@@ -34,6 +34,14 @@ func publishConfigChanged(ws *Workspace) {
 	// workspace ctx so teardown cancels any in-flight init.
 	go mcptools.Reinitialize(ws.ctx, ws.Cfg)
 
+	announceConfigChanged(ws)
+}
+
+// announceConfigChanged publishes only the ConfigChanged event, for
+// writes that must leave MCP servers alone. A reconcile ignores the
+// repository-scoped toggles, so it would stop a config-disabled server
+// enabled for this repository and start one disabled here.
+func announceConfigChanged(ws *Workspace) {
 	ws.SendEvent(pubsub.Event[proto.ConfigChanged]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: proto.ConfigChanged{WorkspaceID: ws.ID},
@@ -149,6 +157,7 @@ func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, prov
 	if err := ws.Cfg.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
 		return err
 	}
+	ws.Cfg.SignalAuthComplete(providerID)
 	publishConfigChanged(ws)
 	return nil
 }

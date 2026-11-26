@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -50,9 +51,17 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var clientHost string
+
+// spawnedServerEnv marks a server that a client process started on its
+// behalf. Such a server shuts itself down once idle so it cannot outlive
+// the client; a server started explicitly with `crush server` has no such
+// marker and keeps running. The variable is set on the child environment by
+// [detachedServerCmd] and read by the server command.
+const spawnedServerEnv = "CRUSH_SPAWNED_SERVER"
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
@@ -86,6 +95,9 @@ var rootCmd = &cobra.Command{
 	Use:   "crush",
 	Short: "A terminal-first AI assistant for software development",
 	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+		return resolveFlagPaths(cmd)
+	},
 	Example: `
 # Run in interactive mode
 crush
@@ -274,11 +286,71 @@ func supportsProgressBar() bool {
 	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "iterm2", "rio")
 }
 
-// useClientServer returns true when the client/server architecture is
-// enabled via the CRUSH_CLIENT_SERVER environment variable.
-func useClientServer() bool {
-	v, _ := strconv.ParseBool(os.Getenv("CRUSH_CLIENT_SERVER"))
-	return v
+// useClientServer reports whether to use the client/server architecture
+// without reading the config: when the CRUSH_CLIENT_SERVER environment
+// variable enables it, or when --host names a server to connect to.
+func useClientServer(cmd *cobra.Command) bool {
+	return cmd.Flags().Changed("host") || clientServerEnabled(nil)
+}
+
+// clientServerEnabled reports whether the client/server architecture is
+// on. The CRUSH_CLIENT_SERVER environment variable decides when set;
+// otherwise options.experimental.client_server does.
+func clientServerEnabled(opts *config.ExperimentalOptions) bool {
+	if v := os.Getenv("CRUSH_CLIENT_SERVER"); v != "" {
+		on, _ := strconv.ParseBool(v)
+		return on
+	}
+	return opts.GetClientServer()
+}
+
+// clientServerMode decides between local and client/server mode. When the
+// environment does not decide, it fully loads the config, which local mode
+// needs anyway, and returns the store for reuse (nil otherwise). --host
+// always picks client/server mode. When client/server mode wins, the
+// experimental options are exported so the server timeouts apply here and
+// in any server this process spawns; only then, and only if the
+// environment or --host chose the mode, is the config read a second,
+// lighter way.
+func clientServerMode(cmd *cobra.Command) (bool, *config.ConfigStore, error) {
+	if cmd.Flags().Changed("host") || os.Getenv("CRUSH_CLIENT_SERVER") != "" {
+		if !useClientServer(cmd) {
+			return false, nil, nil
+		}
+		cwd, err := ResolveCwd(cmd)
+		if err != nil {
+			return false, nil, err
+		}
+		opts, err := config.LoadExperimental(cmd.Context(), cwd)
+		if err != nil {
+			slog.Warn("Failed to read experimental options", "error", err)
+		}
+		opts.ExportEnv()
+		return true, nil, nil
+	}
+
+	store, err := loadLocalConfig(cmd)
+	if err != nil {
+		return false, nil, err
+	}
+	opts := store.Config().Options.Experimental
+	if !opts.GetClientServer() {
+		return false, store, nil
+	}
+	opts.ExportEnv()
+	return true, nil, nil
+}
+
+// loadLocalConfig loads the full config for the command's working
+// directory.
+func loadLocalConfig(cmd *cobra.Command) (*config.ConfigStore, error) {
+	debug, _ := cmd.Flags().GetBool("debug")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, err
+	}
+	return config.Init(cmd.Context(), cwd, dataDir, debug)
 }
 
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
@@ -298,15 +370,19 @@ func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, fun
 	return ws, cleanup, err
 }
 
-// setupWorkspace returns a Workspace and cleanup function. When
-// CRUSH_CLIENT_SERVER=1, it connects to a server process and returns a
-// ClientWorkspace. Otherwise it creates an in-process app.App and
+// setupWorkspace returns a Workspace and cleanup function. In client/server
+// mode (see [clientServerMode]) it connects to a server process and returns
+// a ClientWorkspace. Otherwise it creates an in-process app.App and
 // returns an AppWorkspace.
 func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
-	if useClientServer() {
+	clientServer, store, err := clientServerMode(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	if clientServer {
 		return setupClientServerWorkspace(cmd)
 	}
-	return setupLocalWorkspace(cmd, true)
+	return setupLocalWorkspace(cmd, store, true)
 }
 
 // sysadminModeWarning is printed to stderr whenever -yy puts a session in
@@ -315,28 +391,24 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 const sysadminModeWarning = "Warning: sysadmin mode is active. Every command is auto-approved, and the block list that catches dangerous commands at run time is switched off."
 
 // setupLocalWorkspace creates an in-process app.App and wraps it in an
-// AppWorkspace.
-func setupLocalWorkspace(cmd *cobra.Command, interactive bool) (workspace.Workspace, func(), error) {
+// AppWorkspace. A nil store is loaded here.
+func setupLocalWorkspace(cmd *cobra.Command, store *config.ConfigStore, interactive bool) (workspace.Workspace, func(), error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yoloCount, _ := cmd.Flags().GetCount("yolo")
 	channels, _ := cmd.Flags().GetStringSlice("channels")
-	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
-
-	cwd, err := ResolveCwd(cmd)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	prompts, err := promptOverrides(cmd)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	store, err := config.Init(ctx, cwd, dataDir, debug)
-	if err != nil {
-		return nil, nil, err
+	if store == nil {
+		if store, err = loadLocalConfig(cmd); err != nil {
+			return nil, nil, err
+		}
 	}
+	cwd := store.WorkingDir()
 
 	cfg := store.Config()
 	store.Overrides().EnabledChannels = channels
@@ -489,7 +561,6 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	wsPermMode := proto.WorkspacePermissionModeNormal
 	if yoloCount > 1 {
 		wsPermMode = proto.WorkspacePermissionModeSysadmin
-		fmt.Fprintln(os.Stderr, sysadminModeWarning)
 	} else if yoloCount == 1 {
 		wsPermMode = proto.WorkspacePermissionModeYolo
 	}
@@ -511,6 +582,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	warnPermissionMode(os.Stderr, wsPermMode, ws.PermissionMode)
 
 	if shouldEnableMetrics(ws.Config) {
 		event.Init()
@@ -525,12 +597,44 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 
 	// Retiring the client releases every claim it holds, so it covers
 	// workspaces this process created but never learned the ID of.
-	cleanup := func() {
-		if err := c.RetireClient(context.Background()); err != nil {
-			_ = c.DeleteWorkspace(context.Background(), ws.ID)
-		}
-	}
+	cleanup := func() { sayGoodbye(c, ws.ID) }
 	return c, ws, cleanup, nil
+}
+
+// goodbyeTimeout bounds the goodbye a command sends the server on exit. The
+// client sets no request timeout of its own, and by then the root signal
+// handler swallows Ctrl+C, so a server that accepts the request and never
+// answers would hang the exit forever. Giving up is safe: the server
+// releases a client that left without a goodbye once its grace runs out. A
+// var, not a const, so tests can shrink it.
+var goodbyeTimeout = 5 * time.Second
+
+// sayGoodbye releases every claim this process holds on the server,
+// falling back to releasing workspaceID on a server that cannot retire
+// clients.
+func sayGoodbye(c *client.Client, workspaceID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), goodbyeTimeout)
+	defer cancel()
+	if err := c.RetireClient(ctx); err != nil {
+		_ = c.DeleteWorkspace(ctx, workspaceID)
+	}
+}
+
+// warnPermissionMode tells the user which permission mode the project runs
+// in on the server. A project the server already has open keeps its mode,
+// whatever -y or -yy asked for, and an earlier client may have left it more
+// permissive than this one asked for.
+func warnPermissionMode(w io.Writer, requested, actual proto.WorkspacePermissionMode) {
+	if actual == "" {
+		// The server predates reporting the mode.
+		actual = requested
+	}
+	if actual != requested {
+		fmt.Fprintf(w, "Warning: this project is already open on the server in %s mode, and it stays in that mode.\n", actual)
+	}
+	if actual == proto.WorkspacePermissionModeSysadmin {
+		fmt.Fprintln(w, sysadminModeWarning)
+	}
 }
 
 // maxStaleServerRetries bounds how many times workspace creation may be
@@ -557,7 +661,7 @@ func createWorkspaceOnLiveServer(
 			return ws, nil
 		}
 		if !errors.Is(err, client.ErrServerShuttingDown) || attempt == maxStaleServerRetries-1 {
-			return nil, fmt.Errorf("failed to create workspace: %v", err)
+			return nil, err
 		}
 		slog.Warn("Server is shutting down; retrying against a replacement",
 			"attempt", attempt+1, "error", err)
@@ -1237,6 +1341,9 @@ func detachedServerCmd(exe, dir string, args ...string) *exec.Cmd {
 	// process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, args...)
 	c.Dir = dir
+	// Tell the server a client spawned it, so it keeps the idle shutdown
+	// that stops it from outliving that client.
+	c.Env = append(os.Environ(), spawnedServerEnv+"=1")
 	return c
 }
 
@@ -1321,6 +1428,9 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to change directory: %v", err)
 		}
+		// Store the absolute path so a later call does not resolve a
+		// relative flag against the directory just changed into.
+		_ = cmd.Flags().Set("cwd", abs)
 		return abs, nil
 	}
 	cwd, err := os.Getwd()
@@ -1328,6 +1438,30 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 		return "", fmt.Errorf("failed to get current working directory: %v", err)
 	}
 	return cwd, nil
+}
+
+// resolveFlagPaths makes the relative paths in --host and --prompt
+// absolute against the directory crush was started in, which is what they
+// mean on the command line. It runs before anything changes into --cwd.
+func resolveFlagPaths(cmd *cobra.Command) error {
+	if strings.HasPrefix(clientHost, "unix://") {
+		if hostURL, err := server.ParseHostURL(clientHost); err == nil {
+			clientHost = "unix://" + hostURL.Host
+		}
+	}
+	prompts, err := promptOverrides(cmd)
+	if err != nil || len(prompts) == 0 {
+		return err
+	}
+	values := make([]string, 0, len(prompts))
+	for name, path := range prompts {
+		values = append(values, name+"="+path)
+	}
+	slices.Sort(values)
+	if f, ok := cmd.Flags().Lookup("prompt").Value.(pflag.SliceValue); ok {
+		return f.Replace(values)
+	}
+	return nil
 }
 
 func createDotCrushDir(dir string) error {

@@ -138,6 +138,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 		Command:   command,
 		Cwd:       w.store.WorkingDir(),
 		TermWidth: termWidth,
+		Coreutils: w.store.Config().Options.GetCoreutils(),
 	}
 
 	var result shell.CaptureResult
@@ -198,6 +199,7 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 	}
 	m := w.app.Agent().Model()
 	return AgentModel{
+		Agent:      w.app.Agent().MainAgent(),
 		CatwalkCfg: m.CatwalkCfg,
 		ModelCfg:   m.ModelCfg,
 	}

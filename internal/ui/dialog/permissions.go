@@ -270,6 +270,11 @@ func (p *Permissions) ToolCallID() string {
 	return p.permission.ToolCallID
 }
 
+// RequestID returns the ID of the permission request this dialog answers.
+func (p *Permissions) RequestID() string {
+	return p.permission.ID
+}
+
 // HandleMsg implements [Dialog].
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -838,14 +843,31 @@ func (p *Permissions) renderButtonGroup(spacing string) string {
 		if o.action != PermissionDeny {
 			st = approveStyles
 		}
+		text, underline := o.text, o.underlineIndex
+		if o.action == PermissionAllowForSession {
+			text, underline = p.sessionButtonLabel(o)
+		}
 		parts[i] = common.Button(st, common.ButtonOpts{
-			Text:           o.text,
-			UnderlineIndex: o.underlineIndex,
+			Text:           text,
+			UnderlineIndex: underline,
 			Selected:       p.selectedOption == i,
 		})
 	}
 
 	return strings.Join(parts, spacing)
+}
+
+// sessionButtonLabel returns the "allow for session" button's text and
+// underline position. When the session grant for a shell command covers
+// every call of its program, the button names the program so the user can
+// see how far the approval reaches.
+func (p *Permissions) sessionButtonLabel(o permissionOption) (string, int) {
+	params, ok := p.permission.Params.(tools.BashPermissionsParams)
+	if !ok || params.SessionProgram == "" {
+		return o.text, o.underlineIndex
+	}
+	prefix := "Allow " + params.SessionProgram + " for "
+	return prefix + "Session", ansi.StringWidth(prefix)
 }
 
 func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {

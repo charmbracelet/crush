@@ -43,6 +43,12 @@ Usage:
 While the server is running, browse the HTTP API docs at /v1/docs/
 (e.g. http://127.0.0.1:8080/v1/docs/). The OpenAPI 3.1 spec is served
 at /v1/docs/openapi.json.
+
+The server keeps running until it is stopped (Ctrl+C, SIGTERM, or a
+shutdown request), and its workspaces remain hosted after their clients
+detach or exit. That supports headless workflows; delete a workspace
+explicitly to close it. Unlike a server a client spawns on demand, one
+started this way does not reap itself or its workspaces when idle.
 `,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		dataDir, err := cmd.Flags().GetString("data-dir")
@@ -58,6 +64,7 @@ at /v1/docs/openapi.json.
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
+		cfg.Config().Options.Experimental.ExportEnv()
 
 		hostURL, err := server.ParseHostURL(serverHost)
 		if err != nil {
@@ -74,6 +81,12 @@ at /v1/docs/openapi.json.
 
 		srv := server.NewServer(cfg, hostURL.Scheme, hostURL.Host)
 		srv.SetLogger(slog.Default())
+		if os.Getenv(spawnedServerEnv) == "" {
+			// Started explicitly: keep running when idle and keep hosted
+			// workspaces open for headless work whose caller exits.
+			srv.DisableIdleShutdown()
+			srv.DisableWorkspaceAutoClose()
+		}
 		slog.Info("Starting Crush server...", "addr", serverHost)
 
 		errch := make(chan error, 1)

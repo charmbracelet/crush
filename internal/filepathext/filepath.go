@@ -38,7 +38,7 @@ func SplitGlobPrefix(pattern string) (prefix, rest string) {
 	for i, seg := range segments {
 		if strings.ContainsAny(seg, "*?[{\\") {
 			rest = strings.Join(segments[i:], "/")
-			return strings.Join(literal, "/"), rest
+			return joinLiteral(literal, pattern), rest
 		}
 		literal = append(literal, seg)
 	}
@@ -47,6 +47,22 @@ func SplitGlobPrefix(pattern string) (prefix, rest string) {
 	if len(literal) == 0 {
 		return "", pattern
 	}
-	parent := strings.Join(literal[:len(literal)-1], "/")
+	parent := joinLiteral(literal[:len(literal)-1], pattern)
 	return parent, literal[len(literal)-1]
+}
+
+// joinLiteral joins literal segments back into a path. Segments that
+// begin at the root keep it: "/*.go" is walked from "/", where the
+// pattern points, not from the search path.
+func joinLiteral(literal []string, pattern string) string {
+	joined := strings.Join(literal, "/")
+	if joined == "" && len(literal) > 0 {
+		return "/"
+	}
+	// A Windows drive root needs the slash to stay absolute.
+	volume := filepath.VolumeName(pattern)
+	if volume != "" && joined == volume && strings.HasPrefix(pattern[len(volume):], "/") {
+		return joined + "/"
+	}
+	return joined
 }

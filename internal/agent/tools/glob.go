@@ -104,7 +104,7 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 	walkRoot := searchPath
 	walkPattern := pattern
 	if prefix != "" {
-		walkRoot = filepath.Join(searchPath, prefix)
+		walkRoot = filepathext.SmartJoin(searchPath, prefix)
 		walkPattern = rest
 	}
 

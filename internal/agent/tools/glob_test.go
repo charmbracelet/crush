@@ -72,3 +72,24 @@ func TestGlobFilesCapsResultsOnLargeTree(t *testing.T) {
 	require.LessOrEqual(t, len(got), 10, "must not exceed limit")
 	require.True(t, truncated, "should report truncation on an over-limit tree")
 }
+
+// An absolute pattern is walked where it points, not under the search
+// path: a decoy of the same shape beside the search path must not match.
+func TestGlobFilesAbsolutePatternWalksWhereItPoints(t *testing.T) {
+	t.Parallel()
+
+	there, here := t.TempDir(), t.TempDir()
+	for _, path := range []string{
+		filepath.Join(there, "etc", "real.conf"),
+		filepath.Join(here, "etc", "decoy.conf"),
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
+	}
+
+	pattern := filepath.Join(there, "etc", "*.conf")
+	got, _, err := globFiles(context.Background(), pattern, here, 100)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Contains(t, got[0], "real.conf")
+}

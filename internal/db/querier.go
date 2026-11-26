@@ -15,6 +15,7 @@ type Querier interface {
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeleteFile(ctx context.Context, id string) error
+	DeleteLedgerEntry(ctx context.Context, id string) error
 	DeleteMCPDisabledServer(ctx context.Context, name string) error
 	DeleteMCPEnabledServer(ctx context.Context, name string) error
 	DeleteMessage(ctx context.Context, id string) error

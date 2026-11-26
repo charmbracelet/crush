@@ -106,34 +106,55 @@ func Prune(msgs []message.Message, policy PrunePolicy) ([]message.Message, int64
 	// Everything from this index on is still inside a protected turn.
 	boundary := turnBoundary(msgs, policy.ProtectTurns)
 
+	// Collect unpruned, unprotected tool results before the turn boundary in
+	// chronological order. Because pruning is recomputed on each turn without
+	// mutating storage, we advance the pruned prefix in MinimumReclaim-sized
+	// batches rather than one tool result at a time, so intermediate turns keep
+	// an identical prefix and hit the provider's prompt cache.
 	var (
-		candidates []candidate
-		seen       int64
-		reclaimed  int64
+		eligible []candidate
+		total    int64
 	)
-	for i := boundary - 1; i >= 0; i-- {
+	for i := range boundary {
 		for j, part := range msgs[i].Parts {
 			result, ok := part.(message.ToolResult)
 			if !ok {
 				continue
 			}
-			// Pruning is oldest-first, so reaching output an earlier pass
-			// already pruned means there is nothing left to win here.
 			if strings.HasPrefix(result.Content, prunePrefix) {
-				return msgs, 0
+				// Already pruned in an earlier view pass; nothing earlier to win.
+				eligible = nil
+				total = 0
+				continue
 			}
 			if _, ok := protected[result.Name]; ok {
 				continue
 			}
-
 			size := toolResultTokens(result)
-			seen += size
-			if seen <= policy.ProtectTokens {
-				continue
-			}
-			candidates = append(candidates, candidate{message: i, part: j, tokens: size})
-			reclaimed += size
+			eligible = append(eligible, candidate{message: i, part: j, tokens: size})
+			total += size
 		}
+	}
+
+	maxReclaim := total - policy.ProtectTokens
+	if maxReclaim <= 0 || maxReclaim < policy.MinimumReclaim {
+		return msgs, 0
+	}
+	cutoff := maxReclaim
+	if policy.MinimumReclaim > 0 {
+		cutoff = (maxReclaim / policy.MinimumReclaim) * policy.MinimumReclaim
+	}
+
+	var (
+		candidates []candidate
+		reclaimed  int64
+	)
+	for _, c := range eligible {
+		if reclaimed >= cutoff {
+			break
+		}
+		candidates = append(candidates, c)
+		reclaimed += c.tokens
 	}
 
 	if len(candidates) == 0 || reclaimed < policy.MinimumReclaim {

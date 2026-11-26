@@ -287,3 +287,44 @@ func TestTurnBoundaryProtectsShortSessionsEntirely(t *testing.T) {
 	require.Equal(t, 6, turnBoundary(msgs, 1))
 	require.Zero(t, turnBoundary(msgs, 0))
 }
+
+func TestPruneBatchesToPreservePromptCache(t *testing.T) {
+	t.Parallel()
+
+	policy := PrunePolicy{
+		ProtectTokens:  4_000,
+		ProtectTurns:   1,
+		MinimumReclaim: 2_000,
+	}
+
+	// Build a history that crosses the first 2k batch boundary (6.1k eligible
+	// tokens => maxReclaim 2.1k => cutoff 2k).
+	var msgs []message.Message
+	for i := range 7 {
+		msgs = append(msgs, toolTurn(fmt.Sprintf("t%d", i), 1_000, message.ToolResult{
+			Name: "view", ToolCallID: fmt.Sprintf("c%d", i),
+		})...)
+	}
+
+	view1, saved1 := Prune(msgs, policy)
+	require.Positive(t, saved1)
+
+	// Adding one more 1k turn grows maxReclaim from 2.1k to 3.1k, still in the
+	// same 2k batch: the prefix sent for all earlier messages must stay byte-
+	// identical so the prompt cache hits.
+	msgs2 := append(append([]message.Message(nil), msgs...),
+		toolTurn("t7", 1_000, message.ToolResult{Name: "view", ToolCallID: "c7"})...,
+	)
+	view2, saved2 := Prune(msgs2, policy)
+	require.Equal(t, saved1, saved2, "still inside the same batch: no new items pruned")
+	require.Equal(t, view1, view2[:len(view1)], "prefix must stay identical between batches")
+
+	// Adding a second 1k turn crosses the next 2k batch boundary (maxReclaim 4.1k
+	// => cutoff 4k) and prunes the next batch together.
+	msgs3 := append(append([]message.Message(nil), msgs2...),
+		toolTurn("t8", 1_000, message.ToolResult{Name: "view", ToolCallID: "c8"})...,
+	)
+	view3, saved3 := Prune(msgs3, policy)
+	require.Greater(t, saved3, saved2, "crossing the next batch boundary prunes the next batch")
+	require.NotEqual(t, view2, view3[:len(view2)])
+}

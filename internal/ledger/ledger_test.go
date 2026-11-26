@@ -136,7 +136,7 @@ func TestDecayRetiresLowRelevanceEntriesBeyondBudget(t *testing.T) {
 
 	// Budget of 16 tokens fits only the 16-token decision. The lower relevance
 	// entries (7 tokens each) should both be dropped and retired.
-	retired, err := svc.Decay(t.Context(), sessionID, compaction.RenderBudget(16))
+	retired, err := svc.Decay(t.Context(), sessionID, "cp-1", compaction.RenderBudget(16))
 	require.NoError(t, err)
 	require.Equal(t, 2, retired, "context and notable entries should decay")
 
@@ -148,6 +148,17 @@ func TestDecayRetiresLowRelevanceEntriesBeyondBudget(t *testing.T) {
 	require.Contains(t, rendered.Text, "Always prefer append-only ledger rows")
 	require.NotContains(t, rendered.Text, "Listed files")
 	require.NotContains(t, rendered.Text, "Applied migration 20261007")
+
+	// Undoing decay for that checkpoint brings the retired entries back.
+	restored, err := svc.UndoDecay(t.Context(), sessionID, "cp-1")
+	require.NoError(t, err)
+	require.Equal(t, 2, restored)
+
+	l, err = svc.Ledger(t.Context(), sessionID)
+	require.NoError(t, err)
+	rendered = l.Render(0)
+	require.Contains(t, rendered.Text, "Listed files")
+	require.Contains(t, rendered.Text, "Applied migration 20261007")
 }
 
 func TestAppendDistinguishesMarkersBySessionAndSources(t *testing.T) {
@@ -225,7 +236,7 @@ func TestConcurrentAppendAndDecayDropNoWrites(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if _, err := svc.Decay(ctx, sessionID, compaction.RenderBudget(1)); err != nil {
+		if _, err := svc.Decay(ctx, sessionID, "cp-concurrent", compaction.RenderBudget(1)); err != nil {
 			errs <- err
 		}
 	}()

@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
@@ -118,6 +121,59 @@ func TestRestoreSummarizeRestoresPreviousCheckpoint(t *testing.T) {
 	require.NotContains(t, textOf(view), "checkpoint two")
 	require.NotContains(t, textOf(view), "very-first-turn-marker",
 		"undoing the second compaction restores the first checkpoint rather than raw history")
+}
+
+func TestRestoreSummarizeRejectsBusySession(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, &recordingModel{text: "unused"}, nil, "test prompt").(*sessionAgent)
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	// Mark the session as having an active run; undo must refuse with
+	// ErrSessionBusy so it cannot race with the turn's final session save.
+	sa.activeRequests.Set(sess.ID, &activeCancel{cancel: func() {}})
+	defer sa.activeRequests.Del(sess.ID)
+
+	require.ErrorIs(t, sa.RestoreSummarize(ctx, sess.ID), ErrSessionBusy)
+}
+
+func TestRestoreSummarizeRevertsMemoryDecay(t *testing.T) {
+	env := testEnv(t)
+	model := &recordingModel{text: "the checkpoint"}
+	sa := attachMemory(testSessionAgent(env, model, nil, "test prompt"), env)
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+	seedSizedTurns(t, env, sess.ID, 6, 5_000)
+
+	big := strings.Repeat("filler ", 400)
+	entries := make([]compaction.Entry, 0, 25)
+	for i := range 25 {
+		entries = append(entries, compaction.Entry{
+			Kind:      compaction.KindObservation,
+			Relevance: compaction.RelevanceContext,
+			Text:      fmt.Sprintf("decayable note %d %s", i, big),
+		})
+	}
+	_, err = env.ledger.Append(ctx, sess.ID, entries)
+	require.NoError(t, err)
+	before, err := env.ledger.Ledger(ctx, sess.ID)
+	require.NoError(t, err)
+	beforeKept := before.Render(0).Kept
+
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
+	afterCompact, err := env.ledger.Ledger(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Less(t, afterCompact.Render(0).Kept, beforeKept, "compaction should decay overflow entries")
+
+	require.NoError(t, sa.RestoreSummarize(ctx, sess.ID))
+	afterUndo, err := env.ledger.Ledger(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, beforeKept, afterUndo.Render(0).Kept,
+		"undoing a compaction must restore the memory entries that decayed with it")
 }
 
 func textOf(msgs []message.Message) (all string) {

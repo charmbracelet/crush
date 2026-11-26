@@ -213,8 +213,14 @@ func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
 // ListFromSummary so distill skips already-covered history.
 func lastObservedSource(l compaction.Ledger) string {
 	for i := len(l.Entries) - 1; i >= 0; i-- {
-		if srcs := l.Entries[i].Sources; len(srcs) > 0 {
-			return srcs[len(srcs)-1]
+		e := l.Entries[i]
+		// Retirement drops cite the checkpoint that triggered decay, not an
+		// observed conversation message.
+		if e.Kind == compaction.KindDrop && len(e.Retires) > 0 {
+			continue
+		}
+		if len(e.Sources) > 0 {
+			return e.Sources[len(e.Sources)-1]
 		}
 	}
 	return ""

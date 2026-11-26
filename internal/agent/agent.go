@@ -1939,7 +1939,7 @@ func (a *sessionAgent) runSummarize(ctx context.Context, largeModel Model, sessi
 	// Memory decays when a checkpoint lands rather than on every turn: this is
 	// the moment that knows the window, and previewing must never mutate what
 	// a later checkpoint would be built from.
-	a.decayMemory(genCtx, sessionID, preview.DecayBudget)
+	a.decayMemory(genCtx, sessionID, preview.CheckpointID, preview.DecayBudget)
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
@@ -1986,11 +1986,11 @@ func applyCheckpointCounters(current *session.Session, preview compaction.Previe
 	current.EstimatedUsage = true
 }
 
-func (a *sessionAgent) decayMemory(ctx context.Context, sessionID string, budget compaction.RenderBudget) {
+func (a *sessionAgent) decayMemory(ctx context.Context, sessionID, checkpointID string, budget compaction.RenderBudget) {
 	if a.ledger == nil || budget <= 0 {
 		return
 	}
-	if retired, err := a.ledger.Decay(ctx, sessionID, budget); err != nil {
+	if retired, err := a.ledger.Decay(ctx, sessionID, checkpointID, budget); err != nil {
 		slog.Warn("Memory decay failed", "session_id", sessionID, "error", err)
 	} else if retired > 0 {
 		slog.Debug("Memory decayed", "session_id", sessionID, "entries", retired)
@@ -2041,7 +2041,7 @@ func (a *sessionAgent) ConfirmSummarize(ctx context.Context, sessionID string, p
 
 	a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPostCompact, SessionID: sessionID, Trigger: compactTriggerManual})
 	a.eventSessionCompacted(sessionID, preview.Replaced, preview.Kept)
-	a.decayMemory(ctx, sessionID, preview.DecayBudget)
+	a.decayMemory(ctx, sessionID, preview.CheckpointID, preview.DecayBudget)
 	slog.Info("Adopted a previewed checkpoint", "session_id", sessionID,
 		"replaced", preview.Replaced, "kept", preview.Kept)
 	return nil
@@ -2358,6 +2358,9 @@ func filterInactiveSummaries(msgs []message.Message, activeSummaryID string) []m
 // otherwise the full transcript comes back. The undone checkpoint row goes
 // away and the prompt counter is re-estimated from the restored view.
 func (a *sessionAgent) RestoreSummarize(ctx context.Context, sessionID string) error {
+	if a.HasPendingWork(sessionID) {
+		return ErrSessionBusy
+	}
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
@@ -2369,6 +2372,11 @@ func (a *sessionAgent) RestoreSummarize(ctx context.Context, sessionID string) e
 
 	if err := a.messages.Delete(ctx, checkpointID); err != nil {
 		return fmt.Errorf("failed to remove the checkpoint: %w", err)
+	}
+	if a.ledger != nil {
+		if _, err := a.ledger.UndoDecay(ctx, sessionID, checkpointID); err != nil {
+			return fmt.Errorf("failed to restore decayed memory: %w", err)
+		}
 	}
 
 	prevID := currentSession.PrevSummaryMessageID

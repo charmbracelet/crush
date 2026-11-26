@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,11 +19,16 @@ import (
 
 // Service persists the memory ledger for a session.
 type Service interface {
-	// Decay records what a bounded render could not keep, as retirement rows.
+	// Decay records what a bounded render could not keep, as retirement rows
+	// tagged with checkpointID so undoing that checkpoint can revert them.
 	// It runs when a checkpoint lands, so the decision about what memory is
 	// still worth carrying is made by the same event that knows the window.
 	// It returns how many entries were retired.
-	Decay(ctx context.Context, sessionID string, budget compaction.RenderBudget) (int, error)
+	Decay(ctx context.Context, sessionID, checkpointID string, budget compaction.RenderBudget) (int, error)
+	// UndoDecay removes the decay retirement row recorded for checkpointID,
+	// making the entries it retired active again. Returns how many entries
+	// were restored.
+	UndoDecay(ctx context.Context, sessionID, checkpointID string) (int, error)
 	// Append records entries and returns the rows actually stored, in
 	// insertion order. Seq numbers are assigned here rather than by callers,
 	// so the ledger's only clock cannot fork under concurrent observers.
@@ -145,7 +151,7 @@ func (s *service) Ledger(ctx context.Context, sessionID string) (compaction.Ledg
 // are more than any later reader would consult.
 const markerKeep = 200
 
-func (s *service) Decay(ctx context.Context, sessionID string, budget compaction.RenderBudget) (int, error) {
+func (s *service) Decay(ctx context.Context, sessionID, checkpointID string, budget compaction.RenderBudget) (int, error) {
 	unlock := s.lockSession(sessionID)
 	defer unlock()
 
@@ -170,14 +176,46 @@ func (s *service) Decay(ctx context.Context, sessionID string, budget compaction
 		return 0, nil
 	}
 
+	var sources []string
+	if checkpointID != "" {
+		sources = []string{checkpointID}
+	}
 	if _, err := s.appendLocked(ctx, sessionID, []compaction.Entry{{
 		Kind:    compaction.KindDrop,
 		Text:    "decayed: beyond the memory budget",
+		Sources: sources,
 		Retires: retire,
 	}}); err != nil {
 		return 0, err
 	}
 	return len(retire), nil
+}
+
+func (s *service) UndoDecay(ctx context.Context, sessionID, checkpointID string) (int, error) {
+	if checkpointID == "" {
+		return 0, nil
+	}
+	unlock := s.lockSession(sessionID)
+	defer unlock()
+
+	current, err := s.Ledger(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	restored := 0
+	for _, e := range current.Entries {
+		if e.Kind != compaction.KindDrop || len(e.Retires) == 0 {
+			continue
+		}
+		if !slices.Contains(e.Sources, checkpointID) {
+			continue
+		}
+		if err := s.q.DeleteLedgerEntry(ctx, e.ID); err != nil {
+			return restored, fmt.Errorf("ledger undo decay: %w", err)
+		}
+		restored += len(e.Retires)
+	}
+	return restored, nil
 }
 
 // staleMarkers lists coverage markers beyond the newest markerKeep, oldest

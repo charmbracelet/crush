@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1237,7 +1238,7 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 		PermissionMode: ws.PermissionMode,
 		Channels:       ws.Channels,
 		Prompts:        ws.Prompts,
-		Env:            ws.Env,
+		Env:            os.Environ(),
 		Version:        version.Version,
 	}
 }

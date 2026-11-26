@@ -472,18 +472,27 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	wsA, protoA, err := b.CreateWorkspace(argsA)
 	require.NoError(t, err)
 	require.Equal(t, proto.WorkspacePermissionModeYolo, protoA.PermissionMode)
-	require.Equal(t, originalEnv, protoA.Env)
+	require.Equal(t, originalEnv, wsA.Env)
+	require.Empty(t, protoA.Env, "proto responses must not leak workspace Env")
 
 	argsB := protoWS(cwd, dataDir, uuid.New().String())
 	argsB.PermissionMode = proto.WorkspacePermissionModeNormal
 	argsB.Debug = true
 	argsB.Env = []string{"BAZ=qux"}
-	_, protoB, err := b.CreateWorkspace(argsB)
+	wsB, protoB, err := b.CreateWorkspace(argsB)
 	require.NoError(t, err)
 	require.Equal(t, protoA.ID, protoB.ID)
 	require.Equal(t, proto.WorkspacePermissionModeYolo, protoB.PermissionMode, "first wins: PermissionMode must remain yolo")
-	require.Equal(t, originalEnv, protoB.Env, "proto must carry the originating client's Env")
+	require.Equal(t, originalEnv, wsB.Env, "workspace must keep the originating client's Env")
+	require.Empty(t, protoB.Env, "proto responses must not leak workspace Env")
 	require.Equal(t, permission.PermissionModeYolo, wsA.Cfg.Overrides().PermissionMode)
+
+	for _, listed := range b.ListWorkspaces() {
+		require.Empty(t, listed.Env, "ListWorkspaces must not leak workspace Env")
+	}
+	got, err := b.GetWorkspaceProto(wsA.ID)
+	require.NoError(t, err)
+	require.Empty(t, got.Env, "GetWorkspaceProto must not leak workspace Env")
 }
 
 // TestPathDedupe_Symlink confirms two paths that resolve to the same
@@ -751,14 +760,14 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			t.Cleanup(func() { drainBackend(t, b) })
 
 			argsA := protoWS(cwd, dataDir, uuid.New().String())
-			argsA.Env = []string{"FOO=bar"}
+			argsA.Env = []string{"FOO=bar", "SECRET_A=hunter2"}
 			wsA, _, err := b.CreateWorkspace(argsA)
 			require.NoError(t, err)
 			originalDebug := wsA.Cfg.Config().Options.Debug
 			originalMode := wsA.Cfg.Overrides().PermissionMode
 
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
-			argsB.Env = []string{"FOO=bar"} // identical by default
+			argsB.Env = []string{"FOO=bar", "SECRET_A=hunter2"} // identical by default
 			tc.mutate(&argsB)
 			_, _, err = b.CreateWorkspace(argsB)
 			require.NoError(t, err)
@@ -768,6 +777,8 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 				"Workspace flag mismatch on duplicate create",
 				"expected debug log for mismatching %s", tc.name,
 			)
+			require.NotContains(t, buf.String(), "hunter2", "env values must not be logged")
+			require.NotContains(t, buf.String(), "NEW=val", "env values must not be logged")
 			// Existing workspace's PermissionMode and Debug must not change.
 			require.Equal(t, originalMode, wsA.Cfg.Overrides().PermissionMode, "PermissionMode must be immutable on first-wins")
 			require.Equal(t, originalDebug, wsA.Cfg.Config().Options.Debug, "Debug must be immutable on first-wins")

@@ -223,6 +223,10 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	killGroupOnCancel(cmd)
 
 	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrWaitDelay) {
+			// Wait returns ErrWaitDelay only after a clean exit.
+			return ctx.Err()
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			code := exitErr.ExitCode()

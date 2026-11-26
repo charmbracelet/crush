@@ -499,6 +499,12 @@ type UI struct {
 	// pinentry dialog takes over the screen.
 	program *tea.Program
 
+	// resumeCommand brings Crush back after the terminal restarts, and
+	// quitting is set once the user quits so the terminal forgets it. See
+	// programResume.
+	resumeCommand []string
+	quitting      bool
+
 	// pinentryActive tracks whether the terminal is currently handed over
 	// to a pinentry dialog; pinentryTouchPending tracks whether the status
 	// bar shows the security key touch hint.
@@ -2714,6 +2720,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
+		m.quitting = true
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -4047,11 +4054,12 @@ func (m *UI) View() tea.View {
 	return v
 }
 
-// applyTerminalStatus attaches the program status, and the terminal progress
-// bar while the agent is busy. Kept outside the frame cache so the
-// randomized progress value stays fresh.
+// applyTerminalStatus attaches the program status, how to resume Crush, and
+// the terminal progress bar while the agent is busy. Kept outside the frame
+// cache so the randomized progress value stays fresh.
 func (m *UI) applyTerminalStatus(v *tea.View) {
 	v.ProgramStatus = m.programStatus()
+	v.ProgramResume = m.programResume()
 	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.

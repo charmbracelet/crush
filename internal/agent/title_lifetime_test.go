@@ -38,34 +38,28 @@ func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
-func TestTitle_CancelAllWaitsForInFlightTitle(t *testing.T) {
+func TestTitle_CancelAllStopsInFlightTitle(t *testing.T) {
 	t.Parallel()
-	sa, env, small, release := newGatedTitleAgent(t)
+	sa, env, small, _ := newGatedTitleAgent(t)
 
-	sess, err := env.sessions.Create(t.Context(), "New Session")
+	sess, err := env.sessions.Create(t.Context(), "Untitled")
 	require.NoError(t, err)
 
 	go sa.GenerateTitle(t.Context(), sess.ID, "hello there")
 	waitClosed(t, small.entered, "title stream")
 
-	// No run is active, so only the title can hold CancelAll.
+	// The gate is never released: CancelAll must stop the title rather
+	// than wait the model out.
 	done := make(chan struct{})
 	go func() {
 		sa.CancelAll()
 		close(done)
 	}()
-	select {
-	case <-done:
-		t.Fatal("CancelAll returned while a title was still generating")
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	release()
 	waitClosed(t, done, "CancelAll")
 
 	got, err := env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)
-	require.Equal(t, "Gated Title", got.Title)
+	require.Equal(t, DefaultSessionName, got.Title, "a stopped title still saves the fallback before CancelAll returns")
 }
 
 func TestTitle_RunDoesNotWaitForTitle(t *testing.T) {
@@ -88,7 +82,7 @@ func TestTitle_RunDoesNotWaitForTitle(t *testing.T) {
 	waitClosed(t, small.entered, "title stream")
 
 	release()
-	sa.CancelAll()
+	require.True(t, sa.titles.wait(5*time.Second), "the title finishes once the model answers")
 
 	got, err := env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)

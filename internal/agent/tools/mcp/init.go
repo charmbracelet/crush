@@ -1119,6 +1119,10 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 		}
 	}
 
+	if m.Type == config.MCPStdio {
+		transport = &stdioTransport{inner: transport}
+	}
+
 	// Wrap the transport so channel notifications can be intercepted. The
 	// gate starts undecided: notifications that arrive during capability
 	// negotiation are buffered. After Connect resolves, the gate is opened

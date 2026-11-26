@@ -986,6 +986,9 @@ func TestClose_LastReferenceClosesSessions(t *testing.T) {
 const stdioServerEnv = "CRUSH_TEST_MCP_STDIO_SERVER"
 
 func TestMain(m *testing.M) {
+	if os.Getenv(stdioServerEnv) == stallingStdioServer {
+		serveStallingStdio()
+	}
 	if os.Getenv(stdioServerEnv) == "1" {
 		server := mcp.NewServer(&mcp.Implementation{Name: "stdio-test"}, nil)
 		if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {

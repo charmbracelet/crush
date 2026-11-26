@@ -18,6 +18,7 @@ import (
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
@@ -368,7 +369,7 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 		return err
 	}
 
-	data, err := readFile(path)
+	data, err := fsext.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			data = []byte("{}")
@@ -405,7 +406,7 @@ func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
 	if err != nil {
 		return false
 	}
-	data, err := readFile(path)
+	data, err := fsext.ReadFile(path)
 	if err != nil {
 		return false
 	}
@@ -1335,7 +1336,7 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 		return nil, err
 	}
 
-	data, err := readFile(path)
+	data, err := fsext.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -1605,7 +1606,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 
 	// Merge workspace config if present
 	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
-	if wsData, err := readFile(workspacePath); err == nil && len(wsData) > 0 {
+	if wsData, err := fsext.ReadFile(workspacePath); err == nil && len(wsData) > 0 {
 		if !json.Valid(wsData) {
 			return fmt.Errorf("invalid JSON in config file %s", workspacePath)
 		}

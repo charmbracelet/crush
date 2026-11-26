@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/gateway"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/jq"
+	"github.com/charmbracelet/crush/internal/plugins"
 	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
@@ -269,7 +270,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	}
 
 	// Load workspace config last so it has highest priority.
-	if wsData, err := readFile(store.workspacePath); err == nil && len(wsData) > 0 {
+	if wsData, err := fsext.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
 		if !json.Valid(wsData) {
 			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
 		}
@@ -1258,80 +1259,10 @@ func lookupConfigs(cwd string) []string {
 	return append(append(configPaths, lookupPlugins(cwd)...), foundConfigs...)
 }
 
-// pluginDirName is the directory, under both the global config directory and
-// the working directory's .crush folder, whose scripts run as plugins.
-const pluginDirName = "plugins"
-
 // lookupPlugins returns plugin scripts in load order: global first, then the
-// working directory's, each directory in name order. A plugin is a Bash
-// script that uses the same config builtins as a crushrc, which is how a
-// provider gets added without a Crush release.
-//
-// ponytail: only the working directory's .crush/plugins is scanned, not
-// every level up to the project boundary. Scripts one directory deep are
-// included, because that is where `crush plugin install` puts a repository,
-// but nothing deeper is. Extend the walk if plugins start nesting.
+// working directory's.
 func lookupPlugins(cwd string) []string {
-	dirs := []string{
-		filepath.Join(filepath.Dir(GlobalConfig()), pluginDirName),
-		filepath.Join(cwd, "."+appName, pluginDirName),
-	}
-	var paths []string
-	for _, dir := range dirs {
-		paths = append(paths, pluginScripts(dir)...)
-	}
-	return paths
-}
-
-// pluginScripts lists the runnable scripts in a plugin directory, sorted by
-// name so load order is stable across platforms. Both the directory's own
-// scripts and those of its immediate subdirectories are returned, so an
-// installed plugin repository loads as a group. A missing directory simply
-// contributes nothing.
-func pluginScripts(dir string) []string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var found []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") {
-			// Hidden entries are lock files and editor droppings, not
-			// plugins.
-			continue
-		}
-		if entry.IsDir() {
-			// One level only: a subdirectory is an installed repository, and
-			// anything nested inside it is that repository's own business.
-			found = append(found, topLevelScripts(filepath.Join(dir, name))...)
-			continue
-		}
-		if !strings.HasSuffix(name, ".sh") {
-			continue
-		}
-		found = append(found, filepath.Join(dir, name))
-	}
-	slices.Sort(found)
-	return found
-}
-
-// topLevelScripts lists the runnable scripts directly inside one plugin
-// repository directory.
-func topLevelScripts(dir string) []string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var found []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".sh") {
-			continue
-		}
-		found = append(found, filepath.Join(dir, name))
-	}
-	return found
+	return plugins.Scripts(plugins.GlobalRoot(GlobalConfig()), plugins.ProjectRoot(cwd))
 }
 
 // isShellConfig reports whether a config path is executed as Bash rather
@@ -1357,7 +1288,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 		if path == "" {
 			continue
 		}
-		data, err := readFile(path)
+		data, err := fsext.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -1536,7 +1467,7 @@ func migrateDisableNotifications() {
 	filesToClean := []string{}
 
 	for _, path := range []string{globalConfig, dataConfig} {
-		data, err := readFile(path)
+		data, err := fsext.ReadFile(path)
 		if err != nil {
 			continue
 		}
@@ -1570,7 +1501,7 @@ func migrateDisableNotifications() {
 	}
 
 	if migratedValue != "" {
-		data, err := readFile(dataConfig)
+		data, err := fsext.ReadFile(dataConfig)
 		if err == nil {
 			if !gjson.Get(string(data), "options.notifications").Exists() {
 				updated, err := sjson.Set(string(data), "options.notifications", migratedValue)
@@ -1587,7 +1518,7 @@ func migrateDisableNotifications() {
 
 	// Remove deprecated fields from all files that contain them.
 	for _, path := range filesToClean {
-		data, err := readFile(path)
+		data, err := fsext.ReadFile(path)
 		if err != nil {
 			continue
 		}

@@ -1,6 +1,8 @@
 package ledger
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/compaction"
@@ -190,4 +192,56 @@ func TestAppendDistinguishesMarkersBySessionAndSources(t *testing.T) {
 	other, err := svc.Append(t.Context(), s2.ID, marker("m-1"))
 	require.NoError(t, err)
 	require.Len(t, other, 1, "same marker in another session must not collide")
+}
+
+func TestConcurrentAppendAndDecayDropNoWrites(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+	ctx := t.Context()
+
+	const writers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, writers+1)
+	for i := range writers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			stored, err := svc.Append(ctx, sessionID, []compaction.Entry{{
+				Kind:      compaction.KindObservation,
+				Relevance: compaction.RelevanceContext,
+				Text:      fmt.Sprintf("concurrent observation %d", i),
+				Sources:   []string{fmt.Sprintf("m-%d", i)},
+			}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if len(stored) != 1 {
+				errs <- fmt.Errorf("writer %d stored %d rows, want 1", i, len(stored))
+			}
+		}(i)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, err := svc.Decay(ctx, sessionID, compaction.RenderBudget(1)); err != nil {
+			errs <- err
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	l, err := svc.Ledger(ctx, sessionID)
+	require.NoError(t, err)
+	obs := 0
+	for _, e := range l.Entries {
+		if e.Kind == compaction.KindObservation {
+			obs++
+		}
+	}
+	require.Equal(t, writers, obs, "no concurrent observation may be dropped by seq collision")
 }

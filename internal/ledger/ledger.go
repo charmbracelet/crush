@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/compaction"
@@ -35,22 +36,44 @@ type Service interface {
 }
 
 type service struct {
-	q db.Querier
+	q     db.Querier
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
 }
 
 // NewService builds a ledger service over the shared query layer.
 func NewService(q db.Querier) Service {
-	return &service{q: q}
+	return &service{
+		q:     q,
+		locks: make(map[string]*sync.Mutex),
+	}
+}
+
+func (s *service) lockSession(sessionID string) func() {
+	s.mu.Lock()
+	mu, ok := s.locks[sessionID]
+	if !ok {
+		mu = &sync.Mutex{}
+		s.locks[sessionID] = mu
+	}
+	s.mu.Unlock()
+	mu.Lock()
+	return mu.Unlock
 }
 
 func (s *service) Append(ctx context.Context, sessionID string, entries []compaction.Entry) ([]compaction.Entry, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
+	unlock := s.lockSession(sessionID)
+	defer unlock()
+	return s.appendLocked(ctx, sessionID, entries)
+}
 
+func (s *service) appendLocked(ctx context.Context, sessionID string, entries []compaction.Entry) ([]compaction.Entry, error) {
 	// One insert per entry rather than a single statement: the row count is
-	// small, an observer runs at turn end when nothing else is writing, and
-	// ON CONFLICT DO NOTHING makes a retried append safe rather than fatal.
+	// small, and ON CONFLICT DO NOTHING makes a retried append safe rather
+	// than fatal.
 	stored := make([]compaction.Entry, 0, len(entries))
 	for _, e := range entries {
 		next, err := s.nextSeq(ctx, sessionID)
@@ -123,6 +146,9 @@ func (s *service) Ledger(ctx context.Context, sessionID string) (compaction.Ledg
 const markerKeep = 200
 
 func (s *service) Decay(ctx context.Context, sessionID string, budget compaction.RenderBudget) (int, error) {
+	unlock := s.lockSession(sessionID)
+	defer unlock()
+
 	current, err := s.Ledger(ctx, sessionID)
 	if err != nil {
 		return 0, err
@@ -144,7 +170,7 @@ func (s *service) Decay(ctx context.Context, sessionID string, budget compaction
 		return 0, nil
 	}
 
-	if _, err := s.Append(ctx, sessionID, []compaction.Entry{{
+	if _, err := s.appendLocked(ctx, sessionID, []compaction.Entry{{
 		Kind:    compaction.KindDrop,
 		Text:    "decayed: beyond the memory budget",
 		Retires: retire,

@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/compaction"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
@@ -271,4 +274,76 @@ func TestObserverSkipsFailedAndCancelledTurns(t *testing.T) {
 	}, 750*time.Millisecond, 50*time.Millisecond,
 		"a failed or cancelled turn is not memory")
 	require.Empty(t, observer.calls)
+}
+
+type blockingObserverModel struct {
+	recordingModel
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (m *blockingObserverModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	m.once.Do(func() {
+		close(m.entered)
+		<-m.release
+	})
+	return m.recordingModel.Stream(ctx, call)
+}
+
+type countingMessages struct {
+	message.Service
+	listCalls        int
+	fromSummaryCalls int
+	lastSummaryID    string
+}
+
+func (c *countingMessages) List(ctx context.Context, sessionID string) ([]message.Message, error) {
+	c.listCalls++
+	return c.Service.List(ctx, sessionID)
+}
+
+func (c *countingMessages) ListFromSummary(ctx context.Context, sessionID, summaryMessageID string) ([]message.Message, error) {
+	c.fromSummaryCalls++
+	c.lastSummaryID = summaryMessageID
+	return c.Service.ListFromSummary(ctx, sessionID, summaryMessageID)
+}
+
+func TestDistillSerializesConcurrentPassesAndUsesAnchor(t *testing.T) {
+	env := testEnv(t)
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+	seedSizedTurns(t, env, sess.ID, 2, 2_000)
+
+	observer := &blockingObserverModel{
+		recordingModel: recordingModel{text: "[]"},
+		entered:        make(chan struct{}),
+		release:        make(chan struct{}),
+	}
+	msgs := &countingMessages{Service: env.messages}
+	sa := testSessionAgent(env, &recordingModel{text: "unused"}, observer, "test prompt").(*sessionAgent)
+	sa.messages = msgs
+	sa.ledger = env.ledger
+	sa.observeMemory = true
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		require.NoError(t, sa.distill(ctx, sess.ID))
+	}()
+	<-observer.entered
+	go func() {
+		defer wg.Done()
+		require.NoError(t, sa.distill(ctx, sess.ID))
+	}()
+	close(observer.release)
+	wg.Wait()
+
+	require.Len(t, observer.calls, 1, "concurrent passes for one session must not make duplicate model calls")
+	require.Zero(t, msgs.listCalls, "distill must read via ListFromSummary instead of loading full List")
+	require.Equal(t, 2, msgs.fromSummaryCalls)
+	require.NotEmpty(t, msgs.lastSummaryID, "second pass must anchor on the last observed source message")
 }

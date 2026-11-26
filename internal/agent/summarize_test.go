@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -166,7 +167,7 @@ func TestCompactionTranscriptDirFollowsTheDataDirectory(t *testing.T) {
 	// Tests build the agent without a config store, which means nowhere to
 	// keep displaced transcript.
 	require.Empty(t, sa.compactionTranscriptDir())
-	require.Equal(t, "/data/compaction", compaction.TranscriptDir("/data"))
+	require.Equal(t, filepath.Join("/data", "compaction"), compaction.TranscriptDir("/data"))
 	require.Empty(t, compaction.TranscriptDir(""))
 }
 

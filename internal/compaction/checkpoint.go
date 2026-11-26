@@ -165,21 +165,29 @@ func parseAttrs(tag string) (Info, bool) {
 		}
 		value, tag = value[:closing], value[closing+1:]
 
-		number, err := strconv.ParseInt(value, 10, 64)
-		switch {
-		case err != nil && key == "transcript_path":
+		switch key {
+		case "transcript_path":
 			info.TranscriptPath, found = value, true
-		case err != nil:
-		case key == "replaced_messages":
-			info.ReplacedMessages, found = int(number), true
-		case key == "replaced_tokens":
-			info.ReplacedTokens, found = number, true
-		case key == "kept_messages":
-			info.KeptMessages, found = int(number), true
-		case key == "kept_tokens":
-			info.KeptTokens, found = number, true
-		case key == "observed":
-			info.Observed, found = int(number), true
+		case "replaced_messages":
+			if n, err := strconv.Atoi(value); err == nil {
+				info.ReplacedMessages, found = n, true
+			}
+		case "replaced_tokens":
+			if n, err := strconv.ParseInt(value, 10, 64); err == nil {
+				info.ReplacedTokens, found = n, true
+			}
+		case "kept_messages":
+			if n, err := strconv.Atoi(value); err == nil {
+				info.KeptMessages, found = n, true
+			}
+		case "kept_tokens":
+			if n, err := strconv.ParseInt(value, 10, 64); err == nil {
+				info.KeptTokens, found = n, true
+			}
+		case "observed":
+			if n, err := strconv.Atoi(value); err == nil {
+				info.Observed, found = n, true
+			}
 		}
 	}
 	return info, found
@@ -207,7 +215,10 @@ func parseProse(body string) Info {
 	return info
 }
 
-func atoi(s string) int { return int(atoi64(s)) }
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
 
 func atoi64(s string) int64 {
 	n, _ := strconv.ParseInt(s, 10, 64)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -89,20 +90,46 @@ func (a *sessionAgent) observeTurn(complete notify.RunComplete) {
 	}()
 }
 
+// lockObserve serializes memory observation passes for a session so rapid
+// turns do not run duplicate small-model calls over the same unseen messages.
+func (a *sessionAgent) lockObserve(sessionID string) func() {
+	if a.observeMu == nil {
+		return func() {}
+	}
+	mu, ok := a.observeMu.Get(sessionID)
+	if !ok {
+		a.observeMuCreate.Lock()
+		mu, ok = a.observeMu.Get(sessionID)
+		if !ok {
+			mu = &sync.Mutex{}
+			a.observeMu.Set(sessionID, mu)
+		}
+		a.observeMuCreate.Unlock()
+	}
+	mu.Lock()
+	return mu.Unlock
+}
+
 // distill gathers the unseen conversation and appends what the observer makes
 // of it.
 func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
-	msgs, err := a.messages.List(ctx, sessionID)
+	unlock := a.lockObserve(sessionID)
+	defer unlock()
+
+	current, err := a.ledger.Ledger(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Start from the latest message the ledger already covered rather than
+	// loading the full transcript (which can be tens of MB on long sessions).
+	// ListFromSummary falls back to List when the anchor is empty or missing.
+	msgs, err := a.messages.ListFromSummary(ctx, sessionID, lastObservedSource(current))
 	if err != nil {
 		return fmt.Errorf("list messages: %w", err)
 	}
 	if len(msgs) == 0 {
 		return nil
-	}
-
-	current, err := a.ledger.Ledger(ctx, sessionID)
-	if err != nil {
-		return err
 	}
 
 	// Unobserved rather than "messages after a position": an entry cites the
@@ -169,6 +196,18 @@ func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
 	}
 	slog.Debug("Memory observed", "session", sessionID, "entries", len(stored))
 	return nil
+}
+
+// lastObservedSource returns the last source message ID recorded in the
+// ledger, or "" if no entry has cited a source yet. Used to anchor
+// ListFromSummary so distill skips already-covered history.
+func lastObservedSource(l compaction.Ledger) string {
+	for i := len(l.Entries) - 1; i >= 0; i-- {
+		if srcs := l.Entries[i].Sources; len(srcs) > 0 {
+			return srcs[len(srcs)-1]
+		}
+	}
+	return ""
 }
 
 // uncitedOf lists the messages a pass read that no entry claims to rest on.

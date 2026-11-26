@@ -2554,12 +2554,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before restoring the checkpoint..."))
 			break
 		}
-		cmds = append(cmds, func() tea.Msg {
-			if err := m.com.Workspace.AgentRestoreSummarize(context.Background(), msg.SessionID); err != nil {
-				return util.ReportError(err)()
-			}
-			return nil
-		}, m.loadSession(msg.SessionID))
+		cmds = append(cmds, tea.Sequence(
+			func() tea.Msg {
+				if err := m.com.Workspace.AgentRestoreSummarize(context.Background(), msg.SessionID); err != nil {
+					return util.ReportError(err)()
+				}
+				return nil
+			},
+			m.loadSession(msg.SessionID),
+		))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()

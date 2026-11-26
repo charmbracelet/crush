@@ -289,6 +289,9 @@ type sessionAgent struct {
 	// dispatchMu so two goroutines can't race to lock different mutex
 	// instances for the same session.
 	dispatchMuCreate sync.Mutex
+	// observeMu serializes background memory observation passes per session.
+	observeMu       *csync.Map[string, *sync.Mutex]
+	observeMuCreate sync.Mutex
 	// acceptedMu serializes increments/decrements of acceptedRuns and
 	// the assignment of accept sequence numbers from acceptSeqGen. It
 	// is separate from dispatchMu so AcceptedRun.Close (which may run
@@ -359,6 +362,7 @@ func NewSessionAgent(
 		pendingPreviews:      csync.NewMap[string, string](),
 		titles:               cmp.Or(opts.titles, new(titleTracker)),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
+		observeMu:            csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
 	}

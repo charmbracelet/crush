@@ -13,11 +13,9 @@ import (
 // the honest stub; giving it methods would claim more than the test needs.
 type presentLedger struct{ ledger.Service }
 
-// TestObservesMemoryDefaultsOn pins the default: recording is on unless the
-// user turns it off. A config with no compaction block at all and a config with
-// the option unset must agree, because the difference between them is whether
-// the user has ever looked at the setting, not what they want.
-func TestObservesMemoryDefaultsOn(t *testing.T) {
+// TestObservesMemoryDefaultsOff pins the default: recording is opt-in so users
+// do not pay an extra small-model call per turn unless they enable it.
+func TestObservesMemoryDefaultsOff(t *testing.T) {
 	t.Parallel()
 
 	off := false
@@ -33,13 +31,13 @@ func TestObservesMemoryDefaultsOn(t *testing.T) {
 		{
 			name:      "no compaction block at all",
 			hasLedger: true,
-			want:      true,
+			want:      false,
 		},
 		{
 			name:       "compaction block, option unset",
 			compaction: &config.CompactionOptions{},
 			hasLedger:  true,
-			want:       true,
+			want:       false,
 		},
 		{
 			name:       "explicitly on",

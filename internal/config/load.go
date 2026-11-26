@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
@@ -312,11 +311,8 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		assignIfNil(&cfg.Options.TUI.Transparent, true)
 	}
 
-	// Load known providers, this loads the config from catwalk. A failed
-	// refresh still yields the cached or embedded catalog, so only an empty
-	// list is fatal: starting up without providers is worse than starting
-	// up with slightly stale ones. Pass a Hyper token refresher so the
-	// catalog fetch can retry on 401.
+	// Only an empty list is fatal: stale providers beat none.
+	gens := currentProviderGens()
 	providers, err := LoadProviders(ctx, cfg, func(ctx context.Context) error {
 		return store.RefreshOAuthToken(ctx, ScopeGlobal, "hyper")
 	})
@@ -329,24 +325,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		}
 		slog.Warn("Continuing with the previously known providers", "error", err)
 	}
-	store.knownProviders = providers
-
-	// When Catwalk refreshed its catalog this run, give the model
-	// catalogs that shadow Catwalk's the same treatment: the ChatGPT and
-	// Grok catalogs are otherwise only fetched at login and would freeze
-	// there while Catwalk keeps moving. Best effort; a failed fetch keeps
-	// the catalog loaded from config.
-	//
-	// The refetches publish a copy-on-write config, so re-read it
-	// afterwards: the mutations below must land on the live config rather
-	// than a snapshot the store has already replaced.
-	if CatwalkUpdated() {
-		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		store.refetchOpenAIModels(fetchCtx, ScopeGlobal)
-		store.refetchGrokModels(fetchCtx, ScopeGlobal)
-		cancel()
-		cfg = store.Config()
-	}
+	store.knownProviders, store.providerGens = providers, gens
 
 	env := env.New()
 	// Configure providers
@@ -1447,16 +1426,10 @@ func assignIfNil[T any](ptr **T, val T) {
 
 // isInsideWorktree reports whether dir is inside a git working tree. It
 // checks dir rather than the process working directory, which a server
-// shares across every workspace it hosts.
+// shares across every workspace it hosts. It shares worktreeRoot's memoized
+// lookup, since git only reports a top level from inside a working tree.
 func isInsideWorktree(dir string) bool {
-	cmd := exec.CommandContext(
-		context.Background(),
-		"git", "rev-parse",
-		"--is-inside-work-tree",
-	)
-	cmd.Dir = dir
-	bts, err := cmd.CombinedOutput()
-	return err == nil && strings.TrimSpace(string(bts)) == "true"
+	return worktreeRoot(dir) != ""
 }
 
 // worktreeRoot returns the absolute path of the git working tree root for

@@ -214,12 +214,11 @@ func stubGrokModels(t *testing.T, models []catwalk.Model) *bool {
 	return &called
 }
 
-// TestLoadRefreshesGrokModelsWhenCatwalkUpdates covers the startup
-// wiring: when Catwalk delivers a fresh catalog, the Grok model catalog
-// is refreshed in the same run, and the config Load publishes afterwards
-// still carries the resolved default models (the refresh swaps the
-// config out from under Load, which must re-read it).
-func TestLoadRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
+// TestRefreshCatalogsRefreshesGrokModelsWhenCatwalkUpdates covers the
+// background wiring: startup does not wait on the Grok catalog, and when
+// Catwalk delivers a fresh catalog the refresh renews it and reloads,
+// keeping the resolved default models.
+func TestRefreshCatalogsRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
 	// Not parallel: swaps package-level provider state and the fetch
 	// stub, and sets environment variables.
 	workDir, dataDir := isolateLoadEnv(t)
@@ -246,8 +245,11 @@ func TestLoadRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
 
 	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
+	require.False(t, *fetched, "startup leaves the Grok catalog to the background refresh")
 
-	require.True(t, CatwalkUpdated(), "the stub served a fresh catalog")
+	reloaded, err := store.RefreshCatalogs(t.Context())
+	require.NoError(t, err)
+	require.True(t, reloaded)
 	require.True(t, *fetched, "the Grok catalog refresh rides the Catwalk update")
 
 	pc, ok := store.Config().Providers.Get("xai")
@@ -281,7 +283,6 @@ func TestLoadKeepsGrokModelsWhenCatwalkNotModified(t *testing.T) {
 	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
-	require.False(t, CatwalkUpdated(), "the stub reported the catalog unchanged")
 	require.False(t, *fetched, "an unchanged Catwalk catalog does not trigger a refresh")
 
 	pc, ok := store.Config().Providers.Get("xai")

@@ -24,6 +24,7 @@ type modelsServer struct {
 	mu       sync.Mutex
 	ids      []string
 	requests atomic.Int32
+	down     atomic.Bool
 }
 
 func newModelsServer(t *testing.T, ids ...string) *modelsServer {
@@ -31,6 +32,10 @@ func newModelsServer(t *testing.T, ids ...string) *modelsServer {
 	s := &modelsServer{ids: ids}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		s.requests.Add(1)
+		if s.down.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		entries := make([]string, len(s.ids))
@@ -171,14 +176,14 @@ func TestDiscovery_StartupKeepsSelectionAndRefreshesInBackground(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []string{"a", "b"}, modelIDs(p.Models))
 
-	reloaded, err := store.RefreshDiscoveredModels(t.Context())
+	reloaded, err := store.RefreshCatalogs(t.Context())
 	require.NoError(t, err)
 	require.True(t, reloaded)
 	p, ok = store.Config().Providers.Get("local")
 	require.True(t, ok)
 	require.Equal(t, []string{"a", "b", "c"}, modelIDs(p.Models))
 
-	reloaded, err = store.RefreshDiscoveredModels(t.Context())
+	reloaded, err = store.RefreshCatalogs(t.Context())
 	require.NoError(t, err)
 	require.False(t, reloaded, "an unchanged listing does not reload")
 }
@@ -209,4 +214,30 @@ func TestDiscovery_ReloadDiscoversNewProvider(t *testing.T) {
 	p, ok := store.Config().Providers.Get("added")
 	require.True(t, ok, "a provider added mid-session is discovered on reload")
 	require.Equal(t, []string{"x", "y"}, modelIDs(p.Models))
+}
+
+func TestDiscovery_FailedProbeLeavesLaterStartupsToTheBackground(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	server := newModelsServer(t, "a")
+	server.down.Store(true)
+	pc := ProviderConfig{BaseURL: server.URL + "/v1"}
+
+	configureCustom(t, dir, pc)
+	require.EqualValues(t, 1, server.requests.Load(), "a provider never seen before is probed inline")
+
+	store, cfg := configureCustom(t, dir, pc)
+	require.EqualValues(t, 1, server.requests.Load(), "a provider that failed last time is not probed during startup")
+	_, ok := cfg.Providers.Get("local")
+	require.False(t, ok, "without models it is left out, as when the probe fails")
+	require.Len(t, store.cachedDiscovery, 1, "the background refresh retries it")
+
+	server.down.Store(false)
+	fresh := store.probeAndCache(t.Context(), store.cachedDiscovery, NewShellVariableResolver(env.NewFromMap(nil)))
+	require.Equal(t, []string{"a"}, modelIDs(fresh["local"]))
+
+	_, cfg = configureCustom(t, dir, pc)
+	p, ok := cfg.Providers.Get("local")
+	require.True(t, ok)
+	require.Equal(t, []string{"a"}, modelIDs(p.Models), "once it answers, later startups get its models")
 }

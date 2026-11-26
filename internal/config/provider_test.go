@@ -15,10 +15,8 @@ import (
 
 func resetProviderState() {
 	providerOnce = sync.Once{}
-	providerList = nil
-	providerErr = nil
-	catwalkSyncer = &catwalkSync{}
-	hyperSyncer = &hyperSync{}
+	catwalkSyncer = newCatwalkSync()
+	hyperSyncer = newHyperSync()
 }
 
 func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
@@ -26,8 +24,8 @@ func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", tmpDir)
 
 	// Use a test-specific instance to avoid global state interference.
-	testCatwalkSyncer := &catwalkSync{}
-	testHyperSyncer := &hyperSync{}
+	testCatwalkSyncer := newCatwalkSync()
+	testHyperSyncer := newHyperSync()
 
 	originalCatwalSyncer := catwalkSyncer
 	originalHyperSyncer := hyperSyncer
@@ -59,8 +57,8 @@ func TestProviders_Integration_WithMockClients(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", tmpDir)
 
 	// Create fresh syncers for this test.
-	testCatwalkSyncer := &catwalkSync{}
-	testHyperSyncer := &hyperSync{}
+	testCatwalkSyncer := newCatwalkSync()
+	testHyperSyncer := newHyperSync()
 
 	// Initialize with mock clients.
 	mockCatwalkClient := &mockCatwalkClient{
@@ -82,8 +80,8 @@ func TestProviders_Integration_WithMockClients(t *testing.T) {
 	catwalkPath := tmpDir + "/crush/providers.json"
 	hyperPath := tmpDir + "/crush/hyper.json"
 
-	testCatwalkSyncer.Init(mockCatwalkClient, catwalkPath, true)
-	testHyperSyncer.Init(mockHyperClient, hyperPath, true)
+	testCatwalkSyncer.Init(mockCatwalkClient.GetProviders, catwalkPath, true)
+	testHyperSyncer.Init(mockHyperClient.Get, hyperPath, true)
 
 	// Get providers from each syncer.
 	catwalkProviders, err := testCatwalkSyncer.Get(t.Context())
@@ -120,16 +118,17 @@ func TestProviders_Integration_WithCachedData(t *testing.T) {
 
 	// Write Hyper cache.
 	hyperProvider := catwalk.Provider{
-		Name: "Cached Hyper",
-		ID:   "hyper",
+		Name:   "Cached Hyper",
+		ID:     "hyper",
+		Models: []catwalk.Model{{ID: "cached-model"}},
 	}
 	data, err = json.Marshal(hyperProvider)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(hyperPath, data, 0o644))
 
 	// Create fresh syncers.
-	testCatwalkSyncer := &catwalkSync{}
-	testHyperSyncer := &hyperSync{}
+	testCatwalkSyncer := newCatwalkSync()
+	testHyperSyncer := newHyperSync()
 
 	// Mock clients that return ErrNotModified.
 	mockCatwalkClient := &mockCatwalkClient{
@@ -139,8 +138,8 @@ func TestProviders_Integration_WithCachedData(t *testing.T) {
 		err: catwalk.ErrNotModified,
 	}
 
-	testCatwalkSyncer.Init(mockCatwalkClient, catwalkPath, true)
-	testHyperSyncer.Init(mockHyperClient, hyperPath, true)
+	testCatwalkSyncer.Init(mockCatwalkClient.GetProviders, catwalkPath, true)
+	testHyperSyncer.Init(mockHyperClient.Get, hyperPath, true)
 
 	// Get providers - should use cached.
 	catwalkResult, err := testCatwalkSyncer.Get(t.Context())
@@ -157,8 +156,8 @@ func TestProviders_Integration_CatwalkFailsHyperSucceeds(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
 
-	testCatwalkSyncer := &catwalkSync{}
-	testHyperSyncer := &hyperSync{}
+	testCatwalkSyncer := newCatwalkSync()
+	testHyperSyncer := newHyperSync()
 
 	// Catwalk fails, Hyper succeeds.
 	mockCatwalkClient := &mockCatwalkClient{
@@ -177,8 +176,8 @@ func TestProviders_Integration_CatwalkFailsHyperSucceeds(t *testing.T) {
 	catwalkPath := tmpDir + "/crush/providers.json"
 	hyperPath := tmpDir + "/crush/hyper.json"
 
-	testCatwalkSyncer.Init(mockCatwalkClient, catwalkPath, true)
-	testHyperSyncer.Init(mockHyperClient, hyperPath, true)
+	testCatwalkSyncer.Init(mockCatwalkClient.GetProviders, catwalkPath, true)
+	testHyperSyncer.Init(mockHyperClient.Get, hyperPath, true)
 
 	catwalkResult, err := testCatwalkSyncer.Get(t.Context())
 	require.NoError(t, err)
@@ -193,8 +192,8 @@ func TestProviders_Integration_BothFail(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
 
-	testCatwalkSyncer := &catwalkSync{}
-	testHyperSyncer := &hyperSync{}
+	testCatwalkSyncer := newCatwalkSync()
+	testHyperSyncer := newHyperSync()
 
 	// Both fail.
 	mockCatwalkClient := &mockCatwalkClient{
@@ -207,15 +206,15 @@ func TestProviders_Integration_BothFail(t *testing.T) {
 	catwalkPath := tmpDir + "/crush/providers.json"
 	hyperPath := tmpDir + "/crush/hyper.json"
 
-	testCatwalkSyncer.Init(mockCatwalkClient, catwalkPath, true)
-	testHyperSyncer.Init(mockHyperClient, hyperPath, true)
+	testCatwalkSyncer.Init(mockCatwalkClient.GetProviders, catwalkPath, true)
+	testHyperSyncer.Init(mockHyperClient.Get, hyperPath, true)
 
 	catwalkResult, err := testCatwalkSyncer.Get(t.Context())
 	require.NoError(t, err)
 	require.NotEmpty(t, catwalkResult) // Should fall back to embedded.
 
 	hyperResult, err := testHyperSyncer.Get(t.Context())
-	require.NoError(t, err)
+	require.Error(t, err, "an unusable response is reported")
 	require.Equal(t, "Charm Hyper", hyperResult.Name) // Falls back to embedded when no models.
 }
 
@@ -337,16 +336,16 @@ func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
 
 	// Prime both syncers with mock clients so Providers reuses the memoized
 	// outcome instead of reaching the network.
-	catwalkSyncer.Init(&mockCatwalkClient{
+	catwalkSyncer.Init((&mockCatwalkClient{
 		providers: []catwalk.Provider{{Name: "Provider1", ID: "p1"}},
-	}, unwritable, true)
-	hyperSyncer.Init(&mockHyperClient{
+	}).GetProviders, unwritable, true)
+	hyperSyncer.Init((&mockHyperClient{
 		provider: catwalk.Provider{
 			Name:   "Hyper",
 			ID:     "hyper",
 			Models: []catwalk.Model{{ID: "hyper-1", Name: "Hyper Model"}},
 		},
-	}, unwritable, true)
+	}).Get, unwritable, true)
 
 	catwalkProviders, catwalkErr := catwalkSyncer.Get(t.Context())
 	require.Error(t, catwalkErr, "cache write should fail")
@@ -375,12 +374,12 @@ func TestProviders_FallsBackToEmbeddedHyper(t *testing.T) {
 	resetProviderState()
 	defer resetProviderState()
 
-	catwalkSyncer.Init(&mockCatwalkClient{
+	catwalkSyncer.Init((&mockCatwalkClient{
 		providers: []catwalk.Provider{{Name: "Provider1", ID: "p1"}},
-	}, filepath.Join(tmpDir, "providers.json"), true)
-	hyperSyncer.Init(&mockHyperClient{
+	}).GetProviders, filepath.Join(tmpDir, "providers.json"), true)
+	hyperSyncer.Init((&mockHyperClient{
 		err: errors.New("network error"),
-	}, filepath.Join(tmpDir, "hyper.json"), true)
+	}).Get, filepath.Join(tmpDir, "hyper.json"), true)
 
 	_, _ = catwalkSyncer.Get(t.Context())
 	_, _ = hyperSyncer.Get(t.Context())

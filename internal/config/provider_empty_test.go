@@ -11,8 +11,8 @@ import (
 
 type emptyProviderClient struct{}
 
-func (m *emptyProviderClient) GetProviders(context.Context, string) ([]catwalk.Provider, error) {
-	return []catwalk.Provider{}, nil
+func (m *emptyProviderClient) GetProviders(context.Context, string) ([]catwalk.Provider, []byte, error) {
+	return []catwalk.Provider{}, []byte("[]"), nil
 }
 
 // TestCatwalkSync_GetEmptyResultFromClient tests that when the client returns
@@ -23,14 +23,14 @@ func TestCatwalkSync_GetEmptyResultFromClient(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := tmpDir + "/providers.json"
 
-	syncer := &catwalkSync{}
+	syncer := newCatwalkSync()
 	client := &emptyProviderClient{}
 
-	syncer.Init(client, path, true)
+	syncer.Init(client.GetProviders, path, true)
 
 	providers, err := syncer.Get(t.Context())
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "empty providers list from catwalk")
+	require.Contains(t, err.Error(), "empty Catwalk providers")
 	require.NotEmpty(t, providers) // Should have embedded providers as fallback.
 
 	// Check that no cache file was created for empty results.

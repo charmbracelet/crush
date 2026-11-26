@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/url"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -65,10 +64,9 @@ func discoveryJobs(c *Config, known map[string]bool) []discoveryJob {
 	return jobs
 }
 
-// resolveDiscoveredModels returns the discovered models for each job. Jobs
-// with a cache entry use it without touching the network and are recorded
-// so RefreshDiscoveredModels can update them later; the rest are probed
-// inline, bounded by discoveryProbeTimeout and ctx.
+// resolveDiscoveredModels returns each job's models: cached ones as is, for
+// RefreshCatalogs to update later, and the rest probed inline. A failed probe
+// is cached as empty so an unreachable host only delays the first startup.
 func (s *ConfigStore) resolveDiscoveredModels(ctx context.Context, jobs []discoveryJob, resolver VariableResolver) map[string][]catwalk.Model {
 	found := make(map[string][]catwalk.Model, len(jobs))
 	var cached, misses []discoveryJob
@@ -84,38 +82,16 @@ func (s *ConfigStore) resolveDiscoveredModels(ctx context.Context, jobs []discov
 
 	probeCtx, cancel := context.WithTimeout(ctx, discoveryProbeTimeout)
 	defer cancel()
-	for id, models := range s.probeAndCache(probeCtx, misses, resolver) {
-		found[id] = models
+	probed := s.probeAndCache(probeCtx, misses, resolver)
+	for _, job := range misses {
+		models, ok := probed[job.id]
+		if !ok {
+			s.cacheModels(job, nil)
+			continue
+		}
+		found[job.id] = models
 	}
 	return found
-}
-
-// RefreshDiscoveredModels re-probes every provider whose models came from
-// the discovery cache, and reloads the config when any of them changed. It
-// reports whether a reload happened. Meant to run in the background after
-// startup.
-func (s *ConfigStore) RefreshDiscoveredModels(ctx context.Context) (bool, error) {
-	s.writeMu.RLock()
-	jobs := s.cachedDiscovery
-	resolver := s.resolver
-	s.writeMu.RUnlock()
-
-	if len(jobs) == 0 {
-		return false, nil
-	}
-
-	before := make(map[string][]catwalk.Model, len(jobs))
-	for _, job := range jobs {
-		before[job.id], _ = s.cachedModels(job)
-	}
-	changed := false
-	for id, fresh := range s.probeAndCache(ctx, jobs, resolver) {
-		changed = changed || !reflect.DeepEqual(before[id], fresh)
-	}
-	if !changed {
-		return false, nil
-	}
-	return true, s.ReloadFromDisk(ctx)
 }
 
 // probeAndCache discovers models for jobs concurrently and caches every
@@ -163,7 +139,7 @@ func (s *ConfigStore) cachedModels(job discoveryJob) ([]catwalk.Model, bool) {
 		return nil, false
 	}
 	entry, _, err := newCache[discoveredModels](path).Get()
-	if err != nil || entry.BaseURL != job.cfg.BaseURL || len(entry.Models) == 0 {
+	if err != nil || entry.BaseURL != job.cfg.BaseURL {
 		return nil, false
 	}
 	return entry.Models, true

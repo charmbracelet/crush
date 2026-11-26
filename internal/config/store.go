@@ -103,6 +103,7 @@ type ConfigStore struct {
 	workspacePath      string   // .crush/crush.json
 	loadedPaths        []string // config files that were successfully loaded
 	knownProviders     []catwalk.Provider
+	providerGens       providerGens // The catalog versions knownProviders came from.
 	overrides          RuntimeOverrides
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
@@ -233,11 +234,10 @@ func (s *ConfigStore) RefetchHyperProvider(ctx context.Context) error {
 	// not the stale snapshot captured at startup. The syncer's original
 	// client closes over the startup config and would send an expired
 	// token after OAuth re-authentication.
-	freshClient := realHyperClient{
+	hyperSyncer.SetFetch(realHyperClient{
 		baseURL:    hyperp.BaseURL(),
 		resolveKey: func() string { return ResolveHyperAPIKey(s.Config()) },
-	}
-	hyperSyncer.SetClient(freshClient)
+	}.Get)
 
 	hyperProvider, err := hyperSyncer.Refetch(ctx)
 	if err != nil {
@@ -274,13 +274,8 @@ func (s *ConfigStore) RefetchHyperProvider(ctx context.Context) error {
 		}
 		nc.Providers.Set(string(hyperProvider.ID), pc)
 	}
+	nc.SetupAgents()
 	s.setConfig(nc)
-
-	// Also update the memoized provider list so callers of
-	// config.Providers() (e.g. the models dialog) see fresh data.
-	UpdateProviderInList(hyperProvider)
-
-	s.SetupAgents()
 	return nil
 }
 
@@ -1497,17 +1492,6 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		return fmt.Errorf("invalid hook configuration on reload: %w", err)
 	}
 
-	// Save current state for potential rollback BEFORE configureProviders,
-	// which may write to disk via RemoveConfigField (e.g. removing stale
-	// OAuth providers). Capturing after would snapshot a config that has
-	// already been mutated, and the rollback would restore corrupted state.
-	oldConfig := s.Config()
-	oldLoadedPaths := s.loadedPaths
-	oldResolver := s.resolver
-	oldKnownProviders := s.knownProviders
-	oldOverrides := s.overrides
-	oldWorkspacePath := s.workspacePath
-
 	// Preserve runtime overrides
 	overrides := s.overrides
 
@@ -1526,6 +1510,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// like AWS_PROFILE are visible to the AWS SDK credential chain.
 	cfg.applyEnv(resolver)
 
+	gens := currentProviderGens()
 	providers, err := Providers(cfg)
 	if err != nil {
 		if len(providers) == 0 {
@@ -1538,39 +1523,27 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
 
-	// Update store state BEFORE running model/agent setup (so they see new config)
+	// Finish models and agents before publishing, so readers never see a
+	// half-set-up config.
+	if !cfg.IsConfigured() {
+		slog.Warn("No providers configured after reload")
+	} else {
+		resolved, err := resolveSelectedModels(cfg, providers)
+		if err != nil {
+			return fmt.Errorf("failed to configure selected models during reload: %w", err)
+		}
+		cfg.Models[SelectedModelTypeLarge] = resolved.Large
+		cfg.Models[SelectedModelTypeSmall] = resolved.Small
+		cfg.SetupAgents()
+	}
+
 	s.setConfig(cfg)
 	s.loadedPaths = loadedPaths
 	s.resolver = resolver
 	s.knownProviders = providers
+	s.providerGens = gens
 	s.overrides = overrides
 	s.workspacePath = workspacePath
-
-	// Mirror startup flow: setup models and agents against NEW config.
-	var setupErr error
-	if !cfg.IsConfigured() {
-		slog.Warn("No providers configured after reload")
-	} else {
-		resolved, resolveErr := resolveSelectedModels(cfg, providers)
-		if resolveErr != nil {
-			setupErr = fmt.Errorf("failed to configure selected models during reload: %w", resolveErr)
-		} else {
-			cfg.Models[SelectedModelTypeLarge] = resolved.Large
-			cfg.Models[SelectedModelTypeSmall] = resolved.Small
-			s.SetupAgents()
-		}
-	}
-
-	// Rollback on setup failure
-	if setupErr != nil {
-		s.setConfig(oldConfig)
-		s.loadedPaths = oldLoadedPaths
-		s.resolver = oldResolver
-		s.knownProviders = oldKnownProviders
-		s.overrides = oldOverrides
-		s.workspacePath = oldWorkspacePath
-		return setupErr
-	}
 
 	// Rebuild staleness tracking. Track every discovered config path, not
 	// just the ones that loaded, so a config file created after this reload

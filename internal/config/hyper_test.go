@@ -20,29 +20,19 @@ type mockHyperClient struct {
 	callCount int
 }
 
-func (m *mockHyperClient) Get(ctx context.Context, etag string) (catwalk.Provider, error) {
+func (m *mockHyperClient) Get(ctx context.Context, etag string) (catwalk.Provider, []byte, error) {
 	m.callCount++
-	return m.provider, m.err
-}
-
-func TestHyperSync_Init(t *testing.T) {
-	t.Parallel()
-
-	syncer := &hyperSync{}
-	client := &mockHyperClient{}
-	path := "/tmp/hyper.json"
-
-	syncer.Init(client, path, true)
-
-	require.True(t, syncer.init.Load())
-	require.Equal(t, client, syncer.client)
-	require.Equal(t, path, syncer.cache.path)
+	if m.err != nil {
+		return catwalk.Provider{}, nil, m.err
+	}
+	raw, err := json.Marshal(m.provider)
+	return m.provider, raw, err
 }
 
 func TestHyperSync_GetPanicIfNotInit(t *testing.T) {
 	t.Parallel()
 
-	syncer := &hyperSync{}
+	syncer := newHyperSync()
 	require.Panics(t, func() {
 		_, _ = syncer.Get(t.Context())
 	})
@@ -51,7 +41,7 @@ func TestHyperSync_GetPanicIfNotInit(t *testing.T) {
 func TestHyperSync_GetFreshProvider(t *testing.T) {
 	t.Parallel()
 
-	syncer := &hyperSync{}
+	syncer := newHyperSync()
 	client := &mockHyperClient{
 		provider: catwalk.Provider{
 			Name: "Hyper",
@@ -63,7 +53,7 @@ func TestHyperSync_GetFreshProvider(t *testing.T) {
 	}
 	path := t.TempDir() + "/hyper.json"
 
-	syncer.Init(client, path, true)
+	syncer.Init(client.Get, path, true)
 
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
@@ -84,24 +74,32 @@ func TestHyperSync_GetNotModifiedUsesCached(t *testing.T) {
 
 	// Create cache file.
 	cachedProvider := catwalk.Provider{
-		Name: "Cached Hyper",
-		ID:   "hyper",
+		Name:   "Cached Hyper",
+		ID:     "hyper",
+		Models: []catwalk.Model{{ID: "cached-model"}},
 	}
 	data, err := json.Marshal(cachedProvider)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0o644))
 
-	syncer := &hyperSync{}
+	syncer := newHyperSync()
 	client := &mockHyperClient{
 		err: catwalk.ErrNotModified,
 	}
 
-	syncer.Init(client, path, true)
+	syncer.Init(client.Get, path, true)
 
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, "Cached Hyper", provider.Name)
+	require.Equal(t, 0, client.callCount, "a cached provider is served without a request")
+
+	changed, err := syncer.Revalidate(t.Context())
+	require.NoError(t, err)
+	require.False(t, changed)
 	require.Equal(t, 1, client.callCount)
+	provider, _ = syncer.Get(t.Context())
+	require.Equal(t, "Cached Hyper", provider.Name)
 }
 
 func TestHyperSync_GetClientError(t *testing.T) {
@@ -110,12 +108,12 @@ func TestHyperSync_GetClientError(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := tmpDir + "/hyper.json"
 
-	syncer := &hyperSync{}
+	syncer := newHyperSync()
 	client := &mockHyperClient{
 		err: errors.New("network error"),
 	}
 
-	syncer.Init(client, path, true)
+	syncer.Init(client.Get, path, true)
 
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err) // Should fall back to embedded.
@@ -129,7 +127,7 @@ func TestHyperSync_GetEmptyCache(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := tmpDir + "/hyper.json"
 
-	syncer := &hyperSync{}
+	syncer := newHyperSync()
 	client := &mockHyperClient{
 		provider: catwalk.Provider{
 			Name: "Fresh Hyper",
@@ -140,7 +138,7 @@ func TestHyperSync_GetEmptyCache(t *testing.T) {
 		},
 	}
 
-	syncer.Init(client, path, true)
+	syncer.Init(client.Get, path, true)
 
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
@@ -150,7 +148,7 @@ func TestHyperSync_GetEmptyCache(t *testing.T) {
 func TestHyperSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
 	t.Parallel()
 
-	syncer := &hyperSync{}
+	syncer := newHyperSync()
 	client := &mockHyperClient{
 		provider: catwalk.Provider{
 			Name: "Hyper",
@@ -162,7 +160,7 @@ func TestHyperSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
 	}
 	path := t.TempDir() + "/hyper.json"
 
-	syncer.Init(client, path, true)
+	syncer.Init(client.Get, path, true)
 
 	// Call Get multiple times.
 	provider1, err1 := syncer.Get(t.Context())
@@ -188,7 +186,7 @@ func TestHyperSync_GetCacheStoreError(t *testing.T) {
 	// Try to create cache in a subdirectory under the blocking file.
 	path := blockingFile + "/subdir/hyper.json"
 
-	syncer := &hyperSync{}
+	syncer := newHyperSync()
 	client := &mockHyperClient{
 		provider: catwalk.Provider{
 			Name: "Hyper",
@@ -199,7 +197,7 @@ func TestHyperSync_GetCacheStoreError(t *testing.T) {
 		},
 	}
 
-	syncer.Init(client, path, true)
+	syncer.Init(client.Get, path, true)
 
 	provider, err := syncer.Get(t.Context())
 	require.Error(t, err)
@@ -237,7 +235,7 @@ func TestRealHyperClient_RetryOn401(t *testing.T) {
 		refreshToken: func(ctx context.Context) error { refreshCalled = true; return nil },
 	}
 
-	provider, err := client.Get(t.Context(), "")
+	provider, _, err := client.Get(t.Context(), "")
 	require.NoError(t, err)
 	require.Equal(t, "Hyper", provider.Name)
 	require.True(t, refreshCalled, "token refresher should have been called")
@@ -259,7 +257,7 @@ func TestRealHyperClient_NoRetryWithoutRefresher(t *testing.T) {
 		resolveKey: func() string { return "test-key" },
 	}
 
-	_, err := client.Get(t.Context(), "")
+	_, _, err := client.Get(t.Context(), "")
 	require.ErrorIs(t, err, errUnauthorized)
 	require.Equal(t, int32(1), callCount.Load(), "should not retry without refresher")
 }
@@ -280,7 +278,7 @@ func TestRealHyperClient_RefreshFailureReturnsOriginalError(t *testing.T) {
 		refreshToken: func(ctx context.Context) error { return errors.New("refresh failed") },
 	}
 
-	_, err := client.Get(t.Context(), "")
+	_, _, err := client.Get(t.Context(), "")
 	require.ErrorIs(t, err, errUnauthorized)
 	require.Equal(t, int32(1), callCount.Load(), "should not retry when refresh fails")
 }
@@ -309,7 +307,7 @@ func TestRealHyperClient_SuccessWithoutRetry(t *testing.T) {
 		refreshToken: func(ctx context.Context) error { refreshCalled = true; return nil },
 	}
 
-	provider, err := client.Get(t.Context(), "")
+	provider, _, err := client.Get(t.Context(), "")
 	require.NoError(t, err)
 	require.Equal(t, "Hyper", provider.Name)
 	require.False(t, refreshCalled, "refresher should not be called on success")

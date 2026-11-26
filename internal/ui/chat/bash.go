@@ -291,7 +291,7 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 // renderJobTool renders a job-related tool with the common pattern:
 // header → nested check → early state → body.
 func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, shellID, description, content string) string {
-	header := jobHeader(sty, opts.Status, action, shellID, description, width)
+	header := jobHeader(sty, opts, action, shellID, description, width)
 	if opts.Compact {
 		return header
 	}
@@ -315,26 +315,35 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 
 // jobHeader builds a header for job-related tools.
 // Format: "● Job (Action) PID shellID description..."
-func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, description string, width int) string {
-	icon := toolIcon(sty, status)
+// A long-running call shows its duration, like every other tool header:
+// "description... (took=3s)".
+func jobHeader(sty *styles.Styles, opts *ToolRenderOpts, action, shellID, description string, width int) string {
+	icon := toolIcon(sty, opts.Status)
 	jobPart := sty.Tool.JobToolName.Render("Job")
 	actionPart := sty.Tool.JobAction.Render("(" + action + ")")
 	pidPart := sty.Tool.JobPID.Render("PID " + shellID)
 
 	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, actionPart, pidPart)
 
-	if description == "" {
-		return prefix
+	// Match the other headers: the duration shows once the call has
+	// taken long enough to matter, and never loses its place to a
+	// long description.
+	var took string
+	if opts.Elapsed >= toolTimerThreshold {
+		took = " " + sty.Tool.ParamMain.Render("(took="+common.FormatDuration(opts.Elapsed)+")")
 	}
 
-	prefixWidth := lipgloss.Width(prefix)
-	availableWidth := width - prefixWidth - 1
+	if description == "" {
+		return prefix + took
+	}
+
+	availableWidth := width - lipgloss.Width(prefix+took) - 1
 	if availableWidth < 10 {
-		return prefix
+		return prefix + took
 	}
 
 	truncatedDesc := ansi.Truncate(description, availableWidth, "…")
-	return prefix + " " + sty.Tool.JobDescription.Render(truncatedDesc)
+	return prefix + " " + sty.Tool.JobDescription.Render(truncatedDesc) + took
 }
 
 // joinToolParts joins header and body with a blank line separator.

@@ -231,6 +231,41 @@ func TestJobOutputToolMessageItem_CwdHint(t *testing.T) {
 	require.Contains(t, out, "serve (cwd=sub)")
 }
 
+// TestJobOutputToolMessageItem_ElapsedHeader verifies that a job output call
+// which waited long enough shows how long it ran, after its description, and
+// that the description yields space to it rather than pushing it off the line.
+func TestJobOutputToolMessageItem_ElapsedHeader(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	ctx := &JobOutputToolRenderContext{workingDir: workspace}
+	render := func(elapsed time.Duration, description string) string {
+		sty := styles.CharmtonePantera()
+		in, err := json.Marshal(map[string]any{"shell_id": "sh-1"})
+		require.NoError(t, err)
+		meta, err := json.Marshal(map[string]any{"shell_id": "sh-1", "description": description})
+		require.NoError(t, err)
+		return ansi.Strip(ctx.RenderTool(&sty, 120, &ToolRenderOpts{
+			ToolCall: message.ToolCall{ID: "tc", Name: "job_output", Input: string(in), Finished: true},
+			Result:   &message.ToolResult{ToolCallID: "tc", Content: "ok", Metadata: string(meta)},
+			Status:   ToolStatusSuccess,
+			Elapsed:  elapsed,
+		}))
+	}
+
+	out := render(0, "serve")
+	require.NotContains(t, out, "took", "a quick read shows no duration")
+
+	out = render(3*time.Second, "serve")
+	require.Contains(t, out, "serve (took=3s)")
+
+	out = render(3*time.Second, "")
+	require.Contains(t, out, "took=3s", "a header with no description still shows the duration")
+
+	out = render(3*time.Second, strings.Repeat("d", 200))
+	require.Contains(t, out, "(took=3s)", "a long description yields space to the duration")
+}
+
 // TestBashToolMessageItem_DescriptionHeader verifies that the model's
 // description leads the header, with the command a blank line below it,
 // in the column the tool name and output start in.

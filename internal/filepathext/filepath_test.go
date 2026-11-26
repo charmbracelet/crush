@@ -41,14 +41,23 @@ func TestSplitGlobPrefix(t *testing.T) {
 	}
 }
 
-func TestSplitGlobPrefixWindowsDriveRoot(t *testing.T) {
+func TestSplitGlobPrefixWindowsVolumes(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS != "windows" {
-		t.Skip("Windows drive paths")
+		t.Skip("Windows volume paths")
 	}
-	for _, pattern := range []string{`C:\*.go`, "C:/*.go"} {
-		prefix, rest := SplitGlobPrefix(pattern)
-		require.Equal(t, "C:/", prefix)
-		require.Equal(t, "*.go", rest)
+	for _, tc := range []struct{ pattern, prefix string }{
+		{`C:\*.go`, "C:/"},
+		{"C:/*.go", "C:/"},
+		{`\\?\C:\*.go`, "//?/C:/"},
+		{`\\?\C:\work\*.go`, "//?/C:/work"},
+		{`\\server\share\*.go`, "//server/share/"},
+		{`\\?\UNC\server\share\*.go`, "//?/UNC/server/share/"},
+	} {
+		t.Run(tc.pattern, func(t *testing.T) {
+			prefix, rest := SplitGlobPrefix(tc.pattern)
+			require.Equal(t, tc.prefix, prefix)
+			require.Equal(t, "*.go", rest)
+		})
 	}
 }

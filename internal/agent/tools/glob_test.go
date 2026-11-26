@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,23 +75,39 @@ func TestGlobFilesCapsResultsOnLargeTree(t *testing.T) {
 	require.True(t, truncated, "should report truncation on an over-limit tree")
 }
 
-// An absolute pattern is walked where it points, not under the search
-// path: a decoy of the same shape beside the search path must not match.
 func TestGlobFilesAbsolutePatternWalksWhereItPoints(t *testing.T) {
 	t.Parallel()
+	testGlobFilesAbsolutePattern(t)
+}
 
+func TestGlobFilesAbsolutePatternWithRipgrep(t *testing.T) {
+	rg, err := exec.LookPath("rg")
+	if err != nil {
+		t.Skip("ripgrep is not installed")
+	}
+	originalGetRg := getRg
+	t.Cleanup(func() { getRg = originalGetRg })
+	getRg = func() string { return rg }
+	testGlobFilesAbsolutePattern(t)
+}
+
+func testGlobFilesAbsolutePattern(t *testing.T) {
+	t.Helper()
 	there, here := t.TempDir(), t.TempDir()
+	target := filepath.Join(there, "etc")
+	realFile := filepath.Join(target, "real.conf")
+	relativeTarget := strings.TrimLeft(filepath.ToSlash(target[len(filepath.VolumeName(target)):]), "/")
 	for _, path := range []string{
-		filepath.Join(there, "etc", "real.conf"),
-		filepath.Join(here, "etc", "decoy.conf"),
+		realFile,
+		filepath.Join(here, filepath.FromSlash(relativeTarget), "decoy.conf"),
 	} {
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
 	}
 
-	pattern := filepath.Join(there, "etc", "*.conf")
+	pattern := filepath.Join(target, "*.conf")
 	got, _, err := globFiles(context.Background(), pattern, here, 100)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
-	require.Contains(t, got[0], "real.conf")
+	require.Equal(t, realFile, filepath.Clean(got[0]))
 }

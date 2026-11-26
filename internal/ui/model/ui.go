@@ -2382,7 +2382,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseFrontDialog()
 
 		if msg.Cmd != nil {
-			cmds = append(cmds, msg.Cmd)
+			cmds = append(cmds, m.updateAgentModelCmd(msg.Cmd))
 		}
 
 		if isOnboarding {
@@ -2438,7 +2438,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		} else {
 			// Refresh the agent so memory stops now rather than at
 			// the next restart, matching how connecting behaves.
-			cmds = append(cmds, func() tea.Msg {
+			cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 				if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
 					slog.Warn("Failed to refresh agent after disconnecting memory", "error", err)
 				}
@@ -2446,7 +2446,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 					Type: util.InfoTypeInfo,
 					Msg:  "Memory disconnected. Stored memory is untouched.",
 				}
-			})
+			}))
 		}
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()

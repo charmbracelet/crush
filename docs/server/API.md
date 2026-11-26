@@ -1,6 +1,6 @@
 # Server API
 
-The Crush server has an HTTP API. In [client/server mode](README.md), the TUI
+The Crush server has an HTTP API. In [client/server mode](./README.md), the TUI
 talks to the server through it, and other programs can do the same: an editor
 plugin that runs Crush in a side panel, a script that hands the agent a task, or
 a status bar item that lights up while the agent is working.
@@ -58,16 +58,19 @@ mode. It lives in `internal/cmd/run.go`. The TUI's side is in
   { "message": "workspace not found" }
   ```
 
+  The one exception is a path or method the server doesn't know. Then you get a
+  plain-text `404` or `405`.
+
 These are the status codes you'll see:
 
-| Status | Meaning                                                                                                                                                           |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `400`  | Something is wrong with the request: bad JSON, a missing or malformed `client_id`, or an agent that isn't set up yet.                                             |
-| `404`  | No such workspace. If it's one you opened, it has closed since then, or the server was replaced. Open it again instead of retrying.                               |
-| `409`  | The request clashes with the current state: the agent is busy, the workspace is closing, you haven't opened your event stream yet, or your client ID was retired. |
-| `413`  | The body is too big. Only the theme endpoint has a limit, which is 64 KiB.                                                                                        |
-| `503`  | The server is shutting down. Start a new one and try again.                                                                                                       |
-| `500`  | Anything else.                                                                                                                                                    |
+| Status | Meaning                                                                                                                                                                    |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400`  | Something is wrong with the request: bad JSON, a missing or malformed `client_id`, or an agent that isn't set up yet.                                                      |
+| `404`  | No such workspace. If it's one you opened, it has closed since then, or the server was replaced. Open it again instead of retrying. An unknown LSP name also gets a `404`. |
+| `409`  | The request clashes with the current state: the agent is busy, the workspace is closing, you haven't opened your event stream yet, or your client ID was retired.          |
+| `413`  | The body is too big. Only the theme endpoint has a limit, which is 64 KiB.                                                                                                 |
+| `503`  | The server is shutting down. Start a new one and try again.                                                                                                                |
+| `500`  | Anything else. Some bad requests end up here too, like a prompt with no text or a session ID that doesn't exist.                                                           |
 
 ## Client IDs
 
@@ -111,15 +114,17 @@ Hold on to the `id`, since every other workspace call needs it. The examples
 below assume it's in `$ws`.
 
 If the directory is already open, you get that workspace back as it is, and the
-fields below are ignored. If it isn't, these fields set up the new workspace:
+fields below are ignored, except for `channels`. If it isn't, these fields set
+up the new workspace:
 
 | Field             | What it does                                                                                                                     |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `permission_mode` | `normal` asks before anything risky. `yolo` never asks, but blocks dangerous commands. `sysadmin` never asks and blocks nothing. |
-| `data_dir`        | Where the project's data goes. Defaults to `.crush` in the project.                                                              |
+| `data_dir`        | Where the project's data goes. Defaults to the `data-directory` config option, or `.crush` in the project.                       |
 | `debug`           | Turns on the workspace's `debug` option.                                                                                         |
 | `env`             | A list of `KEY=value` strings for commands run through the `shell` endpoint.                                                     |
 | `version`         | Your Crush version. The server logs a warning if it doesn't match its own.                                                       |
+| `channels`        | MCP servers to use as channels. If the directory is already open, this must match its list, or the request fails with a `500`.   |
 
 ### Staying connected
 
@@ -136,7 +141,8 @@ Besides carrying events, the stream tells the server you're still around:
   you don't, the server assumes you're gone.
 - As long as your stream is open, the workspace stays open.
 - If your stream drops, you have 10 seconds to reconnect before the server stops
-  counting you.
+  counting you. `CRUSH_SERVER_DETACH_GRACE` changes this (see
+  [Options](./README.md#options)).
 - Once nobody is left, the workspace closes, and that cancels whatever the agent
   is doing in it.
 
@@ -174,7 +180,9 @@ There are two layers. The outer `type` says what the event is about, and the
 inner `type` says what happened to it: `created`, `updated`, or `deleted`. The
 inner `payload` is the thing itself, in the same shape the matching endpoint
 returns. A `session` event, for example, carries the same object as
-`GET /v1/workspaces/{id}/sessions/{sid}`.
+`GET /v1/workspaces/{id}/sessions/{sid}`. The one difference is that in a
+`session` event, `is_busy` is always `false` and `attached_clients` is always
+`0`. Fetch the session to get the real values.
 
 ### Event types
 
@@ -183,7 +191,7 @@ returns. A `session` event, for example, carries the same object as
 | `session`                      | A session was created, changed, or deleted.                                    |
 | `message`                      | A message was created, changed, or deleted.                                    |
 | `run_complete`                 | The agent finished a turn. See [Sending a prompt](#sending-a-prompt).          |
-| `agent_event`                  | Notices from the agent, such as errors and progress on summarizing a session.  |
+| `agent_event`                  | Notices from the agent, like errors, finished turns, and login requests.       |
 | `permission_request`           | A tool call needs permission. See [Permissions](#permissions).                 |
 | `permission_notification`      | A permission request was granted, denied, or cancelled.                        |
 | `permission_mode_changed`      | Someone switched the workspace's permission mode.                              |
@@ -219,9 +227,12 @@ the messages in the open session.
 
 ### Prompts and sessions
 
-Permission requests and questions only go to clients looking at the session that
-raised them. Prompts from a subagent count as coming from the session that
-started the subagent. To tell the server which session you're looking at:
+Permission requests and questions, and the events that say how they ended, only
+go to clients looking at the session that raised them. Prompts from a subagent
+count as coming from the session that started the subagent. Password and
+passphrase prompts are different: they go to every client in the workspace.
+
+To tell the server which session you're looking at:
 
 ```bash
 curl --unix-socket "$sock" \
@@ -230,12 +241,13 @@ curl --unix-socket "$sock" \
 ```
 
 An empty `session_id` means you aren't looking at any session, and you'll get no
-prompts at all. A client that never calls this endpoint gets every prompt in the
-workspace, which is usually what a script wants.
+permission requests or questions. A client that never calls this endpoint gets
+all of them, which is usually what a script wants.
 
 You need an open event stream before you can call this endpoint. Without one, it
-returns `409`. When you switch to a session that has a prompt waiting, the
-server sends you that prompt again.
+returns `409`. When you pick a session that has a prompt waiting, the server
+sends that prompt out again. Other clients get a copy too, so use the prompt's
+`id` to skip ones you already have.
 
 ## Sending a prompt
 
@@ -335,8 +347,8 @@ its `params` is rejected.
 
 The action is `allow` for just this call, `allow_session` to allow calls like it
 for the rest of the session, or `deny`. The response is `{"resolved": true}`, or
-`{"resolved": false}` if another client answered first. Either way, every client
-then gets a `permission_notification` saying how it went.
+`{"resolved": false}` if another client answered first. Either way, the clients
+looking at that session then get a `permission_notification` saying how it went.
 
 ### Questions
 
@@ -374,7 +386,9 @@ A question's `type` is `yes_no`, `single_choice`, `multi_choice`, or
 ```
 
 Use `selected_ids` for choices, `fill_in_text` for free text, and `yes` for yes
-or no questions. To dismiss a batch instead, call
+or no questions. The server doesn't check `batch_request_id`. Your answer goes
+to whatever batch is waiting at that moment, so don't answer a batch that's
+already over. To dismiss a batch instead, call
 `POST /v1/workspaces/{id}/questions/cancel` with no body. Both calls return
 `{"resolved": true}`, or `false` if someone else got there first.
 
@@ -484,15 +498,15 @@ Paths that start with `{id}/` are under `/v1/workspaces/`. For example,
 
 ### Server
 
-| Method   | Path                      | What it does                                                                                                                                                     |
-| -------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/v1/health`              | Answers `200` when the server is up.                                                                                                                             |
-| `GET`    | `/v1/version`             | Version, commit, build ID, Go version, and platform.                                                                                                             |
-| `POST`   | `/v1/control`             | `{"command": "shutdown_if_idle"}` shuts the server down if no workspaces are open, and returns `409` if any are. `shutdown` is an older name for the same thing. |
-| `GET`    | `/v1/config`              | The server's own config.                                                                                                                                         |
-| `DELETE` | `/v1/clients/{client_id}` | Retires a client and releases everything it holds.                                                                                                               |
-| `GET`    | `/v1/docs/`               | This API as an HTML page.                                                                                                                                        |
-| `GET`    | `/v1/docs/openapi.json`   | This API as an OpenAPI spec.                                                                                                                                     |
+| Method   | Path                      | What it does                                                                                                                                                                     |
+| -------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/v1/health`              | Answers `200` when the server is up.                                                                                                                                             |
+| `GET`    | `/v1/version`             | Version, commit, build ID, Go version, and platform.                                                                                                                             |
+| `POST`   | `/v1/control`             | `{"command": "shutdown_if_idle"}` shuts the server down if no workspaces are open, and returns `409` if any are open or opening. `shutdown` is an older name for the same thing. |
+| `GET`    | `/v1/config`              | The server's own config.                                                                                                                                                         |
+| `DELETE` | `/v1/clients/{client_id}` | Retires a client and releases everything it holds.                                                                                                                               |
+| `GET`    | `/v1/docs/`               | This API as an HTML page.                                                                                                                                                        |
+| `GET`    | `/v1/docs/openapi.json`   | This API as an OpenAPI spec.                                                                                                                                                     |
 
 ### Workspaces
 
@@ -511,19 +525,19 @@ Paths that start with `{id}/` are under `/v1/workspaces/`. For example,
 
 ### Sessions
 
-| Method   | Path                                    | What it does                                              |
-| -------- | --------------------------------------- | --------------------------------------------------------- |
-| `GET`    | `{id}/sessions`                         | Lists sessions.                                           |
-| `POST`   | `{id}/sessions`                         | Creates a session.                                        |
-| `GET`    | `{id}/sessions/{sid}`                   | Returns one session.                                      |
-| `PUT`    | `{id}/sessions/{sid}`                   | Updates a session, for example its title.                 |
-| `DELETE` | `{id}/sessions/{sid}`                   | Deletes a session.                                        |
-| `GET`    | `{id}/sessions/{sid}/messages`          | The session's messages.                                   |
-| `GET`    | `{id}/sessions/{sid}/messages/user`     | Only the user's messages.                                 |
-| `GET`    | `{id}/sessions/{sid}/history`           | Versions of the files the agent changed.                  |
-| `GET`    | `{id}/sessions/{sid}/filetracker/files` | Files the agent has read.                                 |
-| `POST`   | `{id}/filetracker/read`                 | Records that a file was read.                             |
-| `GET`    | `{id}/filetracker/lastread`             | When a file was last read. Takes `path` and `session_id`. |
+| Method   | Path                                    | What it does                                               |
+| -------- | --------------------------------------- | ---------------------------------------------------------- |
+| `GET`    | `{id}/sessions`                         | Lists sessions.                                            |
+| `POST`   | `{id}/sessions`                         | Creates a session.                                         |
+| `GET`    | `{id}/sessions/{sid}`                   | Returns one session.                                       |
+| `PUT`    | `{id}/sessions/{sid}`                   | Replaces a session. Send the whole session, with its `id`. |
+| `DELETE` | `{id}/sessions/{sid}`                   | Deletes a session.                                         |
+| `GET`    | `{id}/sessions/{sid}/messages`          | The session's messages.                                    |
+| `GET`    | `{id}/sessions/{sid}/messages/user`     | Only the user's messages.                                  |
+| `GET`    | `{id}/sessions/{sid}/history`           | Versions of the files the agent changed.                   |
+| `GET`    | `{id}/sessions/{sid}/filetracker/files` | Files the agent has read.                                  |
+| `POST`   | `{id}/filetracker/read`                 | Records that a file was read.                              |
+| `GET`    | `{id}/filetracker/lastread`             | When a file was last read. Takes `path` and `session_id`.  |
 
 ### Agent
 
@@ -624,4 +638,4 @@ Paths that start with `{id}/` are under `/v1/workspaces/`. For example,
 | `GET`  | `{id}/skills/disabled`        | Skills turned off for this project.                             |
 | `POST` | `{id}/skills/disabled`        | Turns a skill on or off for this project.                       |
 | `GET`  | `{id}/skills/enabled`         | Skills turned off in the config but turned on for this project. |
-| `POST` | `{id}/skills/config-disabled` | Turns a skill on or off in the config.                          |
+| `POST` | `{id}/skills/config-disabled` | Turns a skill on or off in the global config.                   |

@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/gateway"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/httpx"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -1355,24 +1356,15 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		httpClient = log.NewHTTPClient()
 	}
 	if gw != nil {
-		// The provider declares that its traffic needs rewriting, so the
-		// adapter sits under the client and sees the requests the SDK built.
 		gatewayToken := apiKey
 		if token != nil {
 			gatewayToken = token.AccessToken
 		}
-		var base http.RoundTripper
-		if httpClient != nil {
-			base = httpClient.Transport
-		}
-		adapter, err := gateway.New(gw, gatewayToken, base)
+		adapter, err := gatewayTransport(gw, gatewayToken, c.cfg.Config().Options.Debug)
 		if err != nil {
 			return nil, fmt.Errorf("gateway adapter for provider %s: %w", providerID, err)
 		}
-		if httpClient == nil {
-			httpClient = &http.Client{}
-		}
-		httpClient.Transport = adapter
+		httpClient = &http.Client{Transport: adapter}
 	}
 	if httpClient != nil {
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
@@ -1577,24 +1569,15 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 		httpClient = log.NewHTTPClient()
 	}
 	if providerCfg.Gateway != nil {
-		// The provider declares that its traffic needs rewriting, so the
-		// adapter sits under the client and sees the requests the SDK built.
 		token := apiKey
 		if providerCfg.OAuthToken != nil {
 			token = providerCfg.OAuthToken.AccessToken
 		}
-		var base http.RoundTripper
-		if httpClient != nil {
-			base = httpClient.Transport
-		}
-		adapter, err := gateway.New(providerCfg.Gateway, token, base)
+		adapter, err := gatewayTransport(providerCfg.Gateway, token, c.cfg.Config().Options.Debug)
 		if err != nil {
 			return nil, fmt.Errorf("gateway adapter for provider %s: %w", providerCfg.ID, err)
 		}
-		if httpClient == nil {
-			httpClient = &http.Client{}
-		}
-		httpClient.Transport = adapter
+		httpClient = &http.Client{Transport: adapter}
 	}
 	if httpClient != nil {
 		opts = append(opts, google.WithHTTPClient(httpClient))
@@ -1623,16 +1606,17 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
-// notifiesOnRevokedToken reports whether a provider should ask the user to
-// sign in again once its OAuth token stops working: the ones Crush knows and
-// any provider that declares its own login, which has no recovery path other
-// than re-authenticating.
-func (c *coordinator) notifiesOnRevokedToken(providerID string) bool {
-	if providerID == hyper.Name {
-		return true
+// gatewayTransport puts the adapter under the SDK client so it sees the
+// requests the SDK built, on an HTTP/1.1 base when the gateway pins it.
+func gatewayTransport(gw *oauth.GatewaySpec, token string, debug bool) (*gateway.Adapter, error) {
+	var base http.RoundTripper = http.DefaultTransport
+	if gw.HTTP1 {
+		base = httpx.HTTP1Transport()
 	}
-	pc, ok := c.cfg.Config().Providers.Get(providerID)
-	return ok && pc.UsesOAuth()
+	if debug {
+		base = &log.HTTPRoundTripLogger{Transport: base}
+	}
+	return gateway.New(gw, token, base)
 }
 
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {

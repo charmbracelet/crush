@@ -2025,7 +2025,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			break
 		}
 		if err != nil {
-			err = mapManagedErr(nil, err, attempt.model)
+			err = mapManagedModelErr(err, attempt.model)
 			slog.Error("Error generating title with "+attempt.name+" model; trying next", "err", err)
 		} else {
 			slog.Error("Title generation hit token limit with " + attempt.name + " model; trying next")

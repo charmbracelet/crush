@@ -220,20 +220,23 @@ func withManagedCall(ctx context.Context, m *managedCall) context.Context {
 }
 
 func managedCallFrom(ctx context.Context) *managedCall {
-	if ctx == nil {
-		return nil
-	}
 	m, _ := ctx.Value(managedCallKey{}).(*managedCall)
 	return m
 }
 
 // mapManagedErr maps an auth failure on a managed model to the managed
-// error before it is logged or persisted, using the call's state when ctx
-// carries one (a turn or summary) and the model otherwise (a title).
+// error before it is logged or persisted, judged by the call's state when ctx
+// carries one (a turn or summary) and by the model otherwise.
 func mapManagedErr(ctx context.Context, err error, model Model) error {
 	if m := managedCallFrom(ctx); m != nil {
 		return m.mapErr(err)
 	}
+	return mapManagedModelErr(err, model)
+}
+
+// mapManagedModelErr maps an auth failure judged by the model's own managed
+// credential, for calls that carry no call state (a title).
+func mapManagedModelErr(err error, model Model) error {
 	if err == nil || !model.Managed {
 		return err
 	}

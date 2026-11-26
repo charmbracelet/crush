@@ -382,15 +382,16 @@ func TestManagedCredential_DeleteStopsSendingToken(t *testing.T) {
 }
 
 // Title errors on a managed model are mapped before they are logged.
-func TestMapManagedErr_WithoutCallState(t *testing.T) {
+func TestMapManagedModelErr(t *testing.T) {
 	t.Parallel()
 	pe := &fantasy.ProviderError{StatusCode: 401, Message: "secret upstream detail"}
 	m := Model{Managed: true, ModelCfg: config.SelectedModel{Provider: "mock"}}
-	err := mapManagedErr(nil, pe, m)
+	err := mapManagedModelErr(pe, m)
 	require.Contains(t, err.Error(), "managed credential for mock was rejected")
 	require.NotContains(t, err.Error(), "secret")
 	require.True(t, isUnauthorized(err), "status checks still see the 401")
-	require.Same(t, pe, mapManagedErr(nil, pe, Model{}), "unmanaged errors pass through")
+	require.Same(t, pe, mapManagedModelErr(pe, Model{}), "unmanaged errors pass through")
+	require.Equal(t, err.Error(), mapManagedErr(t.Context(), pe, m).Error(), "without call state ctx defers to the model")
 }
 
 // A queued call run as its own turn from inside a running turn gets its own

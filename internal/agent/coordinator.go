@@ -1663,9 +1663,9 @@ func (c *coordinator) buildProviderWith(providerCfg config.ProviderConfig, cred 
 		if cred.Kind == config.ManagedKindOAuth {
 			providerCfg.OAuthToken = managedOAuthToken(providerCfg.OAuthToken, cred)
 			bearer = providerCfg.ID == string(catwalk.InferenceProviderAnthropic)
+			// A pushed Copilot token gets the editor headers a stored login gets at load.
 			if providerCfg.ID == string(catwalk.InferenceProviderCopilot) {
-				providerCfg.ExtraHeaders = headers
-				providerCfg.SetupGitHubCopilot()
+				maps.Copy(headers, copilot.Headers())
 			}
 		} else {
 			// The pushed key replaces any OAuth login the provider had.

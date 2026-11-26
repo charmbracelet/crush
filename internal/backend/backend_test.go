@@ -760,14 +760,14 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			t.Cleanup(func() { drainBackend(t, b) })
 
 			argsA := protoWS(cwd, dataDir, uuid.New().String())
-			argsA.Env = []string{"FOO=bar"}
+			argsA.Env = []string{"FOO=bar", "SECRET_A=hunter2"}
 			wsA, _, err := b.CreateWorkspace(argsA)
 			require.NoError(t, err)
 			originalDebug := wsA.Cfg.Config().Options.Debug
 			originalMode := wsA.Cfg.Overrides().PermissionMode
 
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
-			argsB.Env = []string{"FOO=bar"} // identical by default
+			argsB.Env = []string{"FOO=bar", "SECRET_A=hunter2"} // identical by default
 			tc.mutate(&argsB)
 			_, _, err = b.CreateWorkspace(argsB)
 			require.NoError(t, err)
@@ -777,6 +777,8 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 				"Workspace flag mismatch on duplicate create",
 				"expected debug log for mismatching %s", tc.name,
 			)
+			require.NotContains(t, buf.String(), "hunter2", "env values must not be logged")
+			require.NotContains(t, buf.String(), "NEW=val", "env values must not be logged")
 			// Existing workspace's PermissionMode and Debug must not change.
 			require.Equal(t, originalMode, wsA.Cfg.Overrides().PermissionMode, "PermissionMode must be immutable on first-wins")
 			require.Equal(t, originalDebug, wsA.Cfg.Config().Options.Debug, "Debug must be immutable on first-wins")

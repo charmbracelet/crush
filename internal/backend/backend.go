@@ -1504,10 +1504,11 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	// normalized default ("normal") instead of spuriously logging.
 	existingMode := existing.Cfg.Overrides().PermissionMode
 	requestedMode := proto.ProtoModeToPermission(args.PermissionMode)
+	envDiffers := !stringSlicesEqual(existing.Env, args.Env)
 	if existingMode == requestedMode &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
-		stringSlicesEqual(existing.Env, args.Env) &&
+		!envDiffers &&
 		stringSlicesEqual(existingChannels, args.Channels) &&
 		maps.Equal(existing.Cfg.Overrides().Prompts, args.Prompts) {
 		return
@@ -1522,8 +1523,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"requested_debug", args.Debug,
 		"existing_data_dir", existingCfg.Options.DataDirectory,
 		"requested_data_dir", args.DataDir,
-		"existing_env", existing.Env,
-		"requested_env", args.Env,
+		// Only flag the difference: the env values may hold secrets.
+		"env_differs", envDiffers,
 		"existing_channels", existingChannels,
 		"requested_channels", args.Channels,
 		"existing_prompts", existing.Cfg.Overrides().Prompts,

@@ -1609,7 +1609,7 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 // gatewayTransport puts the adapter under the SDK client so it sees the
 // requests the SDK built, on an HTTP/1.1 base when the gateway pins it.
 func gatewayTransport(gw *oauth.GatewaySpec, token string, debug bool) (*gateway.Adapter, error) {
-	var base http.RoundTripper = http.DefaultTransport
+	base := http.DefaultTransport
 	if gw.HTTP1 {
 		base = httpx.HTTP1Transport()
 	}

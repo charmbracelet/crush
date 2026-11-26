@@ -64,11 +64,8 @@ func NewJobOutputTool(spillDir string, progress pubsub.Publisher[ToolProgress]) 
 			status := "running"
 			if done {
 				status = "completed"
-				if err != nil {
-					exitCode := shell.ExitCode(err)
-					if exitCode != 0 {
-						outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
-					}
+				if msg := shell.Describe(err); msg != "" {
+					outputParts = append(outputParts, msg)
 				}
 			}
 

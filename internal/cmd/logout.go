@@ -12,24 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// canonicalLogoutPlatform resolves a platform alias to its provider ID.
-func canonicalLogoutPlatform(alias string) (string, bool) {
-	switch alias {
-	case "hyper":
-		return "hyper", true
-	case "copilot", "github", "github-copilot":
-		return "copilot", true
-	case "openai", "chatgpt":
-		return "openai", true
-	case "honcho", "memory":
-		return "honcho", true
-	default:
-		return "", false
-	}
-}
-
 // loggedInProviderIDs are the providers the interactive picker offers.
-var loggedInProviderIDs = []string{"hyper", "copilot", "openai"}
+var loggedInProviderIDs = []string{"hyper", "copilot", "openai", "xai"}
 
 // providerDisplayNames maps provider IDs to display names.
 var providerDisplayNames = map[string]string{

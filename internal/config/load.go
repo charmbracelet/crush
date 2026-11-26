@@ -364,30 +364,16 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	cfg.Models[SelectedModelTypeLarge] = resolved.Large
 	cfg.Models[SelectedModelTypeSmall] = resolved.Small
 
-	// A provider that is configured but waiting on a sign-in has no
-	// credential to build a client with, so agent setup waits for the
-	// sign-in rather than failing the startup.
-	if !cfg.HasUsableSelection() {
+	// A selection that resolved to nothing usable (signed out, catalog down)
+	// must not overwrite the user's saved choice.
+	if cfg.HasUsableSelection() {
+		if err := store.persistFallbacks(resolved); err != nil {
+			return nil, err
+		}
+		store.SetupAgents()
+	} else {
 		slog.Warn("No signed-in provider yet, sign in to one of the configured providers")
-		return store, nil
 	}
-
-	// Persist any fallback corrections while we still hold writeMu.
-	if resolved.LargeFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
-		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred large model: %w", err)
-		}
-	}
-	if resolved.SmallFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
-		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
-		}
-	}
-	store.SetupAgents()
 
 	// Capture initial staleness snapshot. Track every discovered config path,
 	// not just the ones that loaded, so a config file created after startup
@@ -395,6 +381,29 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 
 	return store, nil
+}
+
+// persistFallbacks saves selections that fell back from the configured model.
+// The caller holds writeMu.
+func (s *ConfigStore) persistFallbacks(resolved resolvedModels) error {
+	for _, f := range []struct {
+		fell bool
+		typ  SelectedModelType
+		sel  SelectedModel
+	}{
+		{resolved.LargeFallback, SelectedModelTypeLarge, resolved.Large},
+		{resolved.SmallFallback, SelectedModelTypeSmall, resolved.Small},
+	} {
+		if !f.fell {
+			continue
+		}
+		if err := s.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+			return s.updatePreferredModelFields(c, f.typ, f.sel)
+		}); err != nil {
+			return fmt.Errorf("failed to update preferred %s model: %w", f.typ, err)
+		}
+	}
+	return nil
 }
 
 // mustMarshalConfig marshals the config to JSON bytes, returning empty JSON on
@@ -607,6 +616,9 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				continue
 			}
 		}
+		if err := prepareGateway(string(p.ID), &prepared); err != nil {
+			return err
+		}
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
@@ -756,80 +768,8 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			providerConfig.ExtraHeaders[k] = resolved
 		}
 
-		// OAuth endpoints and credentials are expanded the same way
-		// api_key and base_url are, so a plugin can carry $VAR references
-		// instead of baked-in secrets.
-		if auth := providerConfig.Auth; auth != nil {
-			for _, field := range []*string{
-				&auth.Issuer,
-				&auth.ClientID,
-				&auth.ClientSecret,
-				&auth.AuthorizeURL,
-				&auth.TokenURL,
-				&auth.DeviceAuthURL,
-				&auth.RedirectURI,
-			} {
-				if *field == "" {
-					continue
-				}
-				resolved, err := resolver.ResolveValue(*field)
-				if err != nil {
-					return fmt.Errorf("resolving provider %s OAuth value: %w", id, err)
-				}
-				*field = resolved
-			}
-			for _, values := range []map[string]string{auth.ExtraParams, auth.TokenHeaders} {
-				for k, v := range values {
-					resolved, err := resolver.ResolveValue(v)
-					if err != nil {
-						return fmt.Errorf("resolving provider %s OAuth value %q: %w", id, k, err)
-					}
-					values[k] = resolved
-				}
-			}
-		}
-
-		// The gateway programs must compile: a plugin author typo in jq is
-		// a load error naming the provider, not a failed request later.
-		if providerConfig.Gateway != nil {
-			if providerConfig.Gateway.Usable() {
-				// The adapter is attached where a provider family lets the
-				// SDK take a client, today google and anthropic. Saying so
-				// beats ignoring the declaration.
-				if providerConfig.ID != string(catwalk.InferenceProviderGemini) && providerConfig.Type != catwalk.TypeMessages {
-					slog.Warn("Gateway adapter is only applied to google- and anthropic-type providers",
-						"provider", id, "type", string(providerConfig.Type))
-				}
-				if _, err := gateway.New(providerConfig.Gateway, "", nil); err != nil {
-					return fmt.Errorf("invalid gateway adapter for provider %s: %w", id, err)
-				}
-			} else {
-				slog.Warn("Skipping provider gateway adapter with incomplete programs",
-					"provider", id,
-					"hint", "a gateway needs both a request and a response jq program")
-				providerConfig.Gateway = nil
-			}
-		}
-
-		// The quota endpoint is expanded the same way, then checked: a usage
-		// block without a URL is a mistake in the plugin, not a reason to
-		// drop the provider itself.
-		if usage := providerConfig.Usage; usage != nil {
-			for _, field := range []*string{&usage.URL, &usage.Body} {
-				if *field == "" {
-					continue
-				}
-				resolved, err := resolver.ResolveValue(*field)
-				if err != nil {
-					return fmt.Errorf("resolving provider %s usage value: %w", id, err)
-				}
-				*field = resolved
-			}
-			if usage.URL == "" {
-				slog.Warn("Skipping provider usage report with no endpoint", "provider", id,
-					"hint", "set usage.url to the endpoint that reports remaining quota")
-				providerConfig.Usage = nil
-			}
+		if err := prepareDeclaredSpecs(id, &providerConfig, resolver); err != nil {
+			return err
 		}
 
 		c.Providers.Set(id, providerConfig)
@@ -839,6 +779,78 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
 	}
 
+	return nil
+}
+
+// prepareDeclaredSpecs expands OAuth and usage values and validates the gateway.
+func prepareDeclaredSpecs(id string, pc *ProviderConfig, resolver VariableResolver) error {
+	resolve := func(spec string, fields ...*string) error {
+		for _, field := range fields {
+			if *field == "" {
+				continue
+			}
+			value, err := resolver.ResolveValue(*field)
+			if err != nil {
+				return fmt.Errorf("resolving provider %s %s value: %w", id, spec, err)
+			}
+			*field = value
+		}
+		return nil
+	}
+
+	// Resolve OAuth references without requiring plugins to embed secrets.
+	if auth := pc.Auth; auth != nil {
+		if err := resolve("OAuth", &auth.Issuer, &auth.ClientID, &auth.ClientSecret,
+			&auth.AuthorizeURL, &auth.TokenURL, &auth.DeviceAuthURL, &auth.RedirectURI); err != nil {
+			return err
+		}
+		for _, values := range []map[string]string{auth.ExtraParams, auth.TokenHeaders} {
+			for k, v := range values {
+				resolved, err := resolver.ResolveValue(v)
+				if err != nil {
+					return fmt.Errorf("resolving provider %s OAuth value %q: %w", id, k, err)
+				}
+				values[k] = resolved
+			}
+		}
+	}
+
+	if err := prepareGateway(id, pc); err != nil {
+		return err
+	}
+
+	if usage := pc.Usage; usage != nil {
+		if err := resolve("usage", &usage.URL, &usage.Body); err != nil {
+			return err
+		}
+		if usage.URL == "" {
+			slog.Warn("Skipping provider usage report with no endpoint", "provider", id,
+				"hint", "set usage.url to the endpoint that reports remaining quota")
+			pc.Usage = nil
+		}
+	}
+	return nil
+}
+
+// prepareGateway reports invalid jq at load time rather than during a request.
+func prepareGateway(id string, pc *ProviderConfig) error {
+	switch {
+	case pc.Gateway == nil:
+		return nil
+	case !pc.Gateway.Usable():
+		slog.Warn("Skipping provider gateway adapter with incomplete programs",
+			"provider", id,
+			"hint", "a gateway needs both a request and a response jq program")
+		pc.Gateway = nil
+		return nil
+	case id != string(catwalk.InferenceProviderGemini) && pc.Type != catwalk.TypeMessages:
+		// Only google and anthropic SDKs take the adapter's client.
+		slog.Warn("Gateway adapter is only applied to google- and anthropic-type providers",
+			"provider", id, "type", string(pc.Type))
+	}
+	if _, err := gateway.New(pc.Gateway, "", nil); err != nil {
+		return fmt.Errorf("invalid gateway adapter for provider %s: %w", id, err)
+	}
 	return nil
 }
 

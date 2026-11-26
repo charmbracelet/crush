@@ -135,3 +135,46 @@ func TestLoad_TracksNotYetCreatedGlobalCrushrc(t *testing.T) {
 	require.True(t, staleness.Dirty, "creating a global crushrc must be detected")
 	require.Contains(t, staleness.Changed, globalRC)
 }
+
+func TestLoad_TracksCrushrcWithOnlySignedOutProviders(t *testing.T) {
+	workDir, dataDir := isolateReloadEnv(t)
+	rcPath := filepath.Join(workDir, "crushrc")
+	script := `option default-providers false
+provider add signedout --type anthropic --base-url https://example.com --oauth-client-id public --oauth-token-url https://example.com/token --oauth-auth-url https://example.com/authorize
+model add signedout/test --name Test
+`
+	require.NoError(t, os.WriteFile(rcPath, []byte(script), 0o644))
+
+	store, err := config.Load(t.Context(), workDir, dataDir, false)
+	require.NoError(t, err)
+	require.True(t, store.Config().IsConfigured())
+	require.False(t, store.Config().HasUsableSelection())
+	require.False(t, store.ConfigStaleness().Dirty)
+
+	require.NoError(t, os.WriteFile(rcPath, []byte(script+"option notifications bell\n"), 0o644))
+	staleness := store.ConfigStaleness()
+	require.True(t, staleness.Dirty)
+	require.Contains(t, staleness.Changed, rcPath)
+}
+
+// A saved model on a provider that is signed out must survive startup rather
+// than be overwritten by the empty fallback.
+func TestLoad_KeepsSavedModelWhileSignedOut(t *testing.T) {
+	workDir, dataDir := isolateReloadEnv(t)
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crushrc"), []byte(`option default-providers false
+provider add signedout --type anthropic --base-url https://example.com --oauth-client-id public --oauth-token-url https://example.com/token --oauth-auth-url https://example.com/authorize
+model add signedout/test --name Test
+`), 0o644))
+	globalData := config.GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalData), 0o755))
+	saved := `{"models":{"large":{"provider":"elsewhere","model":"gone"}}}`
+	require.NoError(t, os.WriteFile(globalData, []byte(saved), 0o600))
+
+	store, err := config.Load(t.Context(), workDir, dataDir, false)
+	require.NoError(t, err)
+	require.False(t, store.Config().HasUsableSelection())
+
+	onDisk, err := os.ReadFile(globalData)
+	require.NoError(t, err)
+	require.JSONEq(t, saved, string(onDisk))
+}

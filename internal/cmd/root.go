@@ -237,11 +237,18 @@ func takeResumeToken() string {
 
 // resumeCommand returns the command a terminal runs to bring Crush back after
 // it restarts, without the session, which the UI adds. It keeps the flags
-// that say where sessions live, so the session is found again.
+// that say where sessions live, so the session is found again, and the
+// prompt overrides, so the agent behaves the same. It drops --yolo and
+// --channels on purpose: a terminal resumes without asking the user, so a
+// resumed Crush must not skip permission prompts or act on outside events
+// unless the user opts in again.
 func resumeCommand(cmd *cobra.Command) []string {
 	exe := os.Args[0]
-	if filepath.Base(exe) != exe {
-		// Not run from PATH, so name it by an absolute path.
+	if !filepath.IsAbs(exe) && filepath.Base(exe) != exe {
+		// A relative path breaks once the terminal starts somewhere else.
+		// os.Executable is only the fallback: it resolves links, and the
+		// versioned file behind a Homebrew or Nix link is often gone after
+		// an upgrade, which is when people restart their terminal.
 		if abs, err := os.Executable(); err == nil {
 			exe = abs
 		}
@@ -255,6 +262,11 @@ func resumeCommand(cmd *cobra.Command) []string {
 			dataDir = abs
 		}
 		args = append(args, "--data-dir", dataDir)
+	}
+	// resolveFlagPaths already made these paths absolute.
+	prompts, _ := cmd.Flags().GetStringArray("prompt")
+	for _, p := range prompts {
+		args = append(args, "--prompt", p)
 	}
 	return args
 }

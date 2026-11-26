@@ -101,6 +101,27 @@ func TestProtoToMessagePrismModel(t *testing.T) {
 
 func protoPtrFloat(v float64) *float64 { return &v }
 
+// TestClientWorkspace_ShouldOnboard verifies that the client reports the
+// onboarding flag from the server's workspace snapshot, so clients stay in
+// the same fresh-install flow as local mode.
+func TestClientWorkspace_ShouldOnboard(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fresh install", func(t *testing.T) {
+		t.Parallel()
+
+		w := NewClientWorkspace(nil, proto.Workspace{ID: "ws-1", ShouldOnboard: true})
+		require.True(t, w.ShouldOnboard())
+	})
+
+	t.Run("already onboarded", func(t *testing.T) {
+		t.Parallel()
+
+		w := NewClientWorkspace(nil, proto.Workspace{ID: "ws-1"})
+		require.False(t, w.ShouldOnboard())
+	})
+}
+
 // TestClientWorkspace_PermissionGrantMapping verifies that
 // PermissionGrant on the ClientWorkspace serializes a one-time grant
 // (proto.PermissionAllow) and PermissionGrantPersistent serializes a

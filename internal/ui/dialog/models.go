@@ -3,14 +3,17 @@ package dialog
 import (
 	"cmp"
 	"fmt"
+	"image"
 	"log/slog"
 	"slices"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -70,7 +73,24 @@ const (
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
 
-const defaultModelsDialogMaxWidth = 73
+const (
+	defaultModelsDialogMaxWidth = 73
+	onboardingLogoHeight        = 4
+)
+
+// onboardingTopGap returns the empty lines kept between the logo and the
+// onboarding content. It shrinks on short terminals so the list keeps a
+// usable number of rows.
+func onboardingTopGap(height int) int {
+	switch {
+	case height >= 45:
+		return 6
+	case height >= 30:
+		return 4
+	default:
+		return 2
+	}
+}
 
 // Models represents a model selection dialog.
 type Models struct {
@@ -89,9 +109,13 @@ type Models struct {
 		Previous key.Binding
 		Close    key.Binding
 	}
-	list  *ModelsList
-	input textinput.Model
-	help  help.Model
+	list     *ModelsList
+	input    textinput.Model
+	help     help.Model
+	listArea image.Rectangle
+
+	lastClickTime time.Time
+	lastClickID   string
 }
 
 var _ Dialog = (*Models)(nil)
@@ -233,8 +257,62 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			}
 			return ActionCmd{cmd}
 		}
+	case common.CoalescedWheelMsg:
+		if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.listArea) {
+			m.list.ScrollBy(int(msg.DeltaY))
+		}
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(msg)
 	}
 	return nil
+}
+
+// handleMouseClick selects a model item under the pointer and selects it
+// for use on a quick second click, matching the sessions dialog
+// behavior. Clicks on group headers, spacers, and the scrollbar column
+// neither select nor reset the double-click state.
+func (m *Models) handleMouseClick(msg tea.MouseClickMsg) Action {
+	if msg.Button != tea.MouseLeft {
+		m.resetMouseClick()
+		return nil
+	}
+	area := m.listArea
+	area.Max.X = min(area.Max.X, area.Min.X+m.list.Width())
+	point := image.Pt(msg.X, msg.Y)
+	if !point.In(area) {
+		m.resetMouseClick()
+		return nil
+	}
+	index, _ := m.list.ItemIndexAtPosition(point.X-area.Min.X, point.Y-area.Min.Y)
+	if index < 0 {
+		m.resetMouseClick()
+		return nil
+	}
+	modelItem, ok := m.list.ItemAt(index).(*ModelItem)
+	if !ok {
+		m.resetMouseClick()
+		return nil
+	}
+	m.list.Focus()
+	m.list.List.SetSelected(index)
+	m.list.ScrollToSelected()
+	now := time.Now()
+	if m.lastClickID == modelItem.ID() && now.Sub(m.lastClickTime) <= sessionDoubleClickThreshold {
+		m.resetMouseClick()
+		return ActionSelectModel{
+			Provider:  modelItem.prov,
+			Model:     modelItem.SelectedModel(),
+			ModelType: modelItem.SelectedModelType(),
+		}
+	}
+	m.lastClickTime = now
+	m.lastClickID = modelItem.ID()
+	return nil
+}
+
+func (m *Models) resetMouseClick() {
+	m.lastClickTime = time.Time{}
+	m.lastClickID = ""
 }
 
 // Cursor returns the cursor for the dialog.
@@ -267,6 +345,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	if m.isOnboarding {
+		height = max(0, area.Dy()-t.Dialog.View.GetVerticalBorderSize()-
+			onboardingLogoHeight-onboardingTopGap(area.Dy()))
+	}
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
@@ -289,21 +371,68 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(listView)
 
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
-
-	cur := m.Cursor()
-
 	if m.isOnboarding {
 		rc.Title = ""
 		rc.TitleInfo = ""
 		rc.IsOnboarding = true
-		view := rc.Render()
+	}
+
+	cur := m.Cursor()
+	view := rc.Render()
+	m.updateListArea(area, view, listView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
+
+	if m.isOnboarding {
 		cur = adjustOnboardingInputCursor(t, cur)
 		DrawOnboardingCursor(scr, area, view, cur)
 	} else {
-		view := rc.Render()
 		DrawCenterCursor(scr, area, view, cur)
 	}
 	return cur
+}
+
+func (m *Models) updateListArea(
+	area uv.Rectangle,
+	view string,
+	bodyView string,
+	helpView string,
+	viewStyle lipgloss.Style,
+	bodyStyle lipgloss.Style,
+	bodyWidth int,
+	bodyHeight int,
+) {
+	viewWidth, viewHeight := lipgloss.Size(view)
+	dialogArea := common.CenterRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
+	if m.isOnboarding {
+		dialogArea = common.BottomLeftRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
+		// IsOnboarding bypasses the view frame entirely; remove its
+		// border, padding, and margins from hit-testing.
+		viewStyle = lipgloss.NewStyle()
+	}
+	bodyViewTop := dialogArea.Max.Y -
+		viewStyle.GetMarginBottom() -
+		viewStyle.GetBorderBottomSize() -
+		viewStyle.GetPaddingBottom() -
+		lipgloss.Height(helpView) -
+		lipgloss.Height(bodyView)
+	bodyMin := image.Pt(
+		dialogArea.Min.X+
+			viewStyle.GetMarginLeft()+
+			viewStyle.GetBorderLeftSize()+
+			viewStyle.GetPaddingLeft()+
+			bodyStyle.GetMarginLeft()+
+			bodyStyle.GetBorderLeftSize()+
+			bodyStyle.GetPaddingLeft(),
+		bodyViewTop+
+			bodyStyle.GetMarginTop()+
+			bodyStyle.GetBorderTopSize()+
+			bodyStyle.GetPaddingTop(),
+	)
+	m.listArea = image.Rect(
+		bodyMin.X,
+		bodyMin.Y,
+		bodyMin.X+bodyWidth,
+		bodyMin.Y+bodyHeight,
+	).Intersect(dialogArea).Intersect(area)
 }
 
 // ShortHelp returns the short help view.
@@ -508,12 +637,7 @@ func (m *Models) setProviderItems() error {
 
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
-	m.list.SetSelectedItem(selectedItemID)
-	if selectedItemID != "" {
-		m.list.ScrollToSelected()
-	} else {
-		m.list.ScrollToTop()
-	}
+	m.selectInitialModel(selectedItemID)
 
 	// Update placeholder based on model type
 	if !m.isOnboarding {
@@ -521,6 +645,23 @@ func (m *Models) setProviderItems() error {
 	}
 
 	return nil
+}
+
+func (m *Models) selectInitialModel(selectedItemID string) {
+	if m.isOnboarding {
+		// Onboarding offers a fresh choice: keep Hyper, the first provider,
+		// and its first model visible even when startup derived a default
+		// model from environment credentials.
+		m.list.SelectFirst()
+		m.list.ScrollToTop()
+		return
+	}
+	m.list.SetSelectedItem(selectedItemID)
+	if selectedItemID != "" {
+		m.list.ScrollToSelected()
+	} else {
+		m.list.ScrollToTop()
+	}
 }
 
 func modelKey(providerID, modelID string) string {

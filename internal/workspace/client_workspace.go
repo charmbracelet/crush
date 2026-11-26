@@ -683,6 +683,10 @@ func (w *ClientWorkspace) Config() *config.Config {
 	return w.cached().Config
 }
 
+func (w *ClientWorkspace) ShouldOnboard() bool {
+	return w.cached().ShouldOnboard
+}
+
 func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }

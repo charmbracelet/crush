@@ -665,7 +665,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
+	if com.Workspace.ShouldOnboard() {
 		desiredState = uiOnboarding
 	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
 		desiredState = uiInitialize

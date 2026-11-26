@@ -386,6 +386,10 @@ func (w *AppWorkspace) Config() *config.Config {
 	return w.store.Config()
 }
 
+func (w *AppWorkspace) ShouldOnboard() bool {
+	return w.store.ShouldOnboard()
+}
+
 func (w *AppWorkspace) WorkingDir() string {
 	return w.store.WorkingDir()
 }

@@ -88,7 +88,7 @@ func TestFetchGeminiShapedQuota(t *testing.T) {
 	require.True(t, meters[0].HasReset)
 	require.Equal(t, "Third-party Models", meters[2].Group)
 	require.Contains(t, meters[1].Summary(), "Gemini Models · Five Hour Limit Remaining")
-	require.Contains(t, meters[1].Summary(), "50% left")
+	require.Contains(t, meters[1].Summary(), "50% used")
 	// Four hours minus the microseconds already elapsed reads as 3h 59m.
 	require.Regexp(t, `resets in \d+h \d+m`, meters[1].Summary())
 }
@@ -217,12 +217,33 @@ func TestForModel(t *testing.T) {
 }
 
 // Tag picks the short window label a one-line display needs.
-func TestMeterTagAndPercent(t *testing.T) {
+func TestMeterTag(t *testing.T) {
 	t.Parallel()
 
 	require.Equal(t, "5h", Meter{Short: "5h", Label: "Weekly"}.Tag())
 	require.Equal(t, "Weekly", Meter{Label: "Weekly"}.Tag())
-	require.Equal(t, 99, Meter{Left: 0.9997}.Percent())
+}
+
+// The summary states the share used, rounded to the nearest percent like the
+// TUI, so the CLI and the header never disagree by a point.
+func TestMeterSummaryStatesPercentUsed(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		meter Meter
+		want  string
+	}{
+		{"rounds to nearest", Meter{Label: "Weekly", Left: 0.9997}, "Weekly: 0% used"},
+		{"rounds up", Meter{Label: "Weekly", Left: 0.725}, "Weekly: 28% used"},
+		{"exhausted", Meter{Label: "5-hour limit", Left: 0}, "5-hour limit: 100% used"},
+		{"amount stays an amount", Meter{Label: "Credits", Left: 1200}, "Credits: 1200 left"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, tc.meter.Summary())
+		})
+	}
 }
 
 // A plan reporting the share already spent, as a whole percentage, is the
@@ -251,9 +272,9 @@ func TestFetchSpentPercentage(t *testing.T) {
 
 	// Untouched reads as the whole allowance, and a plan 1% spent reads as 99%
 	// left rather than 1%: the value is a percentage, so it is complemented on
-	// that scale rather than judged by size.
+	// that scale rather than judged by size. The summary states the share used.
 	require.InDelta(t, 1, meters[0].Left, 1e-9)
 	require.InDelta(t, 0.99, meters[1].Left, 1e-9)
-	require.Contains(t, meters[1].Summary(), "weekly: 99% left")
+	require.Contains(t, meters[1].Summary(), "weekly: 1% used")
 	require.True(t, meters[1].HasReset)
 }

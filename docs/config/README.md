@@ -312,8 +312,8 @@ provider add example \
 ```text
 $ crush usage
 Google AI Subscription
-  Gemini Models · Weekly Limit Remaining: 99% left · resets in 6d 22h
-  Gemini Models · Five Hour Limit Remaining: 99% left · resets in 3h 57m
+  Gemini Models · Weekly Limit Remaining: 1% used · resets in 6d 22h
+  Gemini Models · Five Hour Limit Remaining: 1% used · resets in 3h 57m
 ```
 
 The response is walked with [gjson](https://github.com/tidwall/gjson) paths.

@@ -180,14 +180,12 @@ func renderHeaderDetails(
 		parts = append(parts, hc)
 	}
 
-	// A plan with several limits shows the ones the model in use draws from,
-	// compactly: the short tag the provider gave each meter and the share
-	// left in it.
+	// Show the meters the model in use draws from by tag and share used.
 	if len(usageMeters) > 0 {
 		segments := make([]string, 0, len(usageMeters))
 		for _, meter := range usageMeters {
 			if meter.IsFraction() {
-				segments = append(segments, fmt.Sprintf("%s %d%%", meter.Tag(), meter.Percent()))
+				segments = append(segments, fmt.Sprintf("%s %d%%", meter.Tag(), meter.PercentUsed()))
 			} else {
 				// An amount rather than a share, such as a credit balance.
 				segments = append(segments, fmt.Sprintf("%s %g", meter.Tag(), meter.Left))

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -39,14 +40,27 @@ type Meter struct {
 	ResetAt time.Time
 	// HasReset reports whether ResetAt carries a real time.
 	HasReset bool
+	// Blocked is set once the provider refuses requests until ResetAt.
+	Blocked bool
 }
 
 // IsFraction reports whether the provider expressed the allowance as a share
 // of the limit rather than an amount.
 func (m Meter) IsFraction() bool { return m.Left <= 1 }
 
-// Percent is the share of the allowance left, rounded to a whole percent.
-func (m Meter) Percent() int { return int(m.Left * 100) }
+// Spent is the share of a fraction meter used, from 0 to 1.
+func (m Meter) Spent() float64 { return min(max(1-m.Left, 0), 1) }
+
+// PercentUsed is the share of a fraction meter used, to the nearest percent.
+func (m Meter) PercentUsed() int { return int(math.Round(m.Spent() * 100)) }
+
+// Name is the meter's label qualified by its group.
+func (m Meter) Name() string {
+	if m.Group == "" {
+		return m.Label
+	}
+	return m.Group + " · " + m.Label
+}
 
 // Tag names the meter as briefly as the provider allows: its short tag when
 // it has one, otherwise its label.
@@ -60,20 +74,16 @@ func (m Meter) Tag() string {
 // Summary renders the meter as one line for a terminal or sidebar.
 func (m Meter) Summary() string {
 	var out strings.Builder
-	if m.Group != "" {
-		out.WriteString(m.Group)
-		out.WriteString(" · ")
-	}
-	out.WriteString(m.Label)
+	out.WriteString(m.Name())
 	out.WriteString(": ")
 	if m.IsFraction() {
-		fmt.Fprintf(&out, "%d%% left", m.Percent())
+		fmt.Fprintf(&out, "%d%% used", m.PercentUsed())
 	} else {
 		fmt.Fprintf(&out, "%g left", m.Left)
 	}
 	if m.HasReset {
 		out.WriteString(" · resets ")
-		out.WriteString(humanUntil(time.Until(m.ResetAt)))
+		out.WriteString(Until(m.ResetAt))
 	}
 	return out.String()
 }
@@ -245,7 +255,9 @@ func GroupForModel(spec *oauth.UsageSpec, modelID string) string {
 	return ""
 }
 
-// humanUntil shortens a duration for one-line display: "4h 17m", "6d 23h".
+// Until says how far off t is for one-line display: "in 4h 17m", "in 6d 23h".
+func Until(t time.Time) string { return humanUntil(time.Until(t)) }
+
 func humanUntil(d time.Duration) string {
 	if d <= 0 {
 		return "now"

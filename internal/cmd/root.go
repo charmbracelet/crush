@@ -56,6 +56,10 @@ import (
 
 var clientHost string
 
+// resumeToken is the terminal's Program Resume Protocol (OSC 7577) token. See
+// [takeResumeToken].
+var resumeToken string
+
 // spawnedServerEnv marks a server that a client process started on its
 // behalf. Such a server shuts itself down once idle so it cannot outlive
 // the client; a server started explicitly with `crush server` has no such
@@ -156,9 +160,13 @@ crush --continue
 
 		com := common.DefaultCommon(ws)
 		model := ui.New(com, sessionID, continueLast)
+		model.SetResumeCommand(resumeCommand(cmd))
 
 		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
+		if resumeToken != "" {
+			env = append(env, ansi.ProgramResumeTokenEnv+"="+resumeToken)
+		}
 		// Don't leak the errors to the TUI
 		browser.Stderr = nil
 		browser.Stdout = nil
@@ -217,6 +225,40 @@ func printSessionResume(model *ui.UI, theme *styles.Styles, banner config.ExitBa
 	fmt.Fprintln(colorprofile.NewWriter(os.Stderr, os.Environ()), body)
 }
 
+// takeResumeToken returns the terminal's Program Resume Protocol token and
+// removes it from the environment. The terminal gave it to Crush alone: the
+// tools, hooks, MCP servers, and server Crush starts must not inherit it, or
+// they could be resumed in Crush's place.
+func takeResumeToken() string {
+	token := os.Getenv(ansi.ProgramResumeTokenEnv)
+	_ = os.Unsetenv(ansi.ProgramResumeTokenEnv)
+	return token
+}
+
+// resumeCommand returns the command a terminal runs to bring Crush back after
+// it restarts, without the session, which the UI adds. It keeps the flags
+// that say where sessions live, so the session is found again.
+func resumeCommand(cmd *cobra.Command) []string {
+	exe := os.Args[0]
+	if filepath.Base(exe) != exe {
+		// Not run from PATH, so name it by an absolute path.
+		if abs, err := os.Executable(); err == nil {
+			exe = abs
+		}
+	}
+	args := []string{exe}
+	if clientHost != server.DefaultHost() {
+		args = append(args, "--host", clientHost)
+	}
+	if dataDir, _ := cmd.Flags().GetString("data-dir"); dataDir != "" {
+		if abs, err := filepath.Abs(dataDir); err == nil {
+			dataDir = abs
+		}
+		args = append(args, "--data-dir", dataDir)
+	}
+	return args
+}
+
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 `
@@ -237,6 +279,8 @@ func Execute() {
 	// fix is to remove slog calls from config.Load and have it return
 	// warnings/diagnostics instead of logging them as a side effect.
 	slog.SetDefault(slog.New(slog.DiscardHandler))
+
+	resumeToken = takeResumeToken()
 
 	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
 	// it forward to a bytes.Buffer, write the colored heartbit to it, and then

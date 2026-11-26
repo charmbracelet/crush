@@ -6,8 +6,10 @@ package event
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/posthog/posthog-go"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetNonInteractive(t *testing.T) {
@@ -156,4 +158,15 @@ type testError string
 
 func (e testError) Error() string {
 	return string(e)
+}
+
+// TestFlushGivesUpWhenSetupHangs guards exit against telemetry: if setting
+// the client up never finishes, Flush must still return on time.
+func TestFlushGivesUpWhenSetupHangs(t *testing.T) {
+	started.Store(true) // As if Init ran, but its setup never finishes.
+	t.Cleanup(func() { started.Store(false) })
+
+	start := time.Now()
+	Flush()
+	require.Less(t, time.Since(start), 2*flushTimeout)
 }

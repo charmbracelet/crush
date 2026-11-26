@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
+	powernapconfig "charm.land/powernap/config"
+	powernap "charm.land/powernap/lsp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
-	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -37,7 +37,7 @@ type Manager struct {
 // NewManager creates a new LSP manager service.
 func NewManager(cfg *config.ConfigStore) *Manager {
 	manager := powernapconfig.NewManager()
-	manager.LoadDefaults()
+	config.LoadLSPDefaults(manager)
 
 	// Merge user-configured LSPs into the manager.
 	for name, clientConfig := range cfg.Config().LSP {

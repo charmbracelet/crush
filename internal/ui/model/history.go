@@ -48,9 +48,9 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 
 // handleHistoryUp handles up arrow for history navigation.
 func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
-	prevHeight := m.textarea.Height()
+	prevHeight := m.prompt.Height()
 	// Navigate to older history entry from cursor position (0,0).
-	if m.textarea.Length() == 0 || m.isAtEditorStart() {
+	if m.prompt.Length() == 0 || m.isAtEditorStart() {
 		if m.historyPrev() {
 			// we send this so that the textarea moves the view to the correct position
 			// without this the cursor will show up in the wrong place.
@@ -59,8 +59,8 @@ func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
 	}
 
 	// First move cursor to start before entering history.
-	if m.textarea.Line() == 0 {
-		m.textarea.CursorStart()
+	if m.prompt.Line() == 0 {
+		m.prompt.CursorStart()
 		return nil
 	}
 
@@ -70,7 +70,7 @@ func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
 
 // handleHistoryDown handles down arrow for history navigation.
 func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
-	prevHeight := m.textarea.Height()
+	prevHeight := m.prompt.Height()
 	// Navigate to newer history entry from end of text.
 	if m.isAtEditorEnd() {
 		if m.historyNext() {
@@ -81,8 +81,8 @@ func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
 	}
 
 	// First move cursor to end before navigating history.
-	if m.textarea.Line() == max(m.textarea.LineCount()-1, 0) {
-		m.textarea.MoveToEnd()
+	if m.prompt.Line() == max(m.prompt.LineCount()-1, 0) {
+		m.prompt.MoveToEnd()
 		return m.updateTextarea(nil)
 	}
 
@@ -92,12 +92,12 @@ func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
 
 // handleHistoryEscape handles escape for exiting history navigation.
 func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
-	prevHeight := m.textarea.Height()
+	prevHeight := m.prompt.Height()
 	// Return to current draft when browsing history.
 	if m.promptHistory.index >= 0 {
 		m.promptHistory.index = -1
-		m.textarea.Reset()
-		m.textarea.InsertString(m.promptHistory.draft)
+		m.prompt.Reset()
+		m.prompt.InsertString(m.promptHistory.draft)
 		m.syncBangModeFromTextarea()
 		return m.updateTextareaWithPrevHeight(nil, prevHeight)
 	}
@@ -108,8 +108,8 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 
 // updateHistoryDraft updates history state when text is modified.
 func (m *UI) updateHistoryDraft(oldValue string) {
-	if m.textarea.Value() != oldValue {
-		m.promptHistory.draft = m.textarea.Value()
+	if m.prompt.Value() != oldValue {
+		m.promptHistory.draft = m.prompt.Value()
 		m.promptHistory.index = -1
 	}
 }
@@ -119,15 +119,15 @@ func (m *UI) updateHistoryDraft(oldValue string) {
 // is stripped when entering bang mode and re-added when leaving it so
 // the visible text always reflects the correct state.
 func (m *UI) syncBangModeFromTextarea() {
-	val := m.textarea.Value()
+	val := m.prompt.Value()
 	hasBang := strings.HasPrefix(val, "!")
 	if hasBang {
 		if !m.bangMode {
 			m.bangMode = true
 			m.bangWasEmpty = false
 		}
-		m.textarea.SetValue(strings.TrimPrefix(val, "!"))
-		m.textarea.MoveToBegin()
+		m.prompt.SetValue(strings.TrimPrefix(val, "!"))
+		m.prompt.MoveToBegin()
 	} else if m.bangMode {
 		m.bangMode = false
 		m.bangWasEmpty = false
@@ -142,16 +142,16 @@ func (m *UI) historyPrev() bool {
 		return false
 	}
 	if m.promptHistory.index == -1 {
-		m.promptHistory.draft = m.textarea.Value()
+		m.promptHistory.draft = m.prompt.Value()
 	}
 	nextIndex := m.promptHistory.index + 1
 	if nextIndex >= len(m.promptHistory.messages) {
 		return false
 	}
 	m.promptHistory.index = nextIndex
-	m.textarea.Reset()
-	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
-	m.textarea.MoveToBegin()
+	m.prompt.Reset()
+	m.prompt.InsertString(m.promptHistory.messages[nextIndex])
+	m.prompt.MoveToBegin()
 	m.syncBangModeFromTextarea()
 	return true
 }
@@ -165,14 +165,14 @@ func (m *UI) historyNext() bool {
 	nextIndex := m.promptHistory.index - 1
 	if nextIndex < 0 {
 		m.promptHistory.index = -1
-		m.textarea.Reset()
-		m.textarea.InsertString(m.promptHistory.draft)
+		m.prompt.Reset()
+		m.prompt.InsertString(m.promptHistory.draft)
 		m.syncBangModeFromTextarea()
 		return true
 	}
 	m.promptHistory.index = nextIndex
-	m.textarea.Reset()
-	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
+	m.prompt.Reset()
+	m.prompt.InsertString(m.promptHistory.messages[nextIndex])
 	m.syncBangModeFromTextarea()
 	return true
 }
@@ -186,18 +186,18 @@ func (m *UI) historyReset() {
 
 // isAtEditorStart returns true if we are at the 0 line and 0 col in the textarea.
 func (m *UI) isAtEditorStart() bool {
-	return m.textarea.Line() == 0 && m.textarea.LineInfo().ColumnOffset == 0
+	return m.prompt.Line() == 0 && m.prompt.LineInfo().ColumnOffset == 0
 }
 
 // isAtEditorEnd returns true if we are in the last line and the last column in the textarea.
 func (m *UI) isAtEditorEnd() bool {
-	lineCount := m.textarea.LineCount()
+	lineCount := m.prompt.LineCount()
 	if lineCount == 0 {
 		return true
 	}
-	if m.textarea.Line() != lineCount-1 {
+	if m.prompt.Line() != lineCount-1 {
 		return false
 	}
-	info := m.textarea.LineInfo()
+	info := m.prompt.LineInfo()
 	return info.CharOffset >= info.CharWidth-1 || info.CharWidth == 0
 }

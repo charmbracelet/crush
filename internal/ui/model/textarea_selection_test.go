@@ -28,15 +28,15 @@ func TestTextareaSelectionKeys(t *testing.T) {
 	u := newSelectionTestUI()
 
 	for _, r := range "hello" {
-		u.textarea.InsertRune(r)
+		u.prompt.InsertRune(r)
 	}
-	u.textarea.CursorStart()
+	u.prompt.CursorStart()
 
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
 
-	require.True(t, u.textarea.HasSelection())
-	require.Equal(t, "he", u.textarea.SelectedText())
+	require.True(t, u.prompt.HasSelection())
+	require.Equal(t, "he", u.prompt.SelectedText())
 }
 
 func TestTextareaCutSelection(t *testing.T) {
@@ -46,18 +46,18 @@ func TestTextareaCutSelection(t *testing.T) {
 	u.keyMap = DefaultKeyMap()
 
 	for _, r := range "hello" {
-		u.textarea.InsertRune(r)
+		u.prompt.InsertRune(r)
 	}
-	u.textarea.CursorStart()
+	u.prompt.CursorStart()
 
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
-	require.True(t, u.textarea.HasSelection())
+	require.True(t, u.prompt.HasSelection())
 
 	_, _ = u.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl | tea.ModShift})
 
-	require.False(t, u.textarea.HasSelection())
-	require.Equal(t, "llo", u.textarea.Value())
+	require.False(t, u.prompt.HasSelection())
+	require.Equal(t, "llo", u.prompt.Value())
 }
 
 func TestTextareaMouseSelection(t *testing.T) {
@@ -66,9 +66,9 @@ func TestTextareaMouseSelection(t *testing.T) {
 	u := newSelectionTestUI()
 
 	for _, r := range "hello world" {
-		u.textarea.InsertRune(r)
+		u.prompt.InsertRune(r)
 	}
-	u.textarea.CursorStart()
+	u.prompt.CursorStart()
 
 	// The textarea renders one row below the editor top (the attachments
 	// row is always reserved, even when empty). The default prompt
@@ -86,8 +86,8 @@ func TestTextareaMouseSelection(t *testing.T) {
 	_, _ = u.Update(tea.MouseReleaseMsg(tea.Mouse{X: startX + 5, Y: y, Button: uv.MouseLeft}))
 	require.False(t, u.textareaMouseSelecting)
 
-	require.True(t, u.textarea.HasSelection())
-	require.Equal(t, "hello", u.textarea.SelectedText())
+	require.True(t, u.prompt.HasSelection())
+	require.Equal(t, "hello", u.prompt.SelectedText())
 }
 
 func TestTextareaMouseClickOutsideDoesNotSelect(t *testing.T) {
@@ -96,7 +96,7 @@ func TestTextareaMouseClickOutsideDoesNotSelect(t *testing.T) {
 	u := newSelectionTestUI()
 
 	for _, r := range "hello" {
-		u.textarea.InsertRune(r)
+		u.prompt.InsertRune(r)
 	}
 
 	// Click in the chat area, far from the editor.
@@ -107,5 +107,5 @@ func TestTextareaMouseClickOutsideDoesNotSelect(t *testing.T) {
 	}))
 
 	require.False(t, u.textareaMouseSelecting)
-	require.False(t, u.textarea.HasSelection())
+	require.False(t, u.prompt.HasSelection())
 }

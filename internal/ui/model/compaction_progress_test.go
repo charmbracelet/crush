@@ -35,7 +35,7 @@ func TestSummarizingProgressDrivesPlaceholder(t *testing.T) {
 		Progress:  note,
 	}))
 	require.Equal(t, note, m.summarizingNote)
-	require.Equal(t, note, m.textarea.Placeholder)
+	require.Equal(t, note, m.prompt.Placeholder())
 
 	// The closing notification clears the note whatever its outcome, so a
 	// canceled or failed compaction cannot leave a lie on screen.
@@ -46,7 +46,7 @@ func TestSummarizingProgressDrivesPlaceholder(t *testing.T) {
 		Done:      true,
 	}))
 	require.Empty(t, m.summarizingNote)
-	require.NotEqual(t, note, m.textarea.Placeholder)
+	require.NotEqual(t, note, m.prompt.Placeholder())
 }
 
 // TestSummarizingProgressIgnoresOtherSessions keeps a background session's

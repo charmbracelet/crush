@@ -58,7 +58,7 @@ func TestPreviewOpensTheHandoff(t *testing.T) {
 	require.True(t, ok, "a previewed checkpoint opens the handoff prompt")
 	require.NotNil(t, inline)
 	require.Equal(t, uiFocusEditor, u.focus)
-	require.False(t, u.textarea.Focused(), "the editor yields to the question")
+	require.False(t, u.prompt.Focused(), "the editor yields to the question")
 	require.NotNil(t, u.pendingPreview, "dismissing keeps the decision pending")
 	require.Equal(t, preview.CheckpointID, u.pendingPreview.CheckpointID)
 }
@@ -72,12 +72,12 @@ func TestHandoffWithoutAPreviewOpensNothing(t *testing.T) {
 	u, _ := newPlanUI(t, "sess-1")
 	u.state = uiChat
 	u.focus = uiFocusEditor
-	u.textarea.Focus()
+	u.prompt.Focus()
 
 	u.openCheckpointHandoff()
 
 	require.Nil(t, u.activeInline, "no question without a staged checkpoint")
-	require.True(t, u.textarea.Focused(), "the editor keeps the textarea")
+	require.True(t, u.prompt.Focused(), "the editor keeps the textarea")
 }
 
 // TestHandoffKeepConfirmsTheStagedCheckpoint.

@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -175,7 +174,7 @@ func newBusyUI(ws *countingWorkspace) *UI {
 		com:         com,
 		status:      NewStatus(com, nil),
 		chat:        NewChat(com, config.ScrollbarDefault),
-		textarea:    textarea.New(),
+		prompt:      newPromptEditor(),
 		state:       uiChat,
 		focus:       uiFocusEditor,
 		width:       140,
@@ -863,16 +862,16 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws)
-	m.textarea.Focus()
-	m.textarea.SetWidth(40)
+	m.prompt.Focus()
+	m.prompt.SetWidth(40)
 	m.permModeCache.set(permission.PermissionModeNormal)
 	m.setEditorPrompt(permission.PermissionModeNormal)
-	normalPrompt := ansi.Strip(m.textarea.View())
+	normalPrompt := ansi.Strip(m.prompt.View())
 
 	// A remote toggle flips yolo on; delivered via an off-thread refresh.
 	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, permMode: permission.PermissionModeYolo})
 	require.Equal(t, permission.PermissionModeYolo, m.permModeCached(), "the refresh must write the new mode through the cache")
-	yoloPrompt := ansi.Strip(m.textarea.View())
+	yoloPrompt := ansi.Strip(m.prompt.View())
 	require.NotEqual(t, normalPrompt, yoloPrompt,
 		"a remote yolo toggle must change the rendered editor prompt")
 	require.Contains(t, yoloPrompt, "!",
@@ -881,6 +880,6 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	// Flipping back off must restore the normal prompt.
 	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, permMode: permission.PermissionModeNormal})
 	require.Equal(t, permission.PermissionModeNormal, m.permModeCached())
-	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
+	require.Equal(t, normalPrompt, ansi.Strip(m.prompt.View()),
 		"toggling yolo off must restore the normal editor prompt")
 }

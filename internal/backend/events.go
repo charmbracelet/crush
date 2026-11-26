@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"charm.land/powernap/lsp/protocol"
 
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"

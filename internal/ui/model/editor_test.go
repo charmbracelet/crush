@@ -47,12 +47,12 @@ func TestOpenEditorMsgClearsComposer(t *testing.T) {
 
 	u := newTestUI()
 	u.dialog = dialog.NewOverlay()
-	u.textarea.SetValue("a message typed before opening the editor")
+	u.prompt.SetValue("a message typed before opening the editor")
 
 	updated, _ := u.Update(openEditorMsg{Text: ""})
 	ui, ok := updated.(*UI)
 	require.True(t, ok)
-	require.Empty(t, ui.textarea.Value())
+	require.Empty(t, ui.prompt.Value())
 }
 
 func TestOpenEditorMsgReplacesComposer(t *testing.T) {
@@ -60,10 +60,10 @@ func TestOpenEditorMsgReplacesComposer(t *testing.T) {
 
 	u := newTestUI()
 	u.dialog = dialog.NewOverlay()
-	u.textarea.SetValue("original")
+	u.prompt.SetValue("original")
 
 	updated, _ := u.Update(openEditorMsg{Text: "edited in vim"})
 	ui, ok := updated.(*UI)
 	require.True(t, ok)
-	require.Equal(t, "edited in vim", ui.textarea.Value())
+	require.Equal(t, "edited in vim", ui.prompt.Value())
 }

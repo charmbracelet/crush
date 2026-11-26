@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"charm.land/bubbles/v2/textarea"
-
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -63,14 +61,14 @@ func (w *channelWorkspace) Config() *config.Config { return nil }
 func newChannelUI(ws *channelWorkspace) *UI {
 	com := common.DefaultCommon(ws)
 	return &UI{
-		com:      com,
-		status:   NewStatus(com, nil),
-		chat:     NewChat(com, config.ScrollbarDefault),
-		textarea: textarea.New(),
-		state:    uiChat,
-		focus:    uiFocusEditor,
-		width:    140,
-		height:   45,
+		com:    com,
+		status: NewStatus(com, nil),
+		chat:   NewChat(com, config.ScrollbarDefault),
+		prompt: newPromptEditor(),
+		state:  uiChat,
+		focus:  uiFocusEditor,
+		width:  140,
+		height: 45,
 	}
 }
 

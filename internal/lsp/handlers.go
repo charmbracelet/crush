@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	powernap "charm.land/powernap/lsp"
+	"charm.land/powernap/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/lsp/util"
-	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // HandleWorkspaceConfiguration handles workspace configuration requests

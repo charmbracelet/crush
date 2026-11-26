@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
+	powernapConfig "charm.land/powernap/config"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
@@ -28,7 +30,6 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/shellconfig"
-	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -836,13 +837,29 @@ var (
 	powernapDefaults     *powernapConfig.Manager
 )
 
+// lspCatalog is crush's default LSP server catalog. It is kept here rather
+// than taken from powernap's own defaults so crush keeps auto-configuring
+// the full set of servers it always has.
+//
+//go:embed lsps.json
+var lspCatalog []byte
+
+// LoadLSPDefaults fills m with crush's default LSP server catalog.
+func LoadLSPDefaults(m *powernapConfig.Manager) {
+	var servers map[string]any
+	if err := json.Unmarshal(lspCatalog, &servers); err != nil {
+		slog.Error("Failed to parse embedded LSP catalog", "error", err)
+		return
+	}
+	if err := m.LoadFromMap(map[string]any{"servers": servers}); err != nil {
+		slog.Error("Failed to load embedded LSP catalog", "error", err)
+	}
+}
+
 func lspDefaultsManager() *powernapConfig.Manager {
 	powernapDefaultsOnce.Do(func() {
 		m := powernapConfig.NewManager()
-		// LoadDefaults only fails on malformed embedded defaults, which
-		// would be a build-time bug; treat the manager as usable either
-		// way so a transient error never wedges config loading.
-		_ = m.LoadDefaults()
+		LoadLSPDefaults(m)
 		powernapDefaults = m
 	})
 	return powernapDefaults

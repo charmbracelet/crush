@@ -11,7 +11,9 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
-	charm.land/tone v0.1.0
+	charm.land/powernap v0.0.0
+	charm.land/superjoy v0.0.0
+	charm.land/tone v0.2.0
 	charm.land/turtle/shcoreutils v0.1.0
 	charm.land/x/nerdfont v0.1.0
 	charm.land/x/vcr v0.1.1
@@ -25,7 +27,7 @@ require (
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/openai-go v0.0.0-20260921175203-216db9e71b83
-	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
+	github.com/charmbracelet/ultraviolet v0.0.0-20261116103235-d7abda73d208
 	github.com/charmbracelet/x/ansi v0.12.0
 	github.com/charmbracelet/x/editor v0.2.0
 	github.com/charmbracelet/x/etag v0.2.0
@@ -33,7 +35,6 @@ require (
 	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/charmbracelet/x/exp/slice v0.1.0
 	github.com/charmbracelet/x/exp/strings v0.1.0
-	github.com/charmbracelet/x/powernap v0.1.6
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/clipperhouse/displaywidth v0.11.0
 	github.com/clipperhouse/uax29/v2 v2.7.0
@@ -81,6 +82,8 @@ require (
 )
 
 require (
+	charm.land/hair v0.0.0 // indirect
+	charm.land/rope v0.0.0 // indirect
 	charm.land/turtle/coreutils v0.1.0 // indirect
 	charm.land/turtle/fsx v0.1.0 // indirect
 	cloud.google.com/go v0.123.0 // indirect
@@ -206,4 +209,12 @@ require (
 	modernc.org/libc v1.78.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
+	mvdan.cc/editorconfig v0.3.0 // indirect
+)
+
+replace (
+	charm.land/hair => ../superjoy/hairsalon
+	charm.land/powernap => ../superjoy/powernap
+	charm.land/rope => ../superjoy/rope
+	charm.land/superjoy => ../superjoy
 )

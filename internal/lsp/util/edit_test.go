@@ -3,8 +3,8 @@ package util
 import (
 	"testing"
 
-	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	powernap "charm.land/powernap/lsp"
+	"charm.land/powernap/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
 
@@ -109,7 +109,7 @@ func TestPositionToByteOffset(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := powernap.PositionToByteOffset(tt.lineText, tt.utf16Char)
+			result := positionToByteOffset(tt.lineText, tt.utf16Char)
 			if result != tt.expected {
 				t.Errorf("PositionToByteOffset(%q, %d) = %d, want %d",
 					tt.lineText, tt.utf16Char, result, tt.expected)

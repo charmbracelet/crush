@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"charm.land/powernap/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 type ReplaceSymbolParams struct {

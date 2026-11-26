@@ -7,10 +7,10 @@ import (
 	"testing/synctest"
 	"time"
 
+	"charm.land/powernap/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
 

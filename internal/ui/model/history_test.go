@@ -31,9 +31,9 @@ func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {
 
 	require.True(t, u.historyPrev())
 	require.True(t, u.bangMode)
-	require.Equal(t, "echo one", u.textarea.Value())
+	require.Equal(t, "echo one", u.prompt.Value())
 
 	require.True(t, u.historyPrev())
 	require.True(t, u.bangMode)
-	require.Equal(t, "echo two", u.textarea.Value())
+	require.Equal(t, "echo two", u.prompt.Value())
 }

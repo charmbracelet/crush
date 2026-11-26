@@ -828,12 +828,18 @@ func (t ToolGrep) GetTimeout() time.Duration {
 }
 
 type ToolGlob struct {
-	Timeout *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the glob tool call,default=30s,example=10s"`
+	Timeout   *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the glob tool call,default=30s,example=10s"`
+	UseLocate *bool          `json:"use_locate,omitempty" jsonschema:"description=Use the locate command for faster filesystem-wide searches,default=false,example=true"`
 }
 
 // GetTimeout returns the user-defined timeout or the default.
 func (t ToolGlob) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 30*time.Second)
+}
+
+// GetUseLocate returns whether to use the locate command for filesystem-wide searches.
+func (t ToolGlob) GetUseLocate() bool {
+	return ptrValOr(t.UseLocate, false)
 }
 
 // HookConfig is a user-configured hook command. The hooks package owns

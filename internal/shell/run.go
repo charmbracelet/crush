@@ -249,7 +249,7 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 func execHandlerOption(blockFuncs []BlockFunc, coreutils CoreutilsMode) interp.RunnerOption {
 	base := processGroupExecHandler(defaultKillTimeout)
 	handler := base
-	for _, mw := range slices.Backward(standardHandlers(blockFuncs, coreutils)) {
+	for _, mw := range slices.Backward(standardHandlers(base, blockFuncs, coreutils)) {
 		handler = mw(handler)
 	}
 	// ExecHandlers always appends DefaultExecHandler which lacks process
@@ -348,7 +348,8 @@ func withoutHerdrEnv(env []string) []string {
 type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 
 // standardHandlers returns the exec-handler middleware chain used by both
-// [Run] and [Shell]. Order matters:
+// [Run] and [Shell]. base is the handler the chain ends in; script dispatch
+// also runs shebang interpreters on it directly. Order matters:
 //  1. block list first, so nothing downstream can route around it. A
 //     builtin, a shebang script, and a binary are all subject to the same
 //     rules, and a script named after a denied command is caught by the
@@ -370,11 +371,11 @@ type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 // interpreter, `sh -c`, make, a language runtime — is invisible to it. The
 // block list is a guardrail against invoking something dangerous by
 // accident, not a sandbox.
-func standardHandlers(blockFuncs []BlockFunc, coreutils CoreutilsMode) []execMiddleware {
+func standardHandlers(base interp.ExecHandlerFunc, blockFuncs []BlockFunc, coreutils CoreutilsMode) []execMiddleware {
 	handlers := []execMiddleware{
 		blockHandler(blockFuncs),
 		builtinHandler(),
-		scriptDispatchHandler(blockFuncs, coreutils),
+		scriptDispatchHandler(base, blockFuncs, coreutils),
 		gpgHandler(),
 	}
 	if mw := coreutilsHandler(coreutils); mw != nil {

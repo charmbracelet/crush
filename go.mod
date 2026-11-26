@@ -4,14 +4,16 @@ go 1.27.4
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.1.1
+	charm.land/bubbletea/v2 v2.1.2
 	charm.land/catwalk/v3 v3.3.1
 	charm.land/fang/v2 v2.0.1
 	charm.land/fantasy v0.48.2
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
-	charm.land/tone v0.1.0
+	charm.land/powernap v0.0.0
+	charm.land/superjoy v0.0.0
+	charm.land/tone v0.2.0
 	charm.land/x/nerdfont v0.1.0
 	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -24,15 +26,15 @@ require (
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/openai-go v0.0.0-20260921175203-216db9e71b83
-	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
-	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/charmbracelet/ultraviolet v0.0.0-20261116103235-d7abda73d208
+	github.com/charmbracelet/x/ansi v0.12.0
 	github.com/charmbracelet/x/editor v0.2.0
 	github.com/charmbracelet/x/etag v0.2.0
+	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444
 	github.com/charmbracelet/x/exp/golden v0.1.0
 	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/charmbracelet/x/exp/slice v0.1.0
 	github.com/charmbracelet/x/exp/strings v0.1.0
-	github.com/charmbracelet/x/powernap v0.1.6
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/charmbracelet/x/vt v0.0.0-20260925121430-ef6c49202246
 	github.com/charmbracelet/x/xpty v0.1.4
@@ -83,6 +85,8 @@ require (
 )
 
 require (
+	charm.land/hair v0.0.0 // indirect
+	charm.land/rope v0.0.0 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.24.4 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
@@ -112,7 +116,6 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/x/conpty v0.2.0 // indirect
-	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
@@ -211,4 +214,12 @@ require (
 	modernc.org/libc v1.78.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
+	mvdan.cc/editorconfig v0.3.0 // indirect
+)
+
+replace (
+	charm.land/hair => ../superjoy/hairsalon
+	charm.land/powernap => ../superjoy/powernap
+	charm.land/rope => ../superjoy/rope
+	charm.land/superjoy => ../superjoy
 )

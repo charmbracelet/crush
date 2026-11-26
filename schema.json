@@ -1402,6 +1402,16 @@
           ],
           "description": "Exit banner style after quitting Crush",
           "default": "default"
+        },
+        "editor_mode": {
+          "type": "string",
+          "enum": [
+            "emacs",
+            "vim",
+            "helix"
+          ],
+          "description": "Editing mode of the prompt editor: emacs types as you go, vim is modal like vim, helix is modal like Helix (select first, then act).",
+          "default": "emacs"
         }
       },
       "additionalProperties": false,

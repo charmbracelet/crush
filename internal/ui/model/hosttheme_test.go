@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -35,12 +34,12 @@ func newHostThemeTestUI(t testing.TB, cfg *config.Config) *UI {
 	com := common.DefaultCommon(&themeTestWorkspace{testWorkspace: testWorkspace{cfg: cfg}})
 	keyMap := DefaultKeyMap()
 	u := &UI{
-		com:      com,
-		keyMap:   keyMap,
-		dialog:   dialog.NewOverlay(),
-		header:   newHeader(com),
-		chat:     NewChat(com, config.ScrollbarDefault),
-		textarea: textarea.New(),
+		com:    com,
+		keyMap: keyMap,
+		dialog: dialog.NewOverlay(),
+		header: newHeader(com),
+		chat:   NewChat(com, config.ScrollbarDefault),
+		prompt: newPromptEditor(),
 		completions: completions.New(
 			com.Styles.Completions.Normal,
 			com.Styles.Completions.Focused,

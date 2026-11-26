@@ -22,13 +22,13 @@ import (
 	"testing"
 	"time"
 
+	powernapconfig "charm.land/powernap/config"
+	"charm.land/powernap/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/lsphost"
 	"github.com/charmbracelet/crush/internal/version"
-	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/sourcegraph/jsonrpc2"
 	"github.com/stretchr/testify/require"
 )

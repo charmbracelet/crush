@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -14,14 +15,14 @@ import (
 	"syscall"
 	"time"
 
+	powernap "charm.land/powernap/lsp"
+	"charm.land/powernap/lsp/protocol"
+	"charm.land/powernap/transport"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsphost"
-	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/charmbracelet/x/powernap/pkg/transport"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -301,8 +302,34 @@ func connectionLost(err error) bool {
 }
 
 // GetOffsetEncoding returns the negotiated offset encoding for this client.
+// powernap keeps the negotiated value private, so it is read back from the
+// server's initialize reply; before initialization the UTF-16 default applies.
 func (c *Client) GetOffsetEncoding() powernap.OffsetEncoding {
-	return c.server().GetOffsetEncoding()
+	raw := c.server().InitializeResult()
+	if len(raw) == 0 {
+		return powernap.UTF16
+	}
+	var result struct {
+		Capabilities struct {
+			PositionEncoding *string `json:"positionEncoding"`
+		} `json:"capabilities"`
+		OffsetEncoding string `json:"offsetEncoding"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return powernap.UTF16
+	}
+	encoding := result.OffsetEncoding
+	if result.Capabilities.PositionEncoding != nil {
+		encoding = *result.Capabilities.PositionEncoding
+	}
+	switch encoding {
+	case "utf-8":
+		return powernap.UTF8
+	case "utf-32":
+		return powernap.UTF32
+	default:
+		return powernap.UTF16
+	}
 }
 
 // Close closes all open files in the client, then shuts down gracefully.
@@ -378,6 +405,7 @@ func (c *Client) createPowernapClient() error {
 		Environment: envs,
 		Settings:    c.config.Options,
 		InitOptions: c.config.InitOptions,
+		Logger:      slog.Default(),
 		WorkspaceFolders: []protocol.WorkspaceFolder{
 			{
 				URI:  rootURI,
@@ -399,7 +427,7 @@ func (c *Client) createPowernapClient() error {
 
 // registerHandlers registers the standard LSP notification and request handlers.
 func (c *Client) registerHandlers() {
-	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.server().GetOffsetEncoding()))
+	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.GetOffsetEncoding()))
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterServerRequestHandler("window/workDoneProgress/create", HandleWorkDoneProgressCreate)
@@ -626,7 +654,14 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	if err = c.server().NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
+	language := string(powernap.DetectLanguage(filepath))
+	if language == "" {
+		switch path.Ext(filepath) {
+		case ".zig", ".zir":
+			language = "zig"
+		}
+	}
+	if err = c.server().NotifyDidOpenTextDocument(ctx, uri, language, 1, string(content)); err != nil {
 		return c.observe(err)
 	}
 
@@ -910,8 +945,25 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
-	result, err := c.server().FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
-	return result, c.observe(err) //nolint:wrapcheck
+	params := protocol.ReferenceParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.URIFromPath(filepath),
+			},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),      //nolint:gosec
+				Character: uint32(character - 1), //nolint:gosec
+			},
+		},
+		Context: protocol.ReferenceContext{
+			IncludeDeclaration: includeDeclaration,
+		},
+	}
+	var result []protocol.Location
+	if err := c.server().Call(ctx, powernap.MethodTextDocumentReferences, params, &result); err != nil {
+		return nil, c.observe(err) //nolint:wrapcheck
+	}
+	return result, nil
 }
 
 // Rename renames the symbol at the given position across all files.
@@ -923,8 +975,21 @@ func (c *Client) Rename(ctx context.Context, filepath string, line, character in
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	result, err := c.server().RequestRename(ctx, filepath, line-1, character-1, newName)
-	return result, c.observe(err) //nolint:wrapcheck
+	params := protocol.RenameParams{
+		TextDocument: protocol.TextDocumentIdentifier{
+			URI: protocol.URIFromPath(filepath),
+		},
+		Position: protocol.Position{
+			Line:      uint32(line - 1),      //nolint:gosec
+			Character: uint32(character - 1), //nolint:gosec
+		},
+		NewName: newName,
+	}
+	var result protocol.WorkspaceEdit
+	if err := c.server().Call(ctx, "textDocument/rename", params, &result); err != nil {
+		return nil, c.observe(err) //nolint:wrapcheck
+	}
+	return &result, nil
 }
 
 // DocumentSymbols returns the document symbols for the given file.
@@ -936,8 +1001,16 @@ func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protoc
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	result, err := c.server().RequestDocumentSymbols(ctx, filepath)
-	return result, c.observe(err) //nolint:wrapcheck
+	params := protocol.DocumentSymbolParams{
+		TextDocument: protocol.TextDocumentIdentifier{
+			URI: protocol.URIFromPath(filepath),
+		},
+	}
+	var result protocol.Or_Result_textDocument_documentSymbol
+	if err := c.server().Call(ctx, "textDocument/documentSymbol", params, &result); err != nil {
+		return nil, c.observe(err) //nolint:wrapcheck
+	}
+	return result.Results() //nolint:wrapcheck
 }
 
 // Definition finds the definition of the symbol at the given position.
@@ -949,7 +1022,10 @@ func (c *Client) Definition(ctx context.Context, filepath string, line, characte
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	result, err := c.server().RequestDefinition(ctx, filepath, line-1, character-1)
+	result, err := c.server().RequestDefinition(ctx, string(protocol.URIFromPath(filepath)), protocol.Position{
+		Line:      uint32(line - 1),      //nolint:gosec
+		Character: uint32(character - 1), //nolint:gosec
+	})
 	return result, c.observe(err) //nolint:wrapcheck
 }
 
@@ -962,8 +1038,22 @@ func (c *Client) PrepareCallHierarchy(ctx context.Context, filepath string, line
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	result, err := c.server().PrepareCallHierarchy(ctx, filepath, line-1, character-1)
-	return result, c.observe(err) //nolint:wrapcheck
+	params := protocol.CallHierarchyPrepareParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.URIFromPath(filepath),
+			},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),      //nolint:gosec
+				Character: uint32(character - 1), //nolint:gosec
+			},
+		},
+	}
+	var result []protocol.CallHierarchyItem
+	if err := c.server().Call(ctx, "textDocument/prepareCallHierarchy", params, &result); err != nil {
+		return nil, c.observe(err) //nolint:wrapcheck
+	}
+	return result, nil
 }
 
 // IncomingCalls returns all callers of the given call hierarchy item.
@@ -971,8 +1061,12 @@ func (c *Client) IncomingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	result, err := c.server().IncomingCalls(ctx, item)
-	return result, c.observe(err) //nolint:wrapcheck
+	params := protocol.CallHierarchyIncomingCallsParams{Item: item}
+	var result []protocol.CallHierarchyIncomingCall
+	if err := c.server().Call(ctx, "callHierarchy/incomingCalls", params, &result); err != nil {
+		return nil, c.observe(err) //nolint:wrapcheck
+	}
+	return result, nil
 }
 
 // OutgoingCalls returns all callees of the given call hierarchy item.
@@ -980,6 +1074,10 @@ func (c *Client) OutgoingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	result, err := c.server().OutgoingCalls(ctx, item)
-	return result, c.observe(err) //nolint:wrapcheck
+	params := protocol.CallHierarchyOutgoingCallsParams{Item: item}
+	var result []protocol.CallHierarchyOutgoingCall
+	if err := c.server().Call(ctx, "callHierarchy/outgoingCalls", params, &result); err != nil {
+		return nil, c.observe(err) //nolint:wrapcheck
+	}
+	return result, nil
 }

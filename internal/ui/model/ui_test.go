@@ -5,7 +5,6 @@ import (
 	"image"
 	"testing"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -398,12 +397,12 @@ func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
 		Styles:    &sty,
 	}
 	u := &UI{
-		com:      com,
-		mode:     uiInputModePlan,
-		textarea: textarea.New(),
-		dialog:   dialog.NewOverlay(),
-		session:  sess,
-		chat:     NewChat(com, config.ScrollbarDefault),
+		com:     com,
+		mode:    uiInputModePlan,
+		prompt:  newPromptEditor(),
+		dialog:  dialog.NewOverlay(),
+		session: sess,
+		chat:    NewChat(com, config.ScrollbarDefault),
 	}
 	u.status = NewStatus(com, u)
 	return u, ws
@@ -471,7 +470,7 @@ func TestToggleSidebarKeyBinding(t *testing.T) {
 		focus:       uiFocusSidebar,
 		session:     &session.Session{ID: "sess-1"},
 		chat:        NewChat(com, config.ScrollbarDefault),
-		textarea:    textarea.New(),
+		prompt:      newPromptEditor(),
 		dialog:      dialog.NewOverlay(),
 		attachments: att,
 		width:       140,
@@ -745,9 +744,9 @@ func TestSetInputMode_SwitchesToCode(t *testing.T) {
 	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
 	ws := &testWorkspace{cfg: cfg}
 	u := &UI{
-		com:      &common.Common{Workspace: ws},
-		mode:     uiInputModePlan,
-		textarea: textarea.New(),
+		com:    &common.Common{Workspace: ws},
+		mode:   uiInputModePlan,
+		prompt: newPromptEditor(),
 	}
 	applyModeSwitchMsg(u, u.setInputMode(uiInputModeCode))
 	require.Equal(t, uiInputModeCode, u.mode)
@@ -759,9 +758,9 @@ func TestSetInputMode_SwitchesToPlan(t *testing.T) {
 	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
 	ws := &testWorkspace{cfg: cfg}
 	u := &UI{
-		com:      &common.Common{Workspace: ws},
-		mode:     uiInputModeCode,
-		textarea: textarea.New(),
+		com:    &common.Common{Workspace: ws},
+		mode:   uiInputModeCode,
+		prompt: newPromptEditor(),
 	}
 	applyModeSwitchMsg(u, u.setInputMode(uiInputModePlan))
 	require.Equal(t, uiInputModePlan, u.mode)
@@ -921,11 +920,11 @@ func TestPlanHandoffExplicitPermissionMode(t *testing.T) {
 func TestPlanPromptIgnoresYOLO(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
-	u.textarea.SetWidth(40)
-	u.textarea.Focus()
+	u.prompt.SetWidth(40)
+	u.prompt.Focus()
 	u.setEditorPrompt(permission.PermissionModeYolo)
-	require.Contains(t, u.textarea.View(), "⏸")
-	require.NotContains(t, u.textarea.View(), " ! ")
+	require.Contains(t, u.prompt.View(), "⏸")
+	require.NotContains(t, u.prompt.View(), " ! ")
 }
 
 func TestGeneratedPlanContinuationIsHidden(t *testing.T) {

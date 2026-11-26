@@ -31,11 +31,11 @@ func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {
 
 	require.True(t, u.historyPrev())
 	require.True(t, u.bangMode)
-	require.Equal(t, "echo one", u.textarea.Value())
+	require.Equal(t, "echo one", u.prompt.Value())
 
 	require.True(t, u.historyPrev())
 	require.True(t, u.bangMode)
-	require.Equal(t, "echo two", u.textarea.Value())
+	require.Equal(t, "echo two", u.prompt.Value())
 }
 
 func TestSyncBangModeSecondBangEngagesInteractive(t *testing.T) {
@@ -45,23 +45,23 @@ func TestSyncBangModeSecondBangEngagesInteractive(t *testing.T) {
 	u.com.Workspace = historyWorkspace{}
 
 	// First "!" engages bang mode.
-	u.textarea.SetValue("!")
+	u.prompt.SetValue("!")
 	u.syncBangModeFromTextarea()
 	require.True(t, u.bangMode)
 	require.False(t, u.interactiveBang)
-	require.Equal(t, "", u.textarea.Value())
+	require.Equal(t, "", u.prompt.Value())
 
 	// A second "!" (e.g. pasted or restored from history) engages the
 	// interactive terminal on top of bang mode.
-	u.textarea.SetValue("!")
+	u.prompt.SetValue("!")
 	u.syncBangModeFromTextarea()
 	require.True(t, u.bangMode)
 	require.True(t, u.interactiveBang)
-	require.Equal(t, "", u.textarea.Value())
+	require.Equal(t, "", u.prompt.Value())
 
 	// Regular typing does not resync; interactive mode stays armed.
-	u.textarea.InsertString("gh auth login")
-	require.Equal(t, "gh auth login", u.textarea.Value())
+	u.prompt.InsertString("gh auth login")
+	require.Equal(t, "gh auth login", u.prompt.Value())
 	require.True(t, u.interactiveBang)
 }
 
@@ -76,7 +76,7 @@ func TestSyncBangModeInteractiveDisengagesWithBangMode(t *testing.T) {
 
 	// A paste or history value without the bang prefix disengages bang
 	// mode, and interactive mode goes with it.
-	u.textarea.SetValue("plain text")
+	u.prompt.SetValue("plain text")
 	u.syncBangModeFromTextarea()
 	require.False(t, u.bangMode)
 	require.False(t, u.interactiveBang)

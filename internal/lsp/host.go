@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	powernapconfig "charm.land/powernap/config"
+	"charm.land/powernap/lsp/protocol"
 )
 
 const (

@@ -25,7 +25,6 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/lipgloss/v2"
@@ -386,7 +385,7 @@ type UI struct {
 	caps common.Capabilities
 
 	// Editor components
-	textarea textarea.Model
+	prompt promptEditor
 
 	// textareaMouseSelecting tracks whether a mouse selection gesture is
 	// currently in progress within the textarea (left button held after a
@@ -623,28 +622,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	// Editor components
-	ta := textarea.New()
+	ta := newPromptEditor()
 	ta.SetStyles(com.Styles.Editor.Textarea)
-	ta.ShowLineNumbers = false
-	ta.CharLimit = -1
-	ta.SetVirtualCursor(false)
-	ta.DynamicHeight = true
-	ta.MinHeight = TextareaMinHeight
-	ta.MaxHeight = TextareaMaxHeight
-	// Keep "ctrl+a" for line-start (the textarea default); bind select-all
-	// to "ctrl+shift+a" instead (line-start is also available via "home").
-	ta.KeyMap.LineStart = key.NewBinding(
-		key.WithKeys("home", "ctrl+a"),
-		key.WithHelp("home", "line start"),
-	)
-	ta.KeyMap.SelectAll = key.NewBinding(
-		key.WithKeys("ctrl+shift+a"),
-		key.WithHelp("ctrl+shift+a", "select all"),
-	)
-	// Copying is handled by crush's keymap (Editor.CopySelection) so it can
-	// use crush's clipboard backend and user feedback; disable the
-	// textarea's built-in copy binding.
-	ta.KeyMap.CopySelection = key.NewBinding()
+	ta.SetMode(com.Config().Options.TUI.EditorMode)
 	ta.Focus()
 
 	ch := NewChat(com, com.Config().Options.TUI.Scrollbar)
@@ -679,7 +659,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		com:                 com,
 		dialog:              dialog.NewOverlay(),
 		keyMap:              keyMap,
-		textarea:            ta,
+		prompt:              ta,
 		chat:                ch,
 		header:              header,
 		completions:         comp,
@@ -720,7 +700,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.mode = uiInputModeCode
 	ui.setEditorPrompt(permMode)
 	ui.randomizePlaceholders()
-	ui.textarea.Placeholder = ui.readyPlaceholder
+	ui.prompt.SetPlaceholder(ui.readyPlaceholder)
 	ui.status = status
 
 	// Initialize compact mode from config
@@ -1469,7 +1449,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if done {
 						prev := m.activeInline
 						m.activeInline = nil
-						m.textarea.Focus()
+						m.prompt.Focus()
 						m.updateLayoutAndSize()
 						if cod, ok := prev.(dialog.CmdOnDone); ok {
 							if c := cod.PendingCmd(); c != nil {
@@ -1742,9 +1722,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case openEditorMsg:
-		prevHeight := m.textarea.Height()
-		m.textarea.SetValue(msg.Text)
-		m.textarea.MoveToEnd()
+		prevHeight := m.prompt.Height()
+		m.prompt.SetValue(msg.Text)
+		m.prompt.MoveToEnd()
 		m.syncBangModeFromTextarea()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 	case shellStreamMsg:
@@ -1887,30 +1867,30 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// This logic gets triggered on any message type, but should it?
-	prevPlaceholder := m.textarea.Placeholder
+	prevPlaceholder := m.prompt.Placeholder()
 	switch m.focus {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
 		if m.bangMode {
-			m.textarea.Placeholder = "Run a shell command"
+			m.prompt.SetPlaceholder("Run a shell command")
 		} else if m.isAgentBusy() {
-			m.textarea.Placeholder = m.workingPlaceholder
+			m.prompt.SetPlaceholder(m.workingPlaceholder)
 		} else if m.mode == uiInputModePlan {
-			m.textarea.Placeholder = "Let's plan"
+			m.prompt.SetPlaceholder("Let's plan")
 		} else {
-			m.textarea.Placeholder = m.readyPlaceholder
+			m.prompt.SetPlaceholder(m.readyPlaceholder)
 		}
 		if !m.bangMode && m.mode != uiInputModePlan {
 			switch m.permModeCached() {
 			case permission.PermissionModeYolo:
-				m.textarea.Placeholder = "Go crazy"
+				m.prompt.SetPlaceholder("Go crazy")
 			case permission.PermissionModeSysadmin:
-				m.textarea.Placeholder = "Sysadmin mode!"
+				m.prompt.SetPlaceholder("Sysadmin mode!")
 			}
 		}
 	}
-	if m.textarea.Placeholder != prevPlaceholder {
+	if m.prompt.Placeholder() != prevPlaceholder {
 		m.invalidateFrames()
 	}
 
@@ -2287,7 +2267,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		return nil
 	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebarScrollable:
 		m.focus = uiFocusSidebar
-		m.textarea.Blur()
+		m.prompt.Blur()
 		m.chat.Blur()
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
@@ -2295,7 +2275,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 			m.focusActiveInline(uiFocusEditor)
 		} else {
 			m.focus = uiFocusEditor
-			cmd = m.textarea.Focus()
+			cmd = m.prompt.Focus()
 			m.chat.Blur()
 		}
 		m.sidebarScrollbarVisible = false
@@ -2304,7 +2284,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 			m.focusActiveInline(uiFocusMain)
 		} else {
 			m.focus = uiFocusMain
-			m.textarea.Blur()
+			m.prompt.Blur()
 			m.chat.Focus()
 		}
 		m.sidebarScrollbarVisible = false
@@ -2320,7 +2300,7 @@ func (m *UI) focusActiveInline(focus uiFocusState) {
 	}
 
 	m.focus = focus
-	m.textarea.Blur()
+	m.prompt.Blur()
 	switch focus {
 	case uiFocusEditor:
 		m.activeInline.SetFocused(true)
@@ -2512,7 +2492,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if m.focus == uiFocusEditor {
-			cmds = append(cmds, m.textarea.Focus())
+			cmds = append(cmds, m.prompt.Focus())
 		}
 	case dialog.ActionCloseOAuth:
 		// Same as ActionClose, but with a cleanup command that cancels
@@ -2530,7 +2510,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if m.focus == uiFocusEditor {
-			cmds = append(cmds, m.textarea.Focus())
+			cmds = append(cmds, m.prompt.Focus())
 		}
 	case dialog.ActionSelectAuthMethod:
 		m.dialog.CloseDialog(dialog.AuthMethodID)
@@ -2645,7 +2625,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
-		editorValue := m.textarea.Value()
+		editorValue := m.prompt.Value()
 		if m.bangMode {
 			editorValue = "!" + editorValue
 		}
@@ -3668,7 +3648,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
 			prev := m.activeInline
 			m.activeInline = nil
-			m.textarea.Focus()
+			m.prompt.Focus()
 			m.updateLayoutAndSize()
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -3753,16 +3733,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Editor.PasteText):
 				cmds = append(cmds, m.pasteTextFromClipboard)
 
-			case key.Matches(msg, m.keyMap.Editor.SendMessage):
+			case key.Matches(msg, m.keyMap.Editor.SendMessage) && m.prompt.Inserting():
 				if m.modeSwitching {
 					cmds = append(cmds, util.ReportInfo("Switching input mode, one moment..."))
 					break
 				}
-				prevHeight := m.textarea.Height()
-				value := m.textarea.Value()
+				prevHeight := m.prompt.Height()
+				value := m.prompt.Value()
 				if before, ok := strings.CutSuffix(value, "\\"); ok {
 					// If the last character is a backslash, remove it and add a newline.
-					m.textarea.SetValue(before)
+					m.prompt.SetValue(before)
 					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
@@ -3770,7 +3750,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				// Otherwise, send the message
-				m.textarea.Reset()
+				m.prompt.Reset()
 				if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -3824,7 +3804,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Tab):
 				if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
-					m.textarea.Blur()
+					m.prompt.Blur()
 					m.chat.Focus()
 					m.chat.SetSelected(m.chat.Len() - 1)
 				}
@@ -3833,33 +3813,33 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 					break
 				}
-				editorValue := m.textarea.Value()
+				editorValue := m.prompt.Value()
 				if m.bangMode {
 					editorValue = "!" + editorValue
 				}
 				cmds = append(cmds, m.openEditor(editorValue))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
-				prevHeight := m.textarea.Height()
-				m.textarea.InsertRune('\n')
+				prevHeight := m.prompt.Height()
+				m.prompt.InsertRune('\n')
 				m.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 			case key.Matches(msg, m.keyMap.Editor.CopySelection):
-				if m.textarea.HasSelection() {
+				if m.prompt.HasSelection() {
 					cmds = append(cmds, common.CopyToClipboardWithCallback(
-						m.textarea.SelectedText(),
+						m.prompt.SelectedText(),
 						"Selection copied to clipboard",
 						nil,
 					))
-					m.textarea.ClearSelection()
+					m.prompt.ClearSelection()
 				}
 			case key.Matches(msg, m.keyMap.Editor.CutSelection):
-				if m.textarea.HasSelection() {
+				if m.prompt.HasSelection() {
 					cmds = append(cmds, common.CopyToClipboardWithCallback(
-						m.textarea.SelectedText(),
+						m.prompt.SelectedText(),
 						"Selection cut to clipboard",
 						nil,
 					))
-					m.textarea.DeleteSelection()
+					m.prompt.DeleteSelection()
 				}
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
@@ -3876,7 +3856,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-			case key.Matches(msg, m.keyMap.Editor.Commands) && m.textarea.Value() == "":
+			case key.Matches(msg, m.keyMap.Editor.Commands) && m.prompt.Value() == "":
 				if cmd := m.openCommandsDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -3895,11 +3875,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				// Check for @ trigger before passing to textarea.
-				curValue := m.textarea.Value()
+				curValue := m.prompt.Value()
 				curIdx := len(curValue)
 
 				// Trigger completions on @.
-				if msg.String() == "@" && !m.completionsOpen {
+				if msg.String() == "@" && !m.completionsOpen && m.prompt.Inserting() {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 						m.completionsOpen = true
@@ -3917,14 +3897,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.updateLayoutAndSize()
 				}
 
-				prevHeight := m.textarea.Height()
+				prevHeight := m.prompt.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
 				// Bang mode: enter when "!" is typed at the start of the
 				// prompt, optionally preceded by whitespace (either on an
 				// empty/whitespace-only prompt or prepended to existing text).
 				// Exit on backspace clearing the last character.
-				newVal := m.textarea.Value()
+				newVal := m.prompt.Value()
 				trimmedNew := strings.TrimLeftFunc(newVal, unicode.IsSpace)
 				trimmedCur := strings.TrimLeftFunc(curValue, unicode.IsSpace)
 				if !m.bangMode && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
@@ -3933,21 +3913,21 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					// Strip leading whitespace and the "!" from the textarea
 					// while preserving the cursor position relative to the
 					// command text.
-					col := m.textarea.Column()
-					line := m.textarea.Line()
+					col := m.prompt.Column()
+					line := m.prompt.Line()
 					stripped := trimmedNew[1:]
-					m.textarea.SetValue(stripped)
-					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
+					m.prompt.SetValue(stripped)
+					m.prompt.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					_ = line // cursor line doesn't change; prefix removed
 					m.setEditorPrompt(m.permModeCached())
 				} else if m.bangMode && !m.interactiveBang && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
 					// A second leading "!" engages the embedded interactive
 					// terminal ("!!command"); strip it like the first.
 					m.interactiveBang = true
-					col := m.textarea.Column()
+					col := m.prompt.Column()
 					stripped := trimmedNew[1:]
-					m.textarea.SetValue(stripped)
-					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
+					m.prompt.SetValue(stripped)
+					m.prompt.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					m.setEditorPrompt(m.permModeCached())
 				} else if m.bangMode && newVal == "" && curValue != "" {
 					// Just cleared last character; mark empty, stay in bang mode.
@@ -3962,7 +3942,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				// After updating textarea, check if we need to filter completions.
 				// Skip filtering on the initial @ keystroke since items are loading async.
 				if m.completionsOpen && msg.String() != "@" {
-					newValue := m.textarea.Value()
+					newValue := m.prompt.Value()
 					newIdx := len(newValue)
 
 					// Close completions if cursor moved before start.
@@ -3992,7 +3972,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Tab):
 				m.focus = uiFocusEditor
 				m.sidebarScrollbarVisible = false
-				cmds = append(cmds, m.textarea.Focus())
+				cmds = append(cmds, m.prompt.Focus())
 				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.FocusSidebar):
 				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebarScrollable {
@@ -4088,7 +4068,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Tab):
 				m.focus = uiFocusEditor
 				m.sidebarScrollbarVisible = false
-				cmds = append(cmds, m.textarea.Focus())
+				cmds = append(cmds, m.prompt.Focus())
 				m.chat.Blur()
 			default:
 				handleGlobalKeys(msg)
@@ -4294,11 +4274,12 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			return nil
 		}
 
-		if m.textarea.Focused() {
-			cur := m.textarea.Cursor()
-			cur.X++                            // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
-			return cur
+		if m.prompt.Focused() {
+			if cur := m.prompt.Cursor(); cur != nil {
+				cur.X++                            // Adjust for app margins
+				cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
+				return cur
+			}
 		}
 	}
 	return nil
@@ -4402,7 +4383,7 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	tab := k.Tab
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
+	if m.focus == uiFocusEditor && m.prompt.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 
@@ -4533,7 +4514,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
+	if m.focus == uiFocusEditor && m.prompt.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 
@@ -4779,7 +4760,7 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 			m.focusActiveInline(uiFocusEditor)
 		} else {
 			m.focus = uiFocusEditor
-			cmds = append(cmds, m.textarea.Focus())
+			cmds = append(cmds, m.prompt.Focus())
 		}
 	}
 
@@ -4816,14 +4797,14 @@ func (m *UI) updateLayoutAndSize() {
 		previousInlineHeight = m.activeInline.Height(m.editorContentWidth())
 	}
 	m.layout = m.generateLayout(m.width, m.height)
-	prevHeight := m.textarea.Height()
+	prevHeight := m.prompt.Height()
 	m.updateSize()
 
 	// SetWidth can change textarea or inline-editor height due to soft-wrap
 	// recalculation. If that happens, reconcile once with the new height.
 	inlineHeightChanged := m.activeInline != nil &&
 		m.activeInline.Height(m.editorContentWidth()) != previousInlineHeight
-	if m.textarea.Height() != prevHeight || inlineHeightChanged {
+	if m.prompt.Height() != prevHeight || inlineHeightChanged {
 		m.layout = m.generateLayout(m.width, m.height)
 		m.updateSize()
 	}
@@ -4838,7 +4819,7 @@ func (m *UI) updateLayoutAndSize() {
 // the view scrolled to the bottom. The returned command, if non-nil, must be
 // batched by the caller.
 func (m *UI) handleTextareaHeightChange(prevHeight int) tea.Cmd {
-	if m.textarea.Height() == prevHeight {
+	if m.prompt.Height() == prevHeight {
 		return nil
 	}
 	m.updateLayoutAndSize()
@@ -4851,7 +4832,7 @@ func (m *UI) handleTextareaHeightChange(prevHeight int) tea.Cmd {
 // updateTextarea updates the textarea for msg and then reconciles layout if
 // the textarea height changed as a result.
 func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
-	return m.updateTextareaWithPrevHeight(msg, m.textarea.Height())
+	return m.updateTextareaWithPrevHeight(msg, m.prompt.Height())
 }
 
 // forwardMouseToTextarea forwards a mouse event to the textarea with
@@ -4868,7 +4849,7 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+attachmentsRow)
 
 	// The textarea occupies its own height starting at the origin.
-	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
+	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.prompt.Height()))}
 	if !image.Pt(mouse.X, mouse.Y).In(area) {
 		return false, nil
 	}
@@ -4886,18 +4867,18 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 			return false, nil
 		}
 		m.textareaMouseSelecting = true
-		m.textarea.BeginSelection(rel.X, rel.Y)
-		return true, nil
+		_, cmd := m.prompt.Update(tea.MouseClickMsg(rel))
+		return true, cmd
 	case tea.MouseMotionMsg:
 		if !m.textareaMouseSelecting {
 			return true, nil
 		}
-		m.textarea.ExtendSelection(rel.X, rel.Y)
-		return true, nil
+		_, cmd := m.prompt.Update(tea.MouseMotionMsg(rel))
+		return true, cmd
 	case tea.MouseReleaseMsg:
-		m.textarea.EndSelection()
 		m.textareaMouseSelecting = false
-		return true, nil
+		_, cmd := m.prompt.Update(tea.MouseReleaseMsg(rel))
+		return true, cmd
 	default:
 		return false, nil
 	}
@@ -4912,8 +4893,8 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 // "before" vs "after" sizing and recalculate the layout if the textarea grew
 // or shrank.
 func (m *UI) updateTextareaWithPrevHeight(msg tea.Msg, prevHeight int) tea.Cmd {
-	ta, cmd := m.textarea.Update(msg)
-	m.textarea = ta
+	ta, cmd := m.prompt.Update(msg)
+	m.prompt = ta
 	return tea.Batch(cmd, m.handleTextareaHeightChange(prevHeight))
 }
 
@@ -4925,8 +4906,7 @@ func (m *UI) updateSize() {
 	m.status.SetWidth(m.layout.status.Dx())
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
-	m.textarea.MaxHeight = TextareaMaxHeight
-	m.textarea.SetWidth(m.layout.editor.Dx())
+	m.prompt.SetWidth(m.layout.editor.Dx())
 	if resizable, ok := m.activeInline.(dialog.ResizableInlineEditor); ok {
 		resizable.SetWidth(m.layout.editor.Dx())
 	}
@@ -4951,7 +4931,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	helpHeight := 1
 	// The editor height: textarea height + margin for attachments and bottom spacing.
 	// When an inline editor is active, use its height instead.
-	editorHeight := m.textarea.Height() + editorHeightMargin
+	editorHeight := m.prompt.Height() + editorHeightMargin
 	if m.activeInline != nil {
 		// The editor content width depends only on terminal width
 		// and layout (not on editor height), so passing the current
@@ -5243,8 +5223,8 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		"crush",
 		tmpPath,
 		editor.AtPosition(
-			m.textarea.Line()+1,
-			m.textarea.Column()+1,
+			m.prompt.Line()+1,
+			m.prompt.Column()+1,
 		),
 	)
 	if err != nil {
@@ -5352,26 +5332,26 @@ func (m *UI) toggleModeAndReport(target permission.PermissionMode) tea.Cmd {
 // permission mode, or whether plan or bang mode is enabled.
 func (m *UI) setEditorPrompt(mode permission.PermissionMode) {
 	if m.bangMode {
-		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
+		m.prompt.SetPromptFunc(4, m.bangPromptFunc)
 		return
 	}
 	if m.mode == uiInputModePlan {
-		m.textarea.SetPromptFunc(4, m.planPromptFunc)
+		m.prompt.SetPromptFunc(4, m.planPromptFunc)
 		return
 	}
 	switch mode {
 	case permission.PermissionModeSysadmin:
-		m.textarea.SetPromptFunc(4, m.sysadminPromptFunc)
+		m.prompt.SetPromptFunc(4, m.sysadminPromptFunc)
 	case permission.PermissionModeYolo:
-		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
+		m.prompt.SetPromptFunc(4, m.yoloPromptFunc)
 	default:
-		m.textarea.SetPromptFunc(4, m.normalPromptFunc)
+		m.prompt.SetPromptFunc(4, m.normalPromptFunc)
 	}
 }
 
 // normalPromptFunc returns the normal editor prompt style ("> " on the
 // first line, "::: " on subsequent lines).
-func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
+func (m *UI) normalPromptFunc(info PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
@@ -5386,7 +5366,7 @@ func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
 }
 
 // planPromptFunc marks planning with a badge beside the editor.
-func (m *UI) planPromptFunc(info textarea.PromptInfo) string {
+func (m *UI) planPromptFunc(info PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
@@ -5402,7 +5382,7 @@ func (m *UI) planPromptFunc(info textarea.PromptInfo) string {
 
 // yoloPromptFunc returns the yolo mode editor prompt style with warning icon
 // and colored dots.
-func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
+func (m *UI) yoloPromptFunc(info PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
@@ -5419,7 +5399,7 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
 // icon and dots.
-func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
+func (m *UI) bangPromptFunc(info PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
@@ -5549,7 +5529,7 @@ type modeSwitchedMsg struct {
 
 // sysadminPromptFunc returns the sysadmin mode editor prompt style with red
 // warning icon and red dots.
-func (m *UI) sysadminPromptFunc(info textarea.PromptInfo) string {
+func (m *UI) sysadminPromptFunc(info PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
@@ -5575,7 +5555,7 @@ func (m *UI) closeCompletions() {
 // insertCompletionText replaces the @query in the textarea with the given text.
 // Returns false if the replacement cannot be performed.
 func (m *UI) insertCompletionText(text string) bool {
-	value := m.textarea.Value()
+	value := m.prompt.Value()
 	if m.completionsStartIndex > len(value) {
 		return false
 	}
@@ -5583,16 +5563,16 @@ func (m *UI) insertCompletionText(text string) bool {
 	word := m.textareaWord()
 	endIdx := min(m.completionsStartIndex+len(word), len(value))
 	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
-	m.textarea.SetValue(newValue)
-	m.textarea.MoveToEnd()
-	m.textarea.InsertRune(' ')
+	m.prompt.SetValue(newValue)
+	m.prompt.MoveToEnd()
+	m.prompt.InsertRune(' ')
 	return true
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,
 // replacing the @query, and adds the file as an attachment.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
-	prevHeight := m.textarea.Height()
+	prevHeight := m.prompt.Height()
 	if !m.insertCompletionText(path) {
 		return nil
 	}
@@ -5644,7 +5624,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
 
-	prevHeight := m.textarea.Height()
+	prevHeight := m.prompt.Height()
 	if !m.insertCompletionText(displayText) {
 		return nil
 	}
@@ -5702,7 +5682,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 
 // completionsPosition returns the X and Y position for the completions popup.
 func (m *UI) completionsPosition() image.Point {
-	cur := m.textarea.Cursor()
+	cur := m.prompt.Cursor()
 	if cur == nil {
 		return image.Point{
 			X: m.layout.editor.Min.X,
@@ -5717,7 +5697,7 @@ func (m *UI) completionsPosition() image.Point {
 
 // textareaWord returns the current word at the cursor position.
 func (m *UI) textareaWord() string {
-	return m.textarea.Word()
+	return m.prompt.Word()
 }
 
 // isWhitespace returns true if the byte is a whitespace character.
@@ -5794,7 +5774,7 @@ func (m *UI) renderEditorView(width int) string {
 	}
 	return strings.Join([]string{
 		attachmentsView,
-		m.textarea.View(),
+		m.prompt.View(),
 		"", // margin at bottom of editor
 	}, "\n")
 }
@@ -5862,7 +5842,7 @@ func (m *UI) refreshStyles() {
 	if m.layout.sidebar.Dx() > 0 {
 		m.cacheSidebarLogo(m.layout.sidebar.Dx())
 	}
-	m.textarea.SetStyles(t.Editor.Textarea)
+	m.prompt.SetStyles(t.Editor.Textarea)
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
 	m.attachments.SetStyles(t.Attachments)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
@@ -6487,7 +6467,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) bool {
 		m.com.Workspace.QuestionCancel(batch.ID)
 	}
 	m.activeInline = form
-	m.textarea.Blur()
+	m.prompt.Blur()
 	m.focus = uiFocusEditor
 	m.activeInline.SetFocused(true)
 	m.updateLayoutAndSize()
@@ -6501,7 +6481,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) bool {
 func (m *UI) handleQuestionNotification(_ question.Notification) {
 	if _, ok := m.activeInline.(*dialog.QuestionForm); ok {
 		m.activeInline = nil
-		m.textarea.Focus()
+		m.prompt.Focus()
 		m.updateLayoutAndSize()
 	}
 }
@@ -6557,7 +6537,7 @@ func (m *UI) focusTerminal() {
 		return
 	}
 	m.focus = uiFocusTerminal
-	m.textarea.Blur()
+	m.prompt.Blur()
 	m.chat.Blur()
 	m.sidebarScrollbarVisible = false
 }
@@ -6592,13 +6572,13 @@ func (m *UI) cycleTerminalFocus() tea.Cmd {
 		}
 		m.focus = uiFocusEditor
 		m.sidebarScrollbarVisible = false
-		return m.textarea.Focus()
+		return m.prompt.Focus()
 	}
 
 	if m.focus == uiFocusEditor {
 		// Editor -> chat, matching the existing tab behavior.
 		m.setState(m.state, uiFocusMain)
-		m.textarea.Blur()
+		m.prompt.Blur()
 		m.chat.Focus()
 		m.chat.SetSelected(m.chat.Len() - 1)
 		return nil
@@ -6606,7 +6586,7 @@ func (m *UI) cycleTerminalFocus() tea.Cmd {
 
 	// Chat (or sidebar) -> terminal.
 	m.focus = uiFocusTerminal
-	m.textarea.Blur()
+	m.prompt.Blur()
 	m.chat.Blur()
 	m.sidebarScrollbarVisible = false
 	return nil
@@ -6683,7 +6663,7 @@ func (m *UI) terminalDialogSize() (cols, rows int) {
 	cols = max(m.width-2, shell.MinInteractiveCols)
 	// Mirror generateLayout's chat-column height closely enough to pick
 	// the docked or the full-window size.
-	avail := m.height - (m.textarea.Height() + editorHeightMargin) - 4
+	avail := m.height - (m.prompt.Height() + editorHeightMargin) - 4
 	if panel := terminalDockPanelHeight(avail); panel > 0 {
 		return cols, max(panel-terminalDockChrome, shell.MinInteractiveRows)
 	}
@@ -6722,7 +6702,7 @@ func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command str
 	// keyboard until they tab away; an agent-driven one is a read-only view
 	// and leaves the current focus alone.
 	if !agentDriven {
-		m.textarea.Blur()
+		m.prompt.Blur()
 		m.focusTerminal()
 	}
 
@@ -6758,7 +6738,7 @@ func (m *UI) detachTerminal() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.focus == uiFocusTerminal {
 		m.focus = uiFocusEditor
-		cmds = append(cmds, m.textarea.Focus())
+		cmds = append(cmds, m.prompt.Focus())
 	}
 	m.updateLayoutAndSize()
 	return tea.Batch(cmds...)
@@ -6838,10 +6818,10 @@ func (m *UI) applyTerminalControl(agentDriven bool) tea.Cmd {
 	if agentDriven {
 		if m.focus == uiFocusTerminal {
 			m.focus = uiFocusEditor
-			cmd = m.textarea.Focus()
+			cmd = m.prompt.Focus()
 		}
 	} else {
-		m.textarea.Blur()
+		m.prompt.Blur()
 		m.focusTerminal()
 	}
 	// Resize the PTY for its new driver: the panel for the user, the
@@ -6928,7 +6908,7 @@ func (m *UI) closeTerminalDialog(result dialog.TerminalResult) tea.Cmd {
 		m.focus = uiFocusEditor
 	}
 	if m.focus == uiFocusEditor {
-		cmds = append(cmds, m.textarea.Focus())
+		cmds = append(cmds, m.prompt.Focus())
 	}
 	return tea.Batch(cmds...)
 }
@@ -7040,7 +7020,7 @@ func (m *UI) resetPlanModeState() tea.Cmd {
 	m.setPlanReadyPending("")
 	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
 		m.activeInline = nil
-		m.textarea.Focus()
+		m.prompt.Focus()
 	}
 	if m.mode != uiInputModePlan {
 		return nil
@@ -7088,7 +7068,7 @@ func (m *UI) openPlanHandoff() {
 		return m.sendMessage(feedback)
 	}
 	m.activeInline = inline
-	m.textarea.Blur()
+	m.prompt.Blur()
 	m.focus = uiFocusEditor
 	m.activeInline.SetFocused(true)
 	if m.status != nil {
@@ -7220,7 +7200,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
 	m.setState(uiLanding, uiFocusEditor)
-	m.textarea.Focus()
+	m.prompt.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()
 	m.pillsExpanded = false
@@ -7251,7 +7231,7 @@ func (m *UI) checkBangModeAfterPaste() {
 	if m.bangMode {
 		return
 	}
-	val := m.textarea.Value()
+	val := m.prompt.Value()
 	trimmed := strings.TrimLeftFunc(val, unicode.IsSpace)
 	if !strings.HasPrefix(trimmed, "!") {
 		return
@@ -7259,9 +7239,9 @@ func (m *UI) checkBangModeAfterPaste() {
 	m.bangMode = true
 	m.bangWasEmpty = true
 	stripped := trimmed[1:]
-	m.textarea.SetValue(stripped)
-	col := m.textarea.Column()
-	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
+	m.prompt.SetValue(stripped)
+	col := m.prompt.Column()
+	m.prompt.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
 	m.setEditorPrompt(m.permModeCached())
 }
 
@@ -7317,7 +7297,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return true
 	}
 	if !allExistsAndValid() {
-		prevHeight := m.textarea.Height()
+		prevHeight := m.prompt.Height()
 		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
 		m.checkBangModeAfterPaste()
 		return cmd

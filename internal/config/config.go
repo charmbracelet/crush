@@ -359,6 +359,7 @@ type TUIOptions struct {
 	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
 	NerdFonts   *bool       `json:"nerd_fonts,omitempty" jsonschema:"description=Override Nerd Font glyph detection for the TUI: true forces glyphs on\\, false forces them off\\, and unset keeps automatic detection"`
 	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	EditorMode  string      `json:"editor_mode,omitempty" jsonschema:"description=Editing mode of the prompt editor: emacs types as you go\\, vim is modal like vim\\, helix is modal like Helix (select first\\, then act).,enum=emacs,enum=vim,enum=helix,default=emacs"`
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The

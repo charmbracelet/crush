@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/powernap/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -38,7 +39,6 @@ import (
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
 )
 

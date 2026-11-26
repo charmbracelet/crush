@@ -578,9 +578,16 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			prepared.BaseURL = endpoint
 			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
 		case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
-			if p.APIKey == "" && !hasAWSCredentials(env) {
+			// Automatic AWS credential import is opt-out. When it is disabled,
+			// only an explicitly configured API key makes Bedrock available, so
+			// neither AWS_* variables nor ~/.aws are consulted at all.
+			if p.APIKey == "" && (c.Options.DisableAWSCredentials || !hasAWSCredentials(env)) {
 				if configExists {
-					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
+					slog.Warn(
+						"Skipping Bedrock provider without usable AWS credentials",
+						"provider", p.ID,
+						"aws_credentials_import_disabled", c.Options.DisableAWSCredentials,
+					)
 					c.Providers.Del(string(p.ID))
 				}
 				continue
@@ -803,6 +810,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_DISABLE_AWS_CREDENTIALS"); ok {
+		c.Options.DisableAWSCredentials, _ = strconv.ParseBool(str)
 	}
 
 	if c.Options.Attribution == nil {

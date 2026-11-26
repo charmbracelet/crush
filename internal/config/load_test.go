@@ -680,6 +680,70 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	require.Equal(t, cfg.Providers.Len(), 0)
 }
 
+func TestConfig_configureProvidersBedrockWithImportDisabled(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderBedrock,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+			}},
+		},
+		{
+			ID:          catwalk.InferenceProviderBedrockEurope,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	cfg.Options.DisableAWSCredentials = true
+	// Credentials the AWS SDK would happily resolve must be ignored.
+	env := env.NewFromMap(map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-key-id",
+		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
+		"AWS_PROFILE":           "test-profile",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 0, cfg.Providers.Len(), "no Bedrock provider may appear without an explicit API key")
+}
+
+func TestConfig_configureProvidersBedrockExplicitKeyWithImportDisabled(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderBedrock,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+			}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"bedrock": {APIKey: "explicit-bedrock-key"},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+	cfg.Options.DisableAWSCredentials = true
+	env := env.NewFromMap(map[string]string{})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	bedrockProvider, ok := cfg.Providers.Get("bedrock")
+	require.True(t, ok, "a configured API key keeps Bedrock usable")
+	require.Equal(t, "explicit-bedrock-key", bedrockProvider.APIKey)
+}
+
 func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
@@ -1972,6 +2036,24 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 
 		require.True(t, cfg.Options.DisableDefaultProviders)
+	})
+}
+
+func TestConfig_setDefaultsDisableAWSCredentialsEnvVar(t *testing.T) {
+	t.Run("sets option from environment variable", func(t *testing.T) {
+		t.Setenv("CRUSH_DISABLE_AWS_CREDENTIALS", "1")
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp", "")
+
+		require.True(t, cfg.Options.DisableAWSCredentials)
+	})
+
+	t.Run("leaves the option alone when env var is not set", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.setDefaults("/tmp", "")
+
+		require.False(t, cfg.Options.DisableAWSCredentials)
 	})
 }
 

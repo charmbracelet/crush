@@ -245,31 +245,31 @@ func (w *AppWorkspace) AgentSetMain(agentID string) error {
 }
 
 func (w *AppWorkspace) AgentSummarizePreview(ctx context.Context, sessionID, instructions string) (compaction.Preview, error) {
-	if w.app.AgentCoordinator == nil {
+	if w.app.Agent() == nil {
 		return compaction.Preview{}, errors.New("agent coordinator not initialized")
 	}
-	return w.app.AgentCoordinator.SummarizePreview(ctx, sessionID, instructions)
+	return w.app.Agent().SummarizePreview(ctx, sessionID, instructions)
 }
 
 func (w *AppWorkspace) AgentConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error {
-	if w.app.AgentCoordinator == nil {
+	if w.app.Agent() == nil {
 		return errors.New("agent coordinator not initialized")
 	}
-	return w.app.AgentCoordinator.ConfirmSummarize(ctx, sessionID, preview)
+	return w.app.Agent().ConfirmSummarize(ctx, sessionID, preview)
 }
 
 func (w *AppWorkspace) AgentDiscardSummarize(ctx context.Context, sessionID, checkpointID string) error {
-	if w.app.AgentCoordinator == nil {
+	if w.app.Agent() == nil {
 		return errors.New("agent coordinator not initialized")
 	}
-	return w.app.AgentCoordinator.DiscardSummarize(ctx, sessionID, checkpointID)
+	return w.app.Agent().DiscardSummarize(ctx, sessionID, checkpointID)
 }
 
 func (w *AppWorkspace) AgentRestoreSummarize(ctx context.Context, sessionID string) error {
-	if w.app.AgentCoordinator == nil {
+	if w.app.Agent() == nil {
 		return errors.New("agent coordinator not initialized")
 	}
-	return w.app.AgentCoordinator.RestoreSummarize(ctx, sessionID)
+	return w.app.Agent().RestoreSummarize(ctx, sessionID)
 }
 
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {

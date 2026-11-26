@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/compaction"
@@ -34,7 +34,7 @@ func TestEmptyMemoryAddsNothingToTheCheckpoint(t *testing.T) {
 	require.NoError(t, err)
 	seedSizedTurns(t, env, sess.ID, 4, 3_000)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
 	require.NotEmpty(t, model.calls, "the summary is always written by the model")
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
@@ -70,7 +70,7 @@ func TestEveryMemoryRetiredFallsBackToo(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
 	require.NotEmpty(t, model.calls, "the summary is still written")
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
@@ -178,12 +178,14 @@ func TestAppendixAccompaniesTheSummary(t *testing.T) {
 	seedSizedTurns(t, env, sess.ID, 4, 3_000)
 
 	_, err = env.ledger.Append(ctx, sess.ID, []compaction.Entry{
-		{Kind: compaction.KindObservation, Relevance: compaction.RelevanceDecision,
-			Text: "User rejected splitting the ledger across sessions"},
+		{
+			Kind: compaction.KindObservation, Relevance: compaction.RelevanceDecision,
+			Text: "User rejected splitting the ledger across sessions",
+		},
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
 
 	require.NotEmpty(t, model.calls, "the default keeps the summarizing model")
 	require.Contains(t, model.calls[0], "<recorded_memory>",

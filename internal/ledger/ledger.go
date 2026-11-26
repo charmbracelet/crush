@@ -57,15 +57,6 @@ func (s *service) Append(ctx context.Context, sessionID string, entries []compac
 		if err != nil {
 			return nil, fmt.Errorf("ledger append: %w", err)
 		}
-		if e.ID == "" {
-			// Content-addressed rather than time-addressed: an observer that
-			// re-emits an entry while coverage is incomplete records it once,
-			// not once per pass. The id is the identity of the claim, and the
-			// same claim twice is one memory.
-			sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%v", e.Kind, e.Text, e.Retires)))
-			e.ID = fmt.Sprintf("e-%x", sum[:8])
-		}
-		e.Seq = next
 		sources, err := encodeJSON(e.Sources)
 		if err != nil {
 			return nil, fmt.Errorf("ledger append: %w", err)
@@ -74,6 +65,15 @@ func (s *service) Append(ctx context.Context, sessionID string, entries []compac
 		if err != nil {
 			return nil, fmt.Errorf("ledger append: %w", err)
 		}
+		if e.ID == "" {
+			// Content-addressed within the session and source span: a retried
+			// pass over the same messages records each entry once, while a
+			// second coverage marker on different messages (or another session)
+			// gets its own row instead of being silently dropped.
+			sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s", sessionID, e.Kind, e.Text, sources, retires)))
+			e.ID = fmt.Sprintf("e-%x", sum[:8])
+		}
+		e.Seq = next
 		rows, err := s.q.CreateLedgerEntry(ctx, db.CreateLedgerEntryParams{
 			ID:        e.ID,
 			SessionID: sessionID,

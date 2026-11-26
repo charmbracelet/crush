@@ -31,7 +31,7 @@ func TestCompactionReadoutCountsTheCheckpointOnce(t *testing.T) {
 	require.NoError(t, err)
 	seedSizedTurns(t, env, sess.ID, 8, 5_000)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
 	require.NoError(t, err)

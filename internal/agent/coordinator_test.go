@@ -53,6 +53,7 @@ func (m *mockSessionAgent) RestoreSummarize(context.Context, string) error { ret
 func (m *mockSessionAgent) SummarizePreview(context.Context, string, Model, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) (compaction.Preview, error) {
 	return compaction.Preview{}, nil
 }
+
 func (m *mockSessionAgent) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }

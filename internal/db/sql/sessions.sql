@@ -51,6 +51,8 @@ SET
     completion_tokens = ?,
     summary_message_id = ?,
     summary_cut_message_id = ?,
+    prev_summary_message_id = ?,
+    prev_summary_cut_message_id = ?,
     cost = ?,
     todos = ?
 WHERE id = ?

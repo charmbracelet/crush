@@ -228,7 +228,7 @@ func TestSummarizeKeepsFullTextWhenItFits(t *testing.T) {
 	seedToolTurn(t, env, sess.ID, "old", 60_000)
 	seedSizedTurns(t, env, sess.ID, 2, 10)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
 	require.Len(t, model.calls, 1)
 	require.Contains(t, model.calls[0], strings.Repeat("o", 4_000))
 	require.NotContains(t, model.calls[0], "[tool output pruned:")
@@ -249,7 +249,7 @@ func TestSummarizeFallsBackToTheSentView(t *testing.T) {
 	seedToolTurn(t, env, sess.ID, "ancient", 300_000)
 	seedSizedTurns(t, env, sess.ID, 2, 10)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
 	require.Len(t, model.calls, 1)
 	require.Contains(t, model.calls[0], "[tool output pruned: view")
 	require.NotContains(t, model.calls[0], strings.Repeat("o", 4_000))

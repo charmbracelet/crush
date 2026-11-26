@@ -43,6 +43,7 @@ func (c *initFakeCoordinator) RestoreSummarize(context.Context, string) error  {
 func (c *initFakeCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
 	return compaction.Preview{}, nil
 }
+
 func (c *initFakeCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }

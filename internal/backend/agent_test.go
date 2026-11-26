@@ -72,6 +72,7 @@ func (c *blockingCoordinator) MainAgent() string                                
 func (c *blockingCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
 	return compaction.Preview{}, nil
 }
+
 func (c *blockingCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }

@@ -55,9 +55,11 @@ func (c *errorCoordinator) MainAgent() string                                 { 
 func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *errorCoordinator) SetHostContext(proto.HostContext)                  {}
 func (c *errorCoordinator) HostContext() proto.HostContext                    { return proto.HostContext{} }
+
 func (c *errorCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
 	return compaction.Preview{}, nil
 }
+
 func (c *errorCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }

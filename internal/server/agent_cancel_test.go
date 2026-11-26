@@ -89,6 +89,7 @@ func (s *runCoordinator) AddNote(string, string)            {}
 func (s *runCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
 	return compaction.Preview{}, nil
 }
+
 func (s *runCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }

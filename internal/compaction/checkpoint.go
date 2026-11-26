@@ -100,6 +100,9 @@ type Preview struct {
 	// never drift. The completion counter is deliberately absent: a
 	// checkpoint's own text already sits inside the prompt it produces.
 	PromptTokens int64
+	// DecayBudget is the memory render budget used when this preview carried a
+	// memory appendix; zero means no decay should run on acceptance.
+	DecayBudget RenderBudget
 }
 
 // Body returns summary with any footer removed, so a later compaction can

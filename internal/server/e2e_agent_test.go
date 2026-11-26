@@ -223,6 +223,7 @@ func (c *scriptedCoordinator) RestoreSummarize(context.Context, string) error { 
 func (c *scriptedCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
 	return compaction.Preview{}, nil
 }
+
 func (c *scriptedCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }

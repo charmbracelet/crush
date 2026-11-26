@@ -2432,6 +2432,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
+		if m.session == nil || m.session.ID != msg.Session.ID {
+			if cmd := m.abandonPendingPreview(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
 	// Open dialog message.
@@ -5698,8 +5703,13 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 		return util.ReportError(err)
 	}
 
-	// Any new prompt supersedes a pending, unconfirmed plan.
+	// Any new prompt supersedes a pending, unconfirmed plan or checkpoint preview.
 	m.setPlanReadyPending("")
+	m.pendingPreview = nil
+	if _, ok := m.activeInline.(*dialog.CheckpointHandoffInline); ok {
+		m.activeInline = nil
+		m.textarea.Focus()
+	}
 	m.turnOutcome = ""
 
 	var cmds []tea.Cmd
@@ -6419,6 +6429,28 @@ func (m *UI) acceptCheckpoint(preview compaction.Preview) tea.Cmd {
 	}
 }
 
+// abandonPendingPreview drops any staged checkpoint preview that the user left
+// unanswered when leaving the session.
+func (m *UI) abandonPendingPreview() tea.Cmd {
+	if m.pendingPreview == nil {
+		return nil
+	}
+	checkpointID := m.pendingPreview.CheckpointID
+	m.pendingPreview = nil
+	if _, ok := m.activeInline.(*dialog.CheckpointHandoffInline); ok {
+		m.activeInline = nil
+		m.textarea.Focus()
+	}
+	if m.session == nil || checkpointID == "" {
+		return nil
+	}
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		_ = m.com.Workspace.AgentDiscardSummarize(context.Background(), sessionID, checkpointID)
+		return nil
+	}
+}
+
 // discardCheckpoint throws the staged checkpoint away and changes nothing.
 func (m *UI) discardCheckpoint(checkpointID string) tea.Cmd {
 	if m.session == nil {
@@ -6595,6 +6627,7 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
+	previewCmd := m.abandonPendingPreview()
 	planCmd := m.resetPlanModeState()
 	m.turnOutcome = ""
 	m.session = nil
@@ -6615,6 +6648,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(
+		previewCmd,
 		planCmd,
 		func() tea.Msg {
 			m.com.Workspace.LSPStopAll(context.Background())

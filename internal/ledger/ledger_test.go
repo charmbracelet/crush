@@ -147,3 +147,47 @@ func TestDecayRetiresLowRelevanceEntriesBeyondBudget(t *testing.T) {
 	require.NotContains(t, rendered.Text, "Listed files")
 	require.NotContains(t, rendered.Text, "Applied migration 20261007")
 }
+
+func TestAppendDistinguishesMarkersBySessionAndSources(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	s1, err := sessions.Create(t.Context(), "s1")
+	require.NoError(t, err)
+	s2, err := sessions.Create(t.Context(), "s2")
+	require.NoError(t, err)
+	svc := NewService(q)
+
+	marker := func(sources ...string) []compaction.Entry {
+		return []compaction.Entry{{
+			Kind:    compaction.KindDrop,
+			Text:    "observed; nothing durable to record",
+			Sources: sources,
+		}}
+	}
+
+	first, err := svc.Append(t.Context(), s1.ID, marker("m-1"))
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	second, err := svc.Append(t.Context(), s1.ID, marker("m-2"))
+	require.NoError(t, err)
+	require.Len(t, second, 1, "marker for different messages must not collide")
+
+	retry, err := svc.Append(t.Context(), s1.ID, marker("m-2"))
+	require.NoError(t, err)
+	require.Empty(t, retry, "retrying the exact same marker stays idempotent")
+
+	l1, err := svc.Ledger(t.Context(), s1.ID)
+	require.NoError(t, err)
+	require.Empty(t, l1.Unobserved([]string{"m-1", "m-2"}))
+
+	other, err := svc.Append(t.Context(), s2.ID, marker("m-1"))
+	require.NoError(t, err)
+	require.Len(t, other, 1, "same marker in another session must not collide")
+}

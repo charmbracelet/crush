@@ -56,6 +56,7 @@ func (s *stubCoordinator) AddNote(string, string)            {}
 func (s *stubCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
 	return compaction.Preview{}, nil
 }
+
 func (s *stubCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }

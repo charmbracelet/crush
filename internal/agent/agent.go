@@ -256,6 +256,9 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
+	// pendingPreviews tracks staged, unaccepted checkpoint message IDs by
+	// session so they can be removed if the user keeps chatting or quits.
+	pendingPreviews *csync.Map[string, string]
 	// notes are what the host told the agent since its last turn, by
 	// session, to add to the next prompt. They are not chat messages.
 	notes *csync.Map[string, []string]
@@ -353,6 +356,7 @@ func NewSessionAgent(
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		notes:                csync.NewMap[string, []string](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
+		pendingPreviews:      csync.NewMap[string, string](),
 		titles:               cmp.Or(opts.titles, new(titleTracker)),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
@@ -977,6 +981,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	)
 
 	sessionLock := sync.Mutex{}
+	a.discardPendingPreview(ctx, call.SessionID)
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -1591,6 +1596,8 @@ func (a *sessionAgent) SummarizePreview(ctx context.Context, sessionID string, m
 func (a *sessionAgent) runSummarize(ctx context.Context, largeModel Model, sessionID, trigger, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, commit bool) (compaction.Preview, error) {
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
+	a.discardPendingPreview(ctx, sessionID)
+
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return compaction.Preview{}, fmt.Errorf("failed to get session: %w", err)
@@ -1893,6 +1900,9 @@ func (a *sessionAgent) runSummarize(ctx context.Context, largeModel Model, sessi
 		Replaced:     len(region),
 		Kept:         cut.Kept,
 	}
+	if a.ledger != nil && appendixText != "" {
+		preview.DecayBudget = appendixBudget
+	}
 	if cut.Found {
 		preview.CutID = cut.MessageID
 		// The next request sends this checkpoint plus the turns the cut kept,
@@ -1903,11 +1913,11 @@ func (a *sessionAgent) runSummarize(ctx context.Context, largeModel Model, sessi
 			cut.KeptTokens + overhead
 	}
 
-	// A preview stops here. The row is written, but nothing points at it, so
-	// the session keeps reading its full history and rejecting the preview
-	// costs one stale row rather than a lost conversation. Hooks and telemetry
-	// describe compactions that happened, so they wait for acceptance.
+	// A preview stops here. The row is staged for display and tracked so it
+	// is removed if the user abandons the preview; hooks, memory decay, and
+	// telemetry wait for acceptance.
 	if !commit {
+		a.pendingPreviews.Set(sessionID, summaryMessage.ID)
 		outcome = fmt.Sprintf("Previewed a checkpoint over %d messages", len(region))
 		return preview, nil
 	}
@@ -1925,13 +1935,7 @@ func (a *sessionAgent) runSummarize(ctx context.Context, largeModel Model, sessi
 	// Memory decays when a checkpoint lands rather than on every turn: this is
 	// the moment that knows the window, and previewing must never mutate what
 	// a later checkpoint would be built from.
-	if a.ledger != nil && appendixText != "" {
-		if retired, err := a.ledger.Decay(genCtx, sessionID, appendixBudget); err != nil {
-			slog.Warn("Memory decay failed", "session_id", sessionID, "error", err)
-		} else if retired > 0 {
-			slog.Debug("Memory decayed", "session_id", sessionID, "entries", retired)
-		}
-	}
+	a.decayMemory(genCtx, sessionID, preview.DecayBudget)
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
@@ -1967,11 +1971,48 @@ func (a *sessionAgent) runSummarize(ctx context.Context, largeModel Model, sessi
 // been made, whatever the summarizer's provider reported about its own call.
 // The undo path already re-estimates the same way and marks it.
 func applyCheckpointCounters(current *session.Session, preview compaction.Preview) {
+	if current.SummaryMessageID != preview.CheckpointID {
+		current.PrevSummaryMessageID = current.SummaryMessageID
+		current.PrevSummaryCutMessageID = current.SummaryCutMessageID
+	}
 	current.SummaryMessageID = preview.CheckpointID
 	current.SummaryCutMessageID = preview.CutID
 	current.PromptTokens = preview.PromptTokens
 	current.CompletionTokens = 0
 	current.EstimatedUsage = true
+}
+
+func (a *sessionAgent) decayMemory(ctx context.Context, sessionID string, budget compaction.RenderBudget) {
+	if a.ledger == nil || budget <= 0 {
+		return
+	}
+	if retired, err := a.ledger.Decay(ctx, sessionID, budget); err != nil {
+		slog.Warn("Memory decay failed", "session_id", sessionID, "error", err)
+	} else if retired > 0 {
+		slog.Debug("Memory decayed", "session_id", sessionID, "entries", retired)
+	}
+}
+
+func (a *sessionAgent) clearPendingPreview(sessionID, checkpointID string) {
+	if a.pendingPreviews == nil {
+		return
+	}
+	if cur, ok := a.pendingPreviews.Get(sessionID); ok && cur == checkpointID {
+		a.pendingPreviews.Del(sessionID)
+	}
+}
+
+func (a *sessionAgent) discardPendingPreview(ctx context.Context, sessionID string) {
+	if a.pendingPreviews == nil {
+		return
+	}
+	checkpointID, ok := a.pendingPreviews.Take(sessionID)
+	if !ok || checkpointID == "" {
+		return
+	}
+	if err := a.messages.Delete(ctx, checkpointID); err != nil {
+		slog.Debug("Failed to clean up abandoned preview checkpoint", "session_id", sessionID, "checkpoint_id", checkpointID, "error", err)
+	}
 }
 
 // ConfirmSummarize adopts a previewed checkpoint, which is the moment the
@@ -1992,8 +2033,11 @@ func (a *sessionAgent) ConfirmSummarize(ctx context.Context, sessionID string, p
 	if _, err := a.sessions.Save(ctx, currentSession); err != nil {
 		return fmt.Errorf("failed to save session: %w", err)
 	}
+	a.clearPendingPreview(sessionID, preview.CheckpointID)
 
+	a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPostCompact, SessionID: sessionID, Trigger: compactTriggerManual})
 	a.eventSessionCompacted(sessionID, preview.Replaced, preview.Kept)
+	a.decayMemory(ctx, sessionID, preview.DecayBudget)
 	slog.Info("Adopted a previewed checkpoint", "session_id", sessionID,
 		"replaced", preview.Replaced, "kept", preview.Kept)
 	return nil
@@ -2005,6 +2049,7 @@ func (a *sessionAgent) DiscardSummarize(ctx context.Context, sessionID, checkpoi
 	if checkpointID == "" {
 		return errors.New("nothing to discard")
 	}
+	a.clearPendingPreview(sessionID, checkpointID)
 	if err := a.messages.Delete(ctx, checkpointID); err != nil {
 		return fmt.Errorf("failed to discard the previewed checkpoint: %w", err)
 	}
@@ -2242,7 +2287,7 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		return nil, fmt.Errorf("failed to list messages: %w", err)
 	}
 	if boundaryID == "" {
-		return msgs, nil
+		return filterInactiveSummaries(msgs, ""), nil
 	}
 
 	summaryIndex, cutIndex := -1, -1
@@ -2257,15 +2302,20 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 
 	if session.SummaryCutMessageID == "" {
 		if summaryIndex != -1 {
-			msgs = msgs[summaryIndex:]
+			msgs = filterInactiveSummaries(msgs[summaryIndex:], session.SummaryMessageID)
 			msgs[0].Role = message.User
+			return msgs, nil
 		}
-		return msgs, nil
+		return filterInactiveSummaries(msgs, ""), nil
 	}
 
 	if summaryIndex == -1 || cutIndex == -1 {
 		// A dangling checkpoint or cut must not silently erase history.
-		return a.messages.List(ctx, session.ID)
+		all, err := a.messages.List(ctx, session.ID)
+		if err != nil {
+			return nil, err
+		}
+		return filterInactiveSummaries(all, session.SummaryMessageID), nil
 	}
 
 	// The checkpoint is presented as the user turn carrying it, which is how
@@ -2275,7 +2325,7 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	view := make([]message.Message, 0, len(msgs))
 	view = append(view, checkpoint)
 	for i, msg := range msgs {
-		if i < cutIndex || i == summaryIndex {
+		if i < cutIndex || i == summaryIndex || msg.IsSummaryMessage {
 			continue
 		}
 		view = append(view, msg)
@@ -2283,14 +2333,26 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return view, nil
 }
 
+// filterInactiveSummaries drops summary rows that are not the session's active
+// checkpoint (such as abandoned previews or superseded checkpoints) so they
+// are never sent to the model.
+func filterInactiveSummaries(msgs []message.Message, activeSummaryID string) []message.Message {
+	out := make([]message.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if msg.IsSummaryMessage && msg.ID != activeSummaryID {
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
 // RestoreSummarize undoes the session's most recent compaction.
 //
 // A checkpoint never deletes the text it replaced, so undo is a pointer write
-// rather than a recovery: the region comes back exactly as it was written. The
-// checkpoint row goes away because nothing refers to it any more, and the
-// prompt counter is re-estimated from the restored transcript, since leaving
-// the compacted figure in place would tell the next check that the session
-// still has room it has just stopped having.
+// rather than a recovery: when a previous checkpoint exists it is restored,
+// otherwise the full transcript comes back. The undone checkpoint row goes
+// away and the prompt counter is re-estimated from the restored view.
 func (a *sessionAgent) RestoreSummarize(ctx context.Context, sessionID string) error {
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -2304,14 +2366,28 @@ func (a *sessionAgent) RestoreSummarize(ctx context.Context, sessionID string) e
 	if err := a.messages.Delete(ctx, checkpointID); err != nil {
 		return fmt.Errorf("failed to remove the checkpoint: %w", err)
 	}
-	msgs, err := a.messages.List(ctx, sessionID)
+
+	prevID := currentSession.PrevSummaryMessageID
+	prevCutID := currentSession.PrevSummaryCutMessageID
+	if prevID != "" {
+		if _, err := a.messages.Get(ctx, prevID); err != nil {
+			prevID = ""
+			prevCutID = ""
+		}
+	}
+
+	currentSession.SummaryMessageID = prevID
+	currentSession.SummaryCutMessageID = prevCutID
+	currentSession.PrevSummaryMessageID = ""
+	currentSession.PrevSummaryCutMessageID = ""
+
+	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
 
-	currentSession.SummaryMessageID = ""
-	currentSession.SummaryCutMessageID = ""
 	currentSession.PromptTokens = compaction.EstimateAll(msgs)
+	currentSession.CompletionTokens = 0
 	currentSession.EstimatedUsage = true
 	if _, err := a.sessions.Save(ctx, currentSession); err != nil {
 		return fmt.Errorf("failed to save session: %w", err)
@@ -2396,7 +2472,7 @@ func (a *sessionAgent) compactionOptions() *config.CompactionOptions {
 		return nil
 	}
 	cfg := a.cfg.Config()
-	if cfg == nil {
+	if cfg == nil || cfg.Options == nil {
 		return nil
 	}
 	return cfg.Options.Compaction
@@ -2880,6 +2956,13 @@ func (a *sessionAgent) CancelAll() {
 	}
 	if !a.titles.wait(time.Until(deadline)) {
 		slog.Warn("Gave up waiting for session title generation to finish")
+	}
+	if a.pendingPreviews != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		for sessionID := range a.pendingPreviews.Seq2() {
+			a.discardPendingPreview(cleanupCtx, sessionID)
+		}
 	}
 }
 

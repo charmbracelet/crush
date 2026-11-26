@@ -62,11 +62,16 @@ type Session struct {
 	// still goes to the model verbatim. Empty when a checkpoint replaced the
 	// whole transcript.
 	SummaryCutMessageID string
-	Cost                float64
-	Todos               []Todo
-	Channel             string
-	CreatedAt           int64
-	UpdatedAt           int64
+	// PrevSummaryMessageID and PrevSummaryCutMessageID hold the checkpoint
+	// that was active before the current one, so undo restores it instead of
+	// falling all the way back to the raw history.
+	PrevSummaryMessageID    string
+	PrevSummaryCutMessageID string
+	Cost                    float64
+	Todos                   []Todo
+	Channel                 string
+	CreatedAt               int64
+	UpdatedAt               int64
 }
 
 type Service interface {
@@ -221,6 +226,14 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: session.SummaryCutMessageID,
 			Valid:  session.SummaryCutMessageID != "",
 		},
+		PrevSummaryMessageID: sql.NullString{
+			String: session.PrevSummaryMessageID,
+			Valid:  session.PrevSummaryMessageID != "",
+		},
+		PrevSummaryCutMessageID: sql.NullString{
+			String: session.PrevSummaryCutMessageID,
+			Valid:  session.PrevSummaryCutMessageID != "",
+		},
 		Cost: session.Cost,
 		Todos: sql.NullString{
 			String: todosJSON,
@@ -345,12 +358,14 @@ func (s *service) fromDBItem(item db.Session) Session {
 		SummaryMessageID: item.SummaryMessageID.String,
 		// Deliberately not the column name: keep the domain field adjacent to
 		// the checkpoint it belongs to.
-		SummaryCutMessageID: item.SummaryCutMessageID.String,
-		Cost:                item.Cost,
-		Todos:               todos,
-		Channel:             item.Channel.String,
-		CreatedAt:           item.CreatedAt,
-		UpdatedAt:           item.UpdatedAt,
+		SummaryCutMessageID:     item.SummaryCutMessageID.String,
+		PrevSummaryMessageID:    item.PrevSummaryMessageID.String,
+		PrevSummaryCutMessageID: item.PrevSummaryCutMessageID.String,
+		Cost:                    item.Cost,
+		Todos:                   todos,
+		Channel:                 item.Channel.String,
+		CreatedAt:               item.CreatedAt,
+		UpdatedAt:               item.UpdatedAt,
 	}
 }
 

@@ -65,7 +65,7 @@ func TestSummarizeSplitsATurnTooBigToRetain(t *testing.T) {
 	seedSizedTurns(t, env, sess.ID, 1, 200)
 	seedStepTurn(t, env, sess.ID, 20, 4_000)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, sa.Model(), "", fantasy.ProviderOptions{}, nil))
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
 	require.NoError(t, err)

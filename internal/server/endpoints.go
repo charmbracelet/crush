@@ -562,6 +562,15 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceConfigRemove),
 
+		apigen.Post("/v1/workspaces/{id}/config/sign-out").
+			Summary("Sign out of a provider").
+			Description("Removes the provider's stored credential and the given extra fields in one write, waiting out any token refresh in flight.").
+			Tags("config").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.ConfigSignOutRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceConfigSignOut),
+
 		apigen.Post("/v1/workspaces/{id}/config/model").
 			Summary("Set the preferred model").
 			Tags("config").

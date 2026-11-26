@@ -258,6 +258,9 @@ type Workspace interface {
 	SetConfigField(scope config.Scope, key string, value any) error
 	SetConfigFields(scope config.Scope, fields map[string]any) error
 	RemoveConfigField(scope config.Scope, key string) error
+	// SignOut removes a provider's login and API key, plus extraFields, in
+	// one write that no in-flight token refresh can undo.
+	SignOut(scope config.Scope, providerID string, extraFields ...string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
 

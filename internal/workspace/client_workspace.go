@@ -753,6 +753,14 @@ func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) erro
 	return err
 }
 
+func (w *ClientWorkspace) SignOut(scope config.Scope, providerID string, extraFields ...string) error {
+	err := w.client.SignOut(context.Background(), w.workspaceID(), scope, providerID, extraFields...)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
 func (w *ClientWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	token, ok, err := w.client.ImportCopilot(context.Background(), w.workspaceID())
 	if err != nil {

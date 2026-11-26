@@ -69,6 +69,9 @@ const TokenExchangeTimeout = 30 * time.Second
 // is not subject to this; see RefreshRejectedOAuthToken.
 const refreshCooldown = 60 * time.Second
 
+// ErrSignedOut is returned by a refresh whose login is no longer on disk; the provider needs a new sign-in.
+var ErrSignedOut = errors.New("signed out")
+
 // fileSnapshot captures metadata about a config file at a point in time.
 type fileSnapshot struct {
 	Path    string
@@ -460,41 +463,29 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
-	if err := s.writeConfigFields(scope, kv); err != nil {
+	if err := s.atomicEdit(scope, kv, nil); err != nil {
 		return err
 	}
-	// Auto-reload to keep in-memory state fresh after config edits.
-	// We use context.Background() since this is an internal operation that
-	// shouldn't be cancelled by user context.
-	if err := s.autoReload(context.Background()); err != nil {
-		// Log warning but don't fail the write - disk is already updated.
-		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
-	}
+	s.reloadAfterWrite()
 	return nil
 }
 
-// writeConfigFields persists key/value pairs to the config file. It does not
-// touch in-memory config state or the staleness snapshot: callers either
-// reload (SetConfigFields, whose reload recaptures the snapshot) or have
-// already published an updated clone and capture the snapshot themselves
-// (update). Both of those run under writeMu, which is what keeps the
-// snapshot map free of concurrent writers.
-func (s *ConfigStore) writeConfigFields(scope Scope, kv map[string]any) error {
-	// Sort keys for deterministic output regardless of map iteration
-	// order. This also ensures consistent results when callers pass
-	// overlapping JSONPath keys (e.g. "a" and "a.b").
-	keys := make([]string, 0, len(kv))
-	for k := range kv {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-
+// atomicEdit sets and deletes JSON-path fields in the scope's config file in
+// one locked write. It leaves memory and the staleness snapshot to callers.
+func (s *ConfigStore) atomicEdit(scope Scope, set map[string]any, del []string) error {
+	// Sorted so output is deterministic and overlapping paths apply in order.
+	keys := slices.Sorted(maps.Keys(set))
 	return s.atomicWrite(scope, func(data []byte) ([]byte, error) {
 		v := string(data)
+		var err error
 		for _, key := range keys {
-			var sErr error
-			if v, sErr = sjson.Set(v, key, kv[key]); sErr != nil {
-				return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
+			if v, err = sjson.Set(v, key, set[key]); err != nil {
+				return nil, fmt.Errorf("failed to set config field %s: %w", key, err)
+			}
+		}
+		for _, key := range del {
+			if v, err = sjson.Delete(v, key); err != nil {
+				return nil, fmt.Errorf("failed to delete config field %s: %w", key, err)
 			}
 		}
 		return []byte(v), nil
@@ -533,7 +524,7 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	if len(fields) == 0 {
 		return nil
 	}
-	if err := s.writeConfigFields(scope, fields); err != nil {
+	if err := s.atomicEdit(scope, fields, nil); err != nil {
 		return err
 	}
 	// Refresh the staleness snapshot so the file watcher does not treat
@@ -580,22 +571,56 @@ func (s *ConfigStore) pinPreferredModelLocked(modelType SelectedModelType, model
 //
 // The write is protected by an in-process mutex and a cross-process flock.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
-	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
-		v, sErr := sjson.Delete(string(data), key)
-		if sErr != nil {
-			return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
-		}
-		return []byte(v), nil
-	})
-	if err != nil {
+	if err := s.atomicEdit(scope, nil, []string{key}); err != nil {
 		return err
 	}
+	s.reloadAfterWrite()
+	return nil
+}
 
+// reloadAfterWrite refreshes in-memory state from disk after a write. The
+// write has landed either way, so a failed reload is only logged.
+func (s *ConfigStore) reloadAfterWrite() {
 	if err := s.autoReload(context.Background()); err != nil {
 		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
 	}
+}
 
+// SignOut removes a provider's credential and extraFields in one write under the refresh lock.
+func (s *ConfigStore) SignOut(ctx context.Context, scope Scope, providerID string, extraFields ...string) error {
+	lockCtx, cancel := context.WithTimeout(ctx, refreshLockDeadline)
+	defer cancel()
+	release, err := lock.File(lockCtx, s.refreshLockPath(providerID))
+	if err != nil {
+		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, err)
+	}
+	defer release()
+	if s.IsManagedProvider(providerID) {
+		return fmt.Errorf("sign out of provider %s: %w", providerID, ErrCredentialManaged)
+	}
+
+	var del []string
+	for _, field := range append([]string{"oauth", "api_key"}, extraFields...) {
+		del = append(del, providerField(providerID, field))
+	}
+	if err := s.atomicEdit(scope, nil, del); err != nil {
+		return err
+	}
+	// Drop the unsaved token too, or the next refresh would save it back.
+	s.tokenMu.Lock()
+	delete(s.pendingPersist, providerID)
+	if pc, ok := s.Config().Providers.Get(providerID); ok {
+		pc.OAuthToken, pc.APIKey = nil, ""
+		s.Config().Providers.Set(providerID, pc)
+	}
+	s.tokenMu.Unlock()
+	s.reloadAfterWrite()
 	return nil
+}
+
+// providerField is the JSON path of one of a provider's config fields.
+func providerField(providerID, field string) string {
+	return fmt.Sprintf("providers.%s.%s", providerID, field)
 }
 
 // UpdatePreferredModel updates the preferred model for the given type and
@@ -651,136 +676,59 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 	})
 }
 
-// SetProviderAPIKey sets the API key for a provider and persists it.
-// The OpenAI provider holds exactly one credential: storing a ChatGPT
-// token removes a previously entered API key, and storing an API key
-// removes a previous ChatGPT login.
+// SetProviderAPIKey stores an API key or OAuth token as the provider's
+// credential. OpenAI and xAI hold exactly one: a key retires the login and a
+// ChatGPT login retires the key.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
-	var providerConfig ProviderConfig
-	var exists bool
-	var setKeyOrToken func()
-	isToken := false
-
+	var set map[string]any
+	var del []string
+	var apply func(*ProviderConfig)
+	_, isToken := apiKey.(*oauth.Token)
 	switch v := apiKey.(type) {
 	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
-			return fmt.Errorf("failed to save api key to config file: %w", err)
+		set = map[string]any{providerField(providerID, "api_key"): v}
+		var catalog string
+		switch providerID {
+		case string(catwalk.InferenceProviderOpenAI):
+			catalog = "chatgpt_models"
+		case string(catwalk.InferenceProviderXAI):
+			catalog = "grok_models"
 		}
-		setKeyOrToken = func() {
-			providerConfig.APIKey = v
-			if providerID == string(catwalk.InferenceProviderOpenAI) {
-				// Either OAuth or an API key, never both: the login
-				// leaves nothing usable on the API-key side behind.
-				providerConfig.OAuthToken = nil
-				providerConfig.ChatGPTModels = nil
-			}
-			if providerID == string(catwalk.InferenceProviderXAI) {
-				// Either OAuth or an API key, never both: the key
-				// replaces a previous Grok login, whose refreshes would
-				// otherwise overwrite the key again.
-				providerConfig.OAuthToken = nil
-				providerConfig.GrokModels = nil
-			}
+		if catalog != "" {
+			del = []string{providerField(providerID, "oauth"), providerField(providerID, catalog)}
 		}
-		if providerID == string(catwalk.InferenceProviderOpenAI) {
-			// Either OAuth or an API key, never both: the new key
-			// leaves nothing usable on the ChatGPT side behind.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
-				return err
-			}
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.chatgpt_models", providerID)); err != nil {
-				return err
-			}
-		}
-		if providerID == string(catwalk.InferenceProviderXAI) {
-			// Either OAuth or an API key, never both: the new key
-			// leaves nothing usable on the Grok side behind.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
-				return err
-			}
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.grok_models", providerID)); err != nil {
-				return err
+		apply = func(pc *ProviderConfig) {
+			pc.APIKey = v
+			if catalog != "" {
+				pc.OAuthToken, pc.ChatGPTModels, pc.GrokModels = nil, nil, nil
 			}
 		}
 	case *oauth.Token:
-		isToken = true
-		// Hold the refresh lock across the write so a peer's in-flight
-		// token exchange cannot land on top of a credential the user just
-		// obtained interactively — which would silently invalidate the
-		// login they only just completed.
-		fields := map[string]any{
-			fmt.Sprintf("providers.%s.oauth", providerID): v,
-		}
-		if providerID != string(catwalk.InferenceProviderOpenAI) {
-			fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v.AccessToken
-		}
-		if err := s.withRefreshLock(providerID, func() error {
-			return s.SetConfigFields(scope, fields)
-		}); err != nil {
-			return err
-		}
+		set = tokenFields(providerID, v)
 		if providerID == string(catwalk.InferenceProviderOpenAI) {
-			// Either OAuth or an API key, never both: the login retires
-			// any key that came before it.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID)); err != nil {
-				return err
-			}
+			del = []string{providerField(providerID, "api_key")}
 		}
-		setKeyOrToken = func() {
-			providerConfig.OAuthToken = v
+		apply = func(pc *ProviderConfig) {
+			*pc = withToken(*pc, providerID, v)
 			if providerID == string(catwalk.InferenceProviderOpenAI) {
-				providerConfig.APIKey = ""
-				return
-			}
-			providerConfig.APIKey = v.AccessToken
-			if providerID == string(catwalk.InferenceProviderCopilot) {
-				providerConfig.SetupGitHubCopilot()
+				pc.APIKey = ""
 			}
 		}
+	default:
+		return fmt.Errorf("unsupported credential type for provider %s", providerID)
 	}
 
-	// Publish under tokenMu so a disk adoption that read the previous
-	// credential cannot overwrite this one.
-	s.tokenMu.Lock()
-	cfg := s.Config()
-	providerConfig, exists = cfg.Providers.Get(providerID)
-	if exists {
-		setKeyOrToken()
-		cfg.Providers.Set(providerID, providerConfig)
-	} else {
-		var foundProvider *catwalk.Provider
-		for _, p := range s.knownProviders {
-			if string(p.ID) == providerID {
-				foundProvider = &p
-				break
-			}
+	// Under the refresh lock, so a refresh in flight cannot write the old login back over this.
+	if err := s.withRefreshLock(providerID, func() error {
+		if err := s.atomicEdit(scope, set, del); err != nil {
+			return fmt.Errorf("failed to save credential to config file: %w", err)
 		}
-
-		if foundProvider != nil {
-			providerConfig = ProviderConfig{
-				ID:           providerID,
-				Name:         foundProvider.Name,
-				BaseURL:      foundProvider.APIEndpoint,
-				Type:         foundProvider.Type,
-				Disable:      false,
-				ExtraHeaders: make(map[string]string),
-				ExtraParams:  make(map[string]string),
-				Models:       foundProvider.Models,
-			}
-			setKeyOrToken()
-		} else {
-			s.tokenMu.Unlock()
-			return fmt.Errorf("provider with ID %s not found in known providers", providerID)
-		}
-		cfg.Providers.Set(providerID, providerConfig)
+		// Published after the reload, which re-derives catalog defaults such as a key template.
+		s.reloadAfterWrite()
+		return s.publishCredential(providerID, apply, isToken)
+	}); err != nil {
+		return err
 	}
-	// A new sign-in, or a key that retires the OAuth login, replaces any
-	// refreshed token still waiting to be saved, so that save must not be
-	// retried over it.
-	if isToken || providerConfig.OAuthToken == nil {
-		delete(s.pendingPersist, providerID)
-	}
-	s.tokenMu.Unlock()
 
 	// After authenticating with Hyper, re-fetch the provider catalog so
 	// the latest models are available without restarting.
@@ -799,6 +747,38 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	// grants and persist it.
 	if providerID == string(catwalk.InferenceProviderXAI) && isToken {
 		s.refetchGrokModels(context.Background(), scope)
+	}
+	return nil
+}
+
+// publishCredential applies a new credential to the live provider config,
+// creating it from the known catalog if needed. Under tokenMu so a disk
+// adoption that read the previous credential cannot overwrite it.
+func (s *ConfigStore) publishCredential(providerID string, apply func(*ProviderConfig), isToken bool) error {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	pc, ok := s.Config().Providers.Get(providerID)
+	if !ok {
+		i := slices.IndexFunc(s.knownProviders, func(p catwalk.Provider) bool { return string(p.ID) == providerID })
+		if i < 0 {
+			return fmt.Errorf("provider with ID %s not found in known providers", providerID)
+		}
+		known := s.knownProviders[i]
+		pc = ProviderConfig{
+			ID:           providerID,
+			Name:         known.Name,
+			BaseURL:      known.APIEndpoint,
+			Type:         known.Type,
+			ExtraHeaders: make(map[string]string),
+			ExtraParams:  make(map[string]string),
+			Models:       known.Models,
+		}
+	}
+	apply(&pc)
+	s.Config().Providers.Set(providerID, pc)
+	// A new login, or a key that retired the login, supersedes an unsaved refreshed token.
+	if isToken || pc.OAuthToken == nil {
+		delete(s.pendingPersist, providerID)
 	}
 	return nil
 }
@@ -822,7 +802,9 @@ func (s *ConfigStore) refetchOpenAIModels(ctx context.Context, scope Scope) {
 	// with a 401. A failed refresh falls through and lets the fetch run
 	// on the old token, which keeps the existing catalog in place.
 	if pc.OAuthToken.IsExpired() {
-		if err := s.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+		if err := s.RefreshOAuthToken(ctx, scope, providerID); errors.Is(err, ErrSignedOut) {
+			return
+		} else if err != nil {
 			slog.Warn("Failed to refresh the ChatGPT token before fetching the model catalog", "error", err)
 		}
 		if refreshed, ok := s.Config().Providers.Get(providerID); ok && refreshed.OAuthToken != nil {
@@ -883,7 +865,9 @@ func (s *ConfigStore) refetchGrokModels(ctx context.Context, scope Scope) {
 	// with a 401. A failed refresh falls through and lets the fetch run
 	// on the old token, which keeps the existing catalog in place.
 	if pc.OAuthToken.IsExpired() {
-		if err := s.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+		if err := s.RefreshOAuthToken(ctx, scope, providerID); errors.Is(err, ErrSignedOut) {
+			return
+		} else if err != nil {
 			slog.Warn("Failed to refresh the Grok token before fetching the model catalog", "error", err)
 		}
 		if refreshed, ok := s.Config().Providers.Get(providerID); ok && refreshed.OAuthToken != nil {
@@ -1070,6 +1054,16 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		if entryToken, err = s.liveToken(providerID); err != nil {
 			return err
 		}
+	}
+
+	// A reload that read disk before a sign-out can resurrect the token in memory, so disk decides.
+	switch onDisk, err := s.diskHoldsLogin(providerID); {
+	case err != nil:
+		return fmt.Errorf("refresh OAuth token for provider %s: cannot tell whether it was signed out: %w", providerID, err)
+	case !onDisk:
+		slog.Info("Not refreshing OAuth token; the login was removed from disk", "provider", providerID)
+		s.applyTokenIfUnchanged(providerID, entryToken, nil)
+		return fmt.Errorf("refresh OAuth token for provider %s: %w", providerID, ErrSignedOut)
 	}
 
 	// Now that we hold the lock, disk is the authority on which credential
@@ -1689,6 +1683,14 @@ func (s *ConfigStore) setTokenLocked(providerConfig ProviderConfig, providerID s
 
 // withToken returns providerConfig carrying token as its credential.
 func withToken(providerConfig ProviderConfig, providerID string, token *oauth.Token) ProviderConfig {
+	if token == nil {
+		// Signing out also drops the key that only mirrored the login.
+		if old := providerConfig.OAuthToken; old != nil && providerConfig.APIKey == old.AccessToken {
+			providerConfig.APIKey = ""
+		}
+		providerConfig.OAuthToken = nil
+		return providerConfig
+	}
 	providerConfig.OAuthToken = token
 	// The OpenAI provider holds exactly one credential, so a ChatGPT
 	// token means there is no API key side by side with it.
@@ -1744,6 +1746,31 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 	}
 
 	return &token, nil
+}
+
+// diskHoldsLogin reports whether any JSON config file the store reads holds
+// an OAuth login for the provider, whichever scope it was saved in.
+func (s *ConfigStore) diskHoldsLogin(providerID string) (bool, error) {
+	key := providerField(providerID, "oauth")
+	for _, path := range append(s.LoadedPaths(), s.globalDataPath, s.workspacePath) {
+		if filepath.Ext(path) != ".json" {
+			continue
+		}
+		data, err := readFile(path)
+		if os.IsNotExist(err) || (err == nil && len(bytes.TrimSpace(data)) == 0) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !json.Valid(data) {
+			return false, fmt.Errorf("config file %s is not valid JSON", path)
+		}
+		if gjson.GetBytes(data, key).Exists() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // nextRecentModels computes the recent-models list for the given type
@@ -1810,14 +1837,8 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	}
 
 	if err := s.SetProviderAPIKey(ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
+		slog.Error("Unable to save GitHub Copilot token", "error", err)
 		return token, false
-	}
-
-	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
-		"providers.copilot.api_key": token.AccessToken,
-		"providers.copilot.oauth":   token,
-	}); err != nil {
-		slog.Error("Unable to save GitHub Copilot token to disk", "error", err)
 	}
 
 	slog.Info("GitHub Copilot successfully imported")

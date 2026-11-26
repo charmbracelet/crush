@@ -128,6 +128,8 @@ func TestRefetchGrokModelsRefreshesExpiredToken(t *testing.T) {
 	// Not parallel: swaps the fetchGrokModels package variable.
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "crush.json")
+	// The login is on disk, as after a real sign-in; a refresh never spends one that is not.
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"xai":{"oauth":{"access_token":"expired-at","refresh_token":"expired-rt"}}}}`), 0o600))
 
 	expired := &oauth.Token{
 		AccessToken:  "expired-at",

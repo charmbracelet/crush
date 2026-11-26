@@ -44,6 +44,24 @@ func (c *Client) RemoveConfigField(ctx context.Context, id string, scope config.
 	return nil
 }
 
+// SignOut removes a provider's stored credential, and extraFields beside
+// it, on the server.
+func (c *Client) SignOut(ctx context.Context, id string, scope config.Scope, providerID string, extraFields ...string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/sign-out", id), nil, jsonBody(proto.ConfigSignOutRequest{
+		Scope:       scope,
+		ProviderID:  providerID,
+		ExtraFields: extraFields,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to sign out of %s: %w", providerID, err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return fmt.Errorf("failed to sign out of %s: %w", providerID, err)
+	}
+	return nil
+}
+
 // UpdatePreferredModel updates the preferred model on the server.
 func (c *Client) UpdatePreferredModel(ctx context.Context, id string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/model", id), nil, jsonBody(struct {

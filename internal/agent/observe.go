@@ -135,9 +135,14 @@ func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
 	// Unobserved rather than "messages after a position": an entry cites the
 	// messages it rests on, so coverage is recorded by what was actually read.
 	// A turn whose distillation failed stays visible and is retried.
+	// Checkpoint rows are skipped so the observer never distills a summary
+	// (and its attached memory appendix) back into the ledger.
 	ids := make([]string, 0, len(msgs))
 	byID := make(map[string]message.Message, len(msgs))
 	for _, m := range msgs {
+		if m.IsSummaryMessage {
+			continue
+		}
 		ids = append(ids, m.ID)
 		byID[m.ID] = m
 	}
@@ -146,9 +151,10 @@ func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
 		return nil
 	}
 
-	// Only the newest unseen messages are read at once; the rest wait for
-	// later turns so one enormous backlog cannot blow the observer's budget.
-	selected := tailWithinTokens(unseen, byID, observeMaxTokens)
+	// Read the oldest unseen messages that fit the budget so a long backlog
+	// is drained chronologically across turns without advancing the anchor
+	// past older unread history.
+	selected := headWithinTokens(unseen, byID, observeMaxTokens)
 	if compaction.EstimateAll(selected) < observeMinTokens && len(unseen) == len(selected) {
 		return nil
 	}
@@ -162,7 +168,11 @@ func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	entries, err := parseObservations(raw, byID)
+	selectedByID := make(map[string]message.Message, len(selected))
+	for _, m := range selected {
+		selectedByID[m.ID] = m
+	}
+	entries, err := parseObservations(raw, selectedByID)
 	if err != nil {
 		return err
 	}
@@ -332,16 +342,16 @@ func extractJSONArray(raw string) string {
 	return raw[start : end+1]
 }
 
-// tailWithinTokens selects the newest messages that fit a budget, so a long
-// backlog is observed over several turns instead of truncating in the middle
-// of the work it describes.
-func tailWithinTokens(ids []string, byID map[string]message.Message, budget int64) []message.Message {
+// headWithinTokens selects the oldest unseen messages that fit a budget, so a
+// long backlog drains chronologically across turns and the anchor never jumps
+// past unread history.
+func headWithinTokens(ids []string, byID map[string]message.Message, budget int64) []message.Message {
 	var (
 		selected []message.Message
 		total    int64
 	)
-	for i := len(ids) - 1; i >= 0; i-- {
-		msg, ok := byID[ids[i]]
+	for _, id := range ids {
+		msg, ok := byID[id]
 		if !ok {
 			continue
 		}
@@ -351,10 +361,6 @@ func tailWithinTokens(ids []string, byID map[string]message.Message, budget int6
 		}
 		total += cost
 		selected = append(selected, msg)
-	}
-	// Collected newest-first for budgeting; read oldest-first.
-	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
-		selected[i], selected[j] = selected[j], selected[i]
 	}
 	return selected
 }

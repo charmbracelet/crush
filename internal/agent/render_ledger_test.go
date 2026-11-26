@@ -347,3 +347,57 @@ func TestDistillSerializesConcurrentPassesAndUsesAnchor(t *testing.T) {
 	require.Equal(t, 2, msgs.fromSummaryCalls)
 	require.NotEmpty(t, msgs.lastSummaryID, "second pass must anchor on the last observed source message")
 }
+
+func TestDistillDrainsBacklogChronologicallyAndSkipsCheckpoints(t *testing.T) {
+	env := testEnv(t)
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	// Seed a backlog exceeding observeMaxTokens (24k) plus a checkpoint row
+	// in the middle so we verify both chronological draining and skipping
+	// summary rows.
+	pad := strings.Repeat("a", 16_000*4) // ~16k tokens per message
+	m1, err := env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "oldest-backlog-msg " + pad}},
+	})
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:             message.Assistant,
+		IsSummaryMessage: true,
+		Parts:            []message.ContentPart{message.TextContent{Text: "checkpoint-must-not-be-observed " + pad}},
+	})
+	require.NoError(t, err)
+	m2, err := env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "newer-backlog-msg " + pad}},
+	})
+	require.NoError(t, err)
+
+	observer := &recordingModel{text: "[]"}
+	sa := testSessionAgent(env, &recordingModel{text: "unused"}, observer, "test prompt").(*sessionAgent)
+	sa.ledger = env.ledger
+	sa.observeMemory = true
+
+	// Pass 1 must read the oldest message first (not jump to the newest) and
+	// ignore the checkpoint row.
+	require.NoError(t, sa.distill(ctx, sess.ID))
+	require.Len(t, observer.calls, 1)
+	require.Contains(t, observer.calls[0], "oldest-backlog-msg")
+	require.NotContains(t, observer.calls[0], "newer-backlog-msg")
+	require.NotContains(t, observer.calls[0], "checkpoint-must-not-be-observed")
+
+	// Pass 2 advances from the anchor to the newer unread message and still
+	// skips the checkpoint row.
+	require.NoError(t, sa.distill(ctx, sess.ID))
+	require.Len(t, observer.calls, 2)
+	require.Contains(t, observer.calls[1], "newer-backlog-msg")
+	require.NotContains(t, observer.calls[1], "checkpoint-must-not-be-observed")
+
+	led, err := env.ledger.Ledger(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Empty(t, led.Unobserved([]string{m1.ID, m2.ID}),
+		"both older and newer messages must be covered across consecutive passes")
+}

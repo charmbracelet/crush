@@ -655,4 +655,6 @@ func TestBlockedCommandErrorNamesTheCommand(t *testing.T) {
 
 	require.Contains(t, resp.Content, "ifconfig is a dangerous command",
 		"the error must name the command, not the spelling that reached it")
+	require.Contains(t, resp.Content, "Error: blocked:", "the reason must reach the model")
+	require.NotContains(t, resp.Content, "Exit code 1", "a blocked command has no exit code")
 }

@@ -538,6 +538,23 @@ func ExitCode(err error) int {
 	return 1
 }
 
+// Describe says how a finished command ended, or "" when it succeeded.
+func Describe(err error) string {
+	if err == nil {
+		return ""
+	}
+	if IsInterrupt(err) {
+		return "Command was aborted before completion"
+	}
+	if status, ok := errors.AsType[interp.ExitStatus](err); ok {
+		if status == 0 {
+			return ""
+		}
+		return fmt.Sprintf("Exit code %d", status)
+	}
+	return "Error: " + err.Error()
+}
+
 // ContainsCommandChaining reports whether command does anything beyond
 // running a single simple command with redirections: pipelines, `&&`/`||`,
 // `;`, backgrounding, subshells, and command or process substitution all

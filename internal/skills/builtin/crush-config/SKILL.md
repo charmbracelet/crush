@@ -216,7 +216,9 @@ option reset <list-key>    # clear a list option back to empty
   `CRUSH_SERVER_READY_TIMEOUT`, `CRUSH_SERVER_IDLE_TIMEOUT`, and
   `CRUSH_SERVER_DETACH_GRACE` take priority when set.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
-  `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
+  `global-context-path`, `skill-path`, `global-skill-path`, `disable-skill`.
+  `global-skill-path` replaces the default global skill dirs (e.g. to skip
+  `~/.claude/skills`). Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).
 
 ```bash

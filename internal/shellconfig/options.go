@@ -249,6 +249,7 @@ var optionSpecs = map[string]optionSpec{
 	"context-path":        {jsonKey: "context_paths", kind: optList},
 	"global-context-path": {jsonKey: "global_context_paths", kind: optList},
 	"skill-path":          {jsonKey: "skills_paths", kind: optList},
+	"global-skill-path":   {jsonKey: "global_skills_paths", kind: optList},
 	"disable-skill":       {jsonKey: "disabled_skills", kind: optList},
 }
 

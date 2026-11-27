@@ -766,8 +766,8 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
-	// Add the default skills directories if not already present.
-	for _, dir := range GlobalSkillsDirs() {
+	// Add the global skills directories if not already present.
+	for _, dir := range GlobalSkillsDirs(c.Options.GlobalSkillsPaths) {
 		if !slices.Contains(c.Options.SkillsPaths, dir) {
 			c.Options.SkillsPaths = append(c.Options.SkillsPaths, dir)
 		}
@@ -1489,12 +1489,16 @@ func projectBoundary(dir string) string {
 	return abs
 }
 
-// GlobalSkillsDirs returns the default directories for Agent Skills.
+// GlobalSkillsDirs returns the global directories for Agent Skills:
+// CRUSH_SKILLS_DIR if set, else configured if non-empty, else the defaults.
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
-func GlobalSkillsDirs() []string {
+func GlobalSkillsDirs(configured []string) []string {
 	if crushSkills := os.Getenv("CRUSH_SKILLS_DIR"); crushSkills != "" {
 		return []string{crushSkills}
+	}
+	if len(configured) > 0 {
+		return configured
 	}
 
 	paths := []string{

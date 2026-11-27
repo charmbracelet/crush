@@ -522,6 +522,8 @@ List Keys:
   context-path string             append a project context path
   global-context-path string      append a global context path
   skill-path string               append a skill directory
+  global-skill-path string        replace the default global skill
+                                  directories (repeatable)
   disable-skill string            hide a skill from the agent
 ```
 
@@ -566,6 +568,7 @@ Available Keys:
   context-path          clear project context paths
   global-context-path   clear global context paths
   skill-path            clear additional skill directories
+  global-skill-path     restore the default global skill directories
   disable-skill         clear disabled skill names
 ```
 

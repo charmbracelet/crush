@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -33,6 +34,9 @@ var (
 	_ StyleRefresher = (*AWSSSO)(nil)
 	_ StyleRefresher = (*MCPAuth)(nil)
 	_ StyleRefresher = (*MCPToggles)(nil)
+	_ StyleRefresher = (*SkillToggles)(nil)
+	_ StyleRefresher = (*Channels)(nil)
+	_ StyleRefresher = (*ChannelItem)(nil)
 	_ StyleRefresher = (*OAuth)(nil)
 	_ StyleRefresher = (*FilePicker)(nil)
 	_ StyleRefresher = (*QuestionForm)(nil)
@@ -155,4 +159,22 @@ func TestRefreshStyles_QuestionForm(t *testing.T) {
 	}
 	require.NotEqual(t, questionTextareaStyles(new(styles.CharmtonePantera())).Focused.Text.GetForeground(),
 		want.Focused.Text.GetForeground(), "the themes must look different")
+}
+
+func TestRefreshStyles_Channels(t *testing.T) {
+	t.Parallel()
+	states := map[string]mcp.ClientInfo{
+		"signal": {Name: "signal", State: mcp.StateConnected, Channel: true},
+		"slack":  {Name: "slack", State: mcp.StateError, Channel: true},
+	}
+	requireRestyled(t, func(com *common.Common) Dialog {
+		return NewChannels(com, states)
+	})
+}
+
+func TestRefreshStyles_SkillToggles(t *testing.T) {
+	t.Parallel()
+	requireRestyled(t, func(com *common.Common) Dialog {
+		return NewSkillsToggles(com, []SkillToggleItem{{Name: "review"}, {Name: "deploy", Disabled: true}})
+	})
 }

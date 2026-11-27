@@ -128,6 +128,18 @@ func (m *MCPToggles) RefreshStyles() {
 }
 
 // RefreshStyles implements [StyleRefresher].
+func (m *SkillToggles) RefreshStyles() {
+	m.help.Styles = m.com.Styles.DialogHelpStyles()
+}
+
+// RefreshStyles implements [StyleRefresher].
+func (d *Channels) RefreshStyles() {
+	d.help.Styles = d.com.Styles.DialogHelpStyles()
+	d.input.SetStyles(d.com.Styles.TextInput)
+	refreshItems(d.list.Items())
+}
+
+// RefreshStyles implements [StyleRefresher].
 func (m *OAuth) RefreshStyles() {
 	m.help.Styles = m.com.Styles.DialogHelpStyles()
 	m.spinner.Style = m.com.Styles.Dialog.OAuth.Spinner
@@ -199,6 +211,14 @@ func (r *ReasoningItem) RefreshStyles() {
 	r.cache = nil
 	if r.Versioned != nil {
 		r.Bump()
+	}
+}
+
+// RefreshStyles implements [StyleRefresher].
+func (c *ChannelItem) RefreshStyles() {
+	c.cache = nil
+	if c.Versioned != nil {
+		c.Bump()
 	}
 }
 

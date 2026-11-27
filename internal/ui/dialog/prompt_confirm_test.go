@@ -37,3 +37,26 @@ func TestConfirmSummaryWraps(t *testing.T) {
 		}
 	}
 }
+
+// TestConfirmScrollHintOnlyWhenScrollable verifies the scroll hint is
+// shown only when the summary overflows its area.
+func TestConfirmScrollHintOnlyWhenScrollable(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	answers := []*question.Answer{{QuestionID: "q1", FillInText: "a"}, {QuestionID: "q2", FillInText: "b"}}
+	c := NewConfirmComponent(&s, "", "", []string{"One", "Two"},
+		[]question.Question{{ID: "q1"}, {ID: "q2"}}, answers)
+	hasScroll := func() bool {
+		for _, b := range c.ShortHelp() {
+			if b.Help().Desc == "scroll" {
+				return true
+			}
+		}
+		return false
+	}
+	h := c.Height(60)
+	c.Draw(uv.NewScreenBuffer(60, h), image.Rect(0, 0, 60, h))
+	require.False(t, hasScroll(), "nothing scrolls at full height")
+	c.Draw(uv.NewScreenBuffer(60, 3), image.Rect(0, 0, 60, 3))
+	require.True(t, hasScroll(), "scroll hint missing when content overflows")
+}

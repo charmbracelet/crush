@@ -40,6 +40,7 @@ type ConfirmComponent struct {
 	focused      bool
 	lastWidth    int
 	scrollOffset int
+	scrollable   bool // last draw overflowed its area
 	compositor   *lipgloss.Compositor
 	hoverX       int
 	hoverY       int
@@ -124,7 +125,11 @@ func (c *ConfirmComponent) Response() question.Answer {
 
 // ShortHelp returns key bindings for the status bar.
 func (c *ConfirmComponent) ShortHelp() []key.Binding {
-	return []key.Binding{c.keyUp, c.keyLeft, c.keyYes, c.keyNo, c.keyEnter, c.keyClose}
+	bindings := []key.Binding{c.keyLeft, c.keyYes, c.keyNo, c.keyEnter, c.keyClose}
+	if c.scrollable {
+		bindings = append([]key.Binding{c.keyUp}, bindings...)
+	}
+	return bindings
 }
 
 // unansweredCount returns how many questions have no meaningful answer.
@@ -251,6 +256,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		{Text: "Not yet", Selected: !c.confirmYes, Padding: 3, UnderlineIndex: 0},
 	}
 	overflow := viewport > 0 && totalLines > viewport
+	c.scrollable = overflow
 
 	// Clamp scroll offset.
 	maxScroll := totalLines - viewport

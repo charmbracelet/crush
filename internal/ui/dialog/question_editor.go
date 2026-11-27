@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // newQuestionTextarea creates a configured textarea for question
@@ -183,11 +184,20 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, f
 
 	val := strings.TrimSpace(e.fillIn.Value())
 	if val != "" {
-		rendered := e.Styles.Editor.QuestionUnselected.Render(val)
+		style := e.Styles.Editor.QuestionUnselected
 		if styleFilled {
-			rendered = e.Styles.Editor.QuestionSelected.Render(val)
+			style = e.Styles.Editor.QuestionSelected
 		}
-		*lines = append(*lines, contentLine{text: bar + fillPrefix + rendered, cursorItem: isActive, choiceIdx: -1})
+		// Wrap the saved answer under its prompt so a long one stays
+		// readable instead of being clipped at the edge.
+		indent := strings.Repeat(" ", prefixWidth)
+		for j, ln := range wrapLines(val, innerWidth-lipgloss.Width(bar)-prefixWidth) {
+			lead := fillPrefix
+			if j > 0 {
+				lead = indent
+			}
+			*lines = append(*lines, contentLine{text: bar + lead + style.Render(ln), cursorItem: isActive, choiceIdx: -1})
+		}
 		return
 	}
 	*lines = append(*lines, contentLine{text: bar + fillPrefix + bodyStyle.Render("Something else?"), cursorItem: isActive, choiceIdx: -1})
@@ -218,11 +228,33 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, not
 	}
 
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
-		dimmed := noteStyle.Render(saved)
-		for _, ln := range strings.Split(dimmed, "\n") {
-			*lines = append(*lines, contentLine{text: bar + notePrefix + ln, cursorItem: isActive, choiceIdx: -1})
+		prefixWidth := lipgloss.Width(notePrefix)
+		indent := strings.Repeat(" ", prefixWidth)
+		for j, ln := range wrapLines(saved, innerWidth-lipgloss.Width(bar)-prefixWidth) {
+			lead := notePrefix
+			if j > 0 {
+				lead = indent
+			}
+			*lines = append(*lines, contentLine{text: bar + lead + noteStyle.Render(ln), cursorItem: isActive, choiceIdx: -1})
 		}
 	}
+}
+
+// wrapLines word-wraps plain text at width (hard-breaking words
+// longer than a line) and returns its visual lines.
+func wrapLines(text string, width int) []string {
+	return strings.Split(ansi.Wrap(text, max(width, 1), ""), "\n")
+}
+
+// savedNoteHeight returns the rows a saved note occupies when drawn
+// as a standalone note at width.
+func (e *questionEditor) savedNoteHeight(noteKey string, width int) int {
+	saved, ok := e.notes[noteKey]
+	if !ok || saved == "" {
+		return 0
+	}
+	const notePrefix = "> "
+	return len(wrapLines(saved, width-lipgloss.Width(notePrefix)))
 }
 
 // fillInCursor returns the hardware cursor position for the fill-in
@@ -289,8 +321,15 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
 		y++
 		noteStyle := e.Styles.Editor.QuestionNote
-		drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), notePrefix+noteStyle.Render(saved))
-		y++
+		indent := strings.Repeat(" ", lipgloss.Width(notePrefix))
+		for j, ln := range wrapLines(saved, area.Dx()-lipgloss.Width(notePrefix)) {
+			lead := notePrefix
+			if j > 0 {
+				lead = indent
+			}
+			drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), lead+noteStyle.Render(ln))
+			y++
+		}
 	}
 
 	return nil, y

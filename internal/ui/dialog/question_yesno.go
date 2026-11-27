@@ -148,9 +148,9 @@ func (d *YesNo) Height(width int) int {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
 		h++ // blank separator before note editor
 		h += d.noteEditor.Height()
-	} else if len(d.notes) > 0 {
-		h++ // blank separator
-		h++ // saved note text (single line)
+	} else if nh := d.savedNoteHeight(question.QuestionNoteKey, w); nh > 0 {
+		h++     // blank separator
+		h += nh // saved note text, wrapped
 	}
 	h++ // trailing blank for bottom padding
 	return h

@@ -310,12 +310,7 @@ func (m *MCPToggles) innerContent() string {
 		// OnlineText (not OnlineIcon) is the text style; the dot is
 		// rendered separately so no "●" prefix sneaks into the text
 		// and pushes the row over the dialog width.
-		statusStyle := t.Resource.OnlineText
-		if status == "disabled" || status == "starting" {
-			// UnsetPadding: SecondaryText carries its own Padding(0, 1),
-			// which would widen the row one column past every other row.
-			statusStyle = t.Dialog.SecondaryText.UnsetPadding()
-		}
+		statusStyle := statusTextStyle(t, status)
 		row := dot.Render() + " " +
 			t.Dialog.NormalItem.UnsetPadding().Render(name) +
 			strings.Repeat(" ", gap) +
@@ -341,6 +336,23 @@ func statusDot(t *styles.Styles, status string) lipgloss.Style {
 	default:
 		// disabled, offline
 		return t.Resource.DisabledIcon
+	}
+}
+
+// statusTextStyle colors a status label to match its dot, so an error
+// reads as an error rather than in the connected green.
+func statusTextStyle(t *styles.Styles, status string) lipgloss.Style {
+	switch {
+	case status == "error" || strings.HasPrefix(status, "error:"):
+		return t.Resource.ErrorIcon.UnsetString()
+	case status == "needs authentication":
+		return t.Resource.NeedsAuthIcon.UnsetString()
+	case status == "disabled" || status == "starting" || status == "offline":
+		// UnsetPadding: SecondaryText carries its own Padding(0, 1),
+		// which would widen the row one column past every other row.
+		return t.Dialog.SecondaryText.UnsetPadding()
+	default:
+		return t.Resource.OnlineText
 	}
 }
 

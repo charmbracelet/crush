@@ -215,3 +215,17 @@ func TestFitToggleRow(t *testing.T) {
 	require.Equal(t, 13, ansi.StringWidth(status), "a long status keeps only half the row")
 	require.Equal(t, 30-2-1, ansi.StringWidth(name+status))
 }
+
+// TestMCPTogglesStatusColors verifies each status label shares its dot's
+// meaning: errors are not drawn in the connected green.
+func TestMCPTogglesStatusColors(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	online := statusTextStyle(&s, "connected").GetForeground()
+	require.NotEqual(t, online, statusTextStyle(&s, "error: boom").GetForeground())
+	require.Equal(t, s.Resource.ErrorIcon.GetForeground(), statusTextStyle(&s, "error: boom").GetForeground())
+	require.Equal(t, s.Resource.NeedsAuthIcon.GetForeground(), statusTextStyle(&s, "needs authentication").GetForeground())
+	require.NotEqual(t, online, statusTextStyle(&s, "offline").GetForeground())
+	require.Equal(t, "error", ansi.Strip(statusTextStyle(&s, "error").Render("error")), "no glyph leaks into the label")
+}

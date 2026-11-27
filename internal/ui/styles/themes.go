@@ -779,6 +779,7 @@ func tigraBlancaOpts() quickStyleOpts {
 		separator: tone.Steep,
 
 		destructive:       tone.Sriracha,
+		destructiveSubtle: tone.Coral,
 		error:             tone.Pom,
 		warningSubtle:     tone.Yam,
 		warning:           tone.Zest,

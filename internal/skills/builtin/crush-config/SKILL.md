@@ -168,12 +168,22 @@ hook add PreToolUse --matcher "^bash$" --command ".crush/hooks/no-haskell.sh" --
 ### permissions
 
 ```bash
-permissions allow <tool> [<tool> ...]   # tools that skip permission prompts
-permissions deny <tool> [<tool> ...]    # hide tools from the agent entirely
+permissions allow <tool> [<tool> ...]          # tools that skip permission prompts
+permissions deny <tool> [<tool> ...]           # hide tools from the agent entirely
+permissions safe "<command line>" [...]        # exact command lines that skip prompts
+permissions block <command> [<command> ...]    # extra commands treated as dangerous
+permissions unblock <command> [<command> ...]  # drop a command from the dangerous list (defaults too)
 ```
 
 `deny` is the inverse of `allow`: it writes `options.disabled_tools`. A denied
 tool is hidden from the agent, not merely prompted for.
+
+The last three act on shell commands rather than tools. Each argument is one
+entry, so quote a command line: `permissions safe "go build"`. A safe entry
+matches only that exact command line, with no extra flags or operands: it
+covers `go build`, not `go build ./...` or `go build -o x`. `block` and
+`unblock` edit the bash tool's dangerous list; `unblock` also removes built-in
+entries.
 
 ### options
 

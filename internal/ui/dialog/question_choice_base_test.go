@@ -260,3 +260,38 @@ func TestSuppressedScrollStillClampsBounds(t *testing.T) {
 	require.Equal(t, 4, d.scrollOffset)
 	require.False(t, d.suppressScroll)
 }
+
+// TestChoiceDrawZeroWidthNoPanic verifies that drawing choice
+// questions into a zero-width area doesn't panic. Reserving the
+// scrollbar column used to take the content width negative, which
+// made strings.Repeat panic while building hit layers.
+func TestChoiceDrawZeroWidthNoPanic(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	choices := []question.Choice{
+		{ID: "a", Label: "Alpha"},
+		{ID: "b", Label: "Beta"},
+		{ID: "c", Label: "Gamma"},
+	}
+	form := NewQuestionForm(&s, question.Request{Questions: []question.Question{
+		{ID: "q1", Type: question.TypeSingleChoice, Text: "Pick one", Choices: choices},
+		{ID: "q2", Type: question.TypeMultiChoice, Text: "Pick some", Choices: choices},
+	}})
+
+	drawers := map[string]interface {
+		Draw(uv.Screen, uv.Rectangle) *tea.Cursor
+	}{
+		"single": newTestSingleChoice(t),
+		"multi":  newTestMultiChoice(t),
+		"form":   form,
+	}
+	for name, d := range drawers {
+		for _, h := range []int{1, 2, 5} {
+			scr := uv.NewScreenBuffer(1, h)
+			require.NotPanics(t, func() {
+				d.Draw(scr, image.Rect(0, 0, 0, h))
+			}, "%s at 0x%d", name, h)
+		}
+	}
+}

@@ -470,7 +470,7 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 	}
 
 	if overflow {
-		contentWidth--
+		contentWidth = max(0, contentWidth-1)
 	}
 	c.lastLines = lines
 	c.lastViewport = viewport
@@ -561,6 +561,7 @@ func (c *choiceList) buildChoiceCompositor(lines []contentLine, area uv.Rectangl
 		}
 	}
 
+	contentWidth = max(0, contentWidth)
 	var layers []*lipgloss.Layer
 	for choiceIdx, r := range ranges {
 		height := r.max - r.min + 1

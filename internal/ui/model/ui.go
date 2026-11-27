@@ -6158,7 +6158,7 @@ func (m *UI) editorContentWidth() int {
 	if m.state == uiChat && !m.isCompact {
 		width -= 30 // sidebar column
 	}
-	return width
+	return max(0, width)
 }
 
 // collapsedInlineEditor returns the active inline editor when it should use

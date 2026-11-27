@@ -267,9 +267,7 @@ func (m *MCPAuth) headerContent() string {
 
 func (m *MCPAuth) innerContent() string {
 	t := m.com.Styles
-	successStyle := t.Dialog.OAuth.Success
 	linkStyle := t.Dialog.OAuth.Link
-	statusStyle := t.Dialog.OAuth.StatusText
 
 	// innerWidth is the dialog's content area: total width minus the
 	// View frame (border). Every block sizes to this so nothing gets
@@ -301,22 +299,17 @@ func (m *MCPAuth) innerContent() string {
 		)
 
 	case MCPAuthStateAuthenticating:
-		waiting := successStyle.Render(m.spinner.View()) +
-			statusStyle.Render("Waiting for authorization...")
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			"",
-			block(waiting),
+			authSpinnerLine(t, m.spinner, innerWidth, "Waiting for authorization..."),
 			"",
 			urlText(m.authURL()),
 			"",
 		)
 
 	case MCPAuthStateSuccess:
-		return successStyle.
-			Width(innerWidth).
-			Padding(1).
-			Render("Authentication successful!")
+		return authSuccessBlock(t, innerWidth)
 
 	case MCPAuthStateError:
 		return authErrorBlock(t, innerWidth, errText(m.err))

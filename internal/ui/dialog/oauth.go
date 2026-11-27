@@ -388,7 +388,6 @@ func (m *OAuth) headerContent() string {
 func (m *OAuth) innerDialogContent() string {
 	var (
 		t               = m.com.Styles
-		successStyle    = t.Dialog.OAuth.Success
 		linkStyle       = t.Dialog.OAuth.Link
 		statusTextStyle = t.Dialog.OAuth.StatusText
 	)
@@ -400,13 +399,7 @@ func (m *OAuth) innerDialogContent() string {
 
 	switch m.State {
 	case OAuthStateInitializing:
-		status := statusTextStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(
-				successStyle.Render(m.spinner.View()) +
-					statusTextStyle.Render("Initializing..."),
-			)
+		status := authSpinnerLine(t, m.spinner, innerWidth, "Initializing...")
 		return lipgloss.JoinVertical(lipgloss.Left, "", status, "")
 
 	case OAuthStateDisplay:
@@ -433,12 +426,7 @@ func (m *OAuth) innerDialogContent() string {
 		if m.userCode != "" {
 			waitingMsg = "Verifying..."
 		}
-		waiting := statusTextStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(
-				successStyle.Render(m.spinner.View()) + statusTextStyle.Render(waitingMsg),
-			)
+		waiting := authSpinnerLine(t, m.spinner, innerWidth, waitingMsg)
 
 		elements = append(elements, url, "", waiting, "")
 
@@ -461,19 +449,10 @@ func (m *OAuth) innerDialogContent() string {
 		return lipgloss.JoinVertical(lipgloss.Left, elements...)
 
 	case OAuthStateSuccess:
-		return successStyle.
-			Width(innerWidth).
-			Padding(1).
-			Render("Authentication successful!")
+		return authSuccessBlock(t, innerWidth)
 
 	case OAuthStateSaving:
-		status := statusTextStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(
-				successStyle.Render(m.spinner.View()) +
-					statusTextStyle.Render("Fetching models..."),
-			)
+		status := authSpinnerLine(t, m.spinner, innerWidth, "Fetching models...")
 		// No keys work while saving, so the empty help row below
 		// stands in for the trailing blank line.
 		return lipgloss.JoinVertical(lipgloss.Left, "", status)

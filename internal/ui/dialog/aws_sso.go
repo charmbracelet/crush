@@ -186,10 +186,8 @@ func (m *AWSSSO) headerContent() string {
 
 func (m *AWSSSO) innerDialogContent() string {
 	var (
-		t               = m.com.Styles
-		successStyle    = t.Dialog.OAuth.Success
-		linkStyle       = t.Dialog.OAuth.Link
-		statusTextStyle = t.Dialog.OAuth.StatusText
+		t         = m.com.Styles
+		linkStyle = t.Dialog.OAuth.Link
 	)
 
 	// innerWidth is the dialog's content area (total minus the View
@@ -208,13 +206,7 @@ func (m *AWSSSO) innerDialogContent() string {
 				Padding(0, 1).
 				Render(wrappedLink(linkStyle, m.url, "id=aws-sso-verify", innerWidth-2)) // -2 for padding
 
-			waiting := statusTextStyle.
-				Width(innerWidth).
-				Padding(0, 1).
-				Render(
-					successStyle.Render(m.spinner.View()) +
-						statusTextStyle.Render("Waiting for authentication..."),
-				)
+			waiting := authSpinnerLine(t, m.spinner, innerWidth, "Waiting for authentication...")
 
 			return lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -227,20 +219,11 @@ func (m *AWSSSO) innerDialogContent() string {
 		}
 
 		// No URL yet; still waiting for command output.
-		spinnerLine := statusTextStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(
-				successStyle.Render(m.spinner.View()) +
-					statusTextStyle.Render("Starting "+m.command+"..."),
-			)
+		spinnerLine := authSpinnerLine(t, m.spinner, innerWidth, "Starting "+m.command+"...")
 		return lipgloss.JoinVertical(lipgloss.Left, "", spinnerLine, "")
 
 	case awsSSOStateSuccess:
-		return successStyle.
-			Width(innerWidth).
-			Padding(1).
-			Render("Authentication successful!")
+		return authSuccessBlock(t, innerWidth)
 
 	case awsSSOStateError:
 		return authErrorBlock(t, innerWidth, m.errMsg)

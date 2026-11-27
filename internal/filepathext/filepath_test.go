@@ -1,6 +1,7 @@
 package filepathext
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,6 +25,10 @@ func TestSplitGlobPrefix(t *testing.T) {
 		{"glob.go", "", "glob.go"},
 		// A brace or bracket in the first segment means no literal prefix.
 		{"{a,b}/x.go", "", "{a,b}/x.go"},
+		// An absolute pattern keeps its root, so it is walked where it points.
+		{"/etc/*.conf", "/etc", "*.conf"},
+		{"/*.go", "/", "*.go"},
+		{"/glob.go", "/", "glob.go"},
 	}
 
 	for _, tc := range cases {
@@ -32,6 +37,27 @@ func TestSplitGlobPrefix(t *testing.T) {
 			gotPrefix, gotRest := SplitGlobPrefix(tc.pattern)
 			require.Equal(t, tc.wantPrefix, gotPrefix, "prefix")
 			require.Equal(t, tc.wantRest, gotRest, "rest")
+		})
+	}
+}
+
+func TestSplitGlobPrefixWindowsVolumes(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows volume paths")
+	}
+	for _, tc := range []struct{ pattern, prefix string }{
+		{`C:\*.go`, "C:/"},
+		{"C:/*.go", "C:/"},
+		{`\\?\C:\*.go`, "//?/C:/"},
+		{`\\?\C:\work\*.go`, "//?/C:/work"},
+		{`\\server\share\*.go`, "//server/share/"},
+		{`\\?\UNC\server\share\*.go`, "//?/UNC/server/share/"},
+	} {
+		t.Run(tc.pattern, func(t *testing.T) {
+			prefix, rest := SplitGlobPrefix(tc.pattern)
+			require.Equal(t, tc.prefix, prefix)
+			require.Equal(t, "*.go", rest)
 		})
 	}
 }

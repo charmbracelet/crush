@@ -33,12 +33,26 @@ func SmartIsAbs(path string) bool {
 // "*.go"); for "**/foo.go" it returns ("", "**/foo.go").
 func SplitGlobPrefix(pattern string) (prefix, rest string) {
 	pattern = filepath.ToSlash(pattern)
+	// A Windows volume can contain a question mark as part of its namespace.
+	volume := filepath.ToSlash(filepath.VolumeName(pattern))
+	if strings.EqualFold(volume, "//?/UNC") {
+		share := filepath.VolumeName("/" + pattern[len(volume):])
+		volume = pattern[:len(volume)+max(0, len(share)-1)]
+	}
+	if path := strings.TrimPrefix(pattern, volume); volume != "" && strings.HasPrefix(path, "/") {
+		prefix, rest := splitGlobPrefix(path)
+		return volume + prefix, rest
+	}
+	return splitGlobPrefix(pattern)
+}
+
+func splitGlobPrefix(pattern string) (prefix, rest string) {
 	segments := strings.Split(pattern, "/")
 	var literal []string
 	for i, seg := range segments {
 		if strings.ContainsAny(seg, "*?[{\\") {
 			rest = strings.Join(segments[i:], "/")
-			return strings.Join(literal, "/"), rest
+			return joinLiteral(literal), rest
 		}
 		literal = append(literal, seg)
 	}
@@ -47,6 +61,17 @@ func SplitGlobPrefix(pattern string) (prefix, rest string) {
 	if len(literal) == 0 {
 		return "", pattern
 	}
-	parent := strings.Join(literal[:len(literal)-1], "/")
+	parent := joinLiteral(literal[:len(literal)-1])
 	return parent, literal[len(literal)-1]
+}
+
+// joinLiteral joins literal segments back into a path. Segments that
+// begin at the root keep it: "/*.go" is walked from "/", where the
+// pattern points, not from the search path.
+func joinLiteral(literal []string) string {
+	joined := strings.Join(literal, "/")
+	if joined == "" && len(literal) > 0 {
+		return "/"
+	}
+	return joined
 }

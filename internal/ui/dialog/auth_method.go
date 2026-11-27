@@ -197,7 +197,7 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	render := func(cardHeight int) string {
 		rc := NewRenderContext(t, width)
-		rc.Title = "Let’s Auth " + cmp.Or(m.provider.Name, string(m.provider.ID))
+		rc.Title = "Authenticate with " + cmp.Or(m.provider.Name, string(m.provider.ID))
 		rc.AddPart(prompt)
 
 		oauthCard := m.renderCard(oauthCardLabel, m.selected == 0, cardWidth, cardHeight)

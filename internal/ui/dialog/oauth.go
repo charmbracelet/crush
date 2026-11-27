@@ -376,7 +376,7 @@ func (m *OAuth) headerContent() string {
 		textStyle    = t.Dialog.PrimaryText
 		dialogStyle  = t.Dialog.View.Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
+		dialogTitle  = fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
 	)
 	if m.isOnboarding {
 		return textStyle.Render(dialogTitle)

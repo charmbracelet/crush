@@ -631,6 +631,11 @@
           "description": "Disable providers auto-update",
           "default": false
         },
+        "disable_subagents": {
+          "type": "boolean",
+          "description": "Prevent agents from starting subagents. Removes the agent, agent_dispatch, agent_send, agent_status, agent_stop, and agentic_fetch tools",
+          "default": false
+        },
         "disable_default_providers": {
           "type": "boolean",
           "description": "Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs",

@@ -735,6 +735,19 @@ func TestTerminalWriteAsksPermission(t *testing.T) {
 	require.Contains(t, permissions.requests[0].Description, "rm -rf ~")
 }
 
+func TestTerminalStartGrantCoversOnlyThatCommand(t *testing.T) {
+	resetTerminalManager(t)
+	workingDir := t.TempDir()
+
+	permissions := &denyingPermissionService{}
+	tool := NewTerminalTool(permissions, newFakeTerminalService(), workingDir, workingDir, nil)
+
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "git commit"})
+	require.True(t, resp.IsError)
+	require.Len(t, permissions.requests, 1)
+	require.Equal(t, "git commit", permissions.requests[0].GrantKey)
+}
+
 func TestTerminalRefusesSessionsItDoesNotOwn(t *testing.T) {
 	needsPOSIXShell(t)
 

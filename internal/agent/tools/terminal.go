@@ -197,6 +197,10 @@ func (t terminalTool) start(ctx context.Context, params TerminalParams, blocked 
 				Command:     params.Command,
 				WorkingDir:  execWorkingDir,
 			},
+			// Path is only the directory, and an interactive program can
+			// do anything once running, so a session grant covers this
+			// exact command alone.
+			GrantKey: params.Command,
 		},
 	)
 	if err != nil {

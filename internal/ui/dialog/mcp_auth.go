@@ -283,16 +283,13 @@ func (m *MCPAuth) innerContent() string {
 	}
 
 	// urlText renders the URL as a green hyperlink, matching the Hyper
-	// OAuth dialog's link style. No label, no box — just the URL.
+	// OAuth dialog's link style. No label, no box — just the URL, broken
+	// at fixed widths like the other sign-in dialogs.
 	urlText := func(u string) string {
 		if u == "" {
 			return ""
 		}
-		link := linkStyle.Hyperlink(u, "id=mcp-oauth").Render(u)
-		return lipgloss.NewStyle().
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(link)
+		return block(wrappedLink(linkStyle, u, "id=mcp-oauth", innerWidth-2)) // -2 for padding
 	}
 
 	switch m.state {

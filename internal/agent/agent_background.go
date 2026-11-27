@@ -57,7 +57,7 @@ func (c *coordinator) runSubAgentMaybeBackground(
 	toolName, access string,
 	params subAgentParams,
 ) (fantasy.ToolResponse, error) {
-	if !c.interactive {
+	if !c.interactive || IsNonInteractiveRun(ctx) {
 		return c.runSubAgent(ctx, params)
 	}
 	access = accessOrRead(access)

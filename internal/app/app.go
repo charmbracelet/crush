@@ -492,7 +492,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	done := make(chan error, 1)
 	coord := app.Agent()
 	go func(ctx context.Context, sessionID, prompt string) {
-		if _, err := coord.Run(ctx, sessionID, prompt); err != nil {
+		if _, err := coord.Run(agent.WithNonInteractiveRun(ctx), sessionID, prompt); err != nil {
 			done <- fmt.Errorf("failed to start agent processing stream: %w", err)
 			return
 		}

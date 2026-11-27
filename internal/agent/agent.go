@@ -38,6 +38,7 @@ import (
 	"charm.land/tone"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
@@ -108,6 +109,11 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+
+	// Headless prompt guidance is independent of the subagent behavior
+	// controlled by NonInteractive above. Both fields travel with queued calls.
+	headless       bool
+	headlessPrompt *prompt.Prompt
 
 	// HostContext is what the host application had in view when the
 	// prompt was sent. The model sees it with this prompt only; it is
@@ -181,6 +187,21 @@ func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, state
 		}
 	}
 	return filtered
+}
+
+func (a *sessionAgent) toolsForCall(channel string, headless bool) []fantasy.AgentTool {
+	available := filterToolsForChannel(a.tools.Copy(), channel, mcp.GetStates())
+	if !headless {
+		return available
+	}
+	return slices.DeleteFunc(available, func(tool fantasy.AgentTool) bool {
+		switch tool.Info().Name {
+		case tools.QuestionToolName, AgentDispatchToolName, AgentSendToolName, AgentStatusToolName, AgentStopToolName:
+			return true
+		default:
+			return false
+		}
+	})
 }
 
 // ErrSessionIdle is returned for a QueueOnly call when no turn is active.
@@ -488,15 +509,12 @@ func insertQueued(queue []SessionAgentCall, call SessionAgentCall) []SessionAgen
 // observed inconsistently.
 //
 // Calls covered by a pending cancel are dropped and returned in canceled
-// for the caller to settle (see settleDroppedCalls). Uncanceled calls without
-// a RunID are returned in fold to be folded into the active turn,
-// preserving the existing follow-up behavior. Uncanceled calls that carry
-// a RunID are left in the queue so each runs as its own turn via the
-// recursive run path and publishes its own RunComplete, giving every
-// RunID-bearing prompt an explicit lifecycle instead of being silently
-// absorbed into another turn. fold is processed by the caller without the
+// for the caller to settle (see settleDroppedCalls). Uncanceled calls
+// in the same mode without a RunID are returned in fold, preserving the
+// existing follow-up behavior. Other calls stay queued so each runs as
+// its own turn via the recursive run path. fold is processed without the
 // lock held.
-func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceled []SessionAgentCall) {
+func (a *sessionAgent) drainQueueForStep(sessionID string, headless bool) (fold, canceled []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
@@ -507,7 +525,7 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceled []Ses
 			canceled = append(canceled, queued)
 			continue
 		}
-		if queued.RunID != "" {
+		if queued.RunID != "" || queued.headless != headless {
 			keep = append(keep, queued)
 			continue
 		}
@@ -841,6 +859,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Idle: become the active run. Register the cancel func before dropping
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
+	if IsNonInteractiveRun(ctx) != call.headless {
+		ctx = context.WithValue(ctx, nonInteractiveRunKey{}, call.headless)
+	}
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 	runCtx = withRefusalRetries(runCtx, refusalRetriesPerTurn)
 	genCtx, cancel = context.WithCancel(runCtx)
@@ -919,10 +940,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}()
 
 	// Copy mutable fields under lock to avoid races with SetTools.
-	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
+	agentTools := a.toolsForCall(call.Channel, call.headless)
 	largeModel := call.Model
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
+	scope := ""
+	if call.headless {
+		if call.headlessPrompt != nil {
+			var err error
+			systemPrompt, err = call.headlessPrompt.BuildForNonInteractive(ctx, largeModel.Model.Provider(), largeModel.Model.Model(), a.cfg)
+			if err != nil {
+				return nil, err
+			}
+		}
+		scope = nonInteractiveRunScope
+		if call.NonInteractive {
+			scope += nonInteractiveDelegationScope
+		}
+	}
 	var instructions strings.Builder
 
 	for _, server := range mcp.GetStates() {
@@ -936,7 +971,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+		systemPrompt = scope + systemPrompt + "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	} else {
+		systemPrompt = scope + systemPrompt
 	}
 
 	if len(agentTools) > 0 {
@@ -1027,10 +1064,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Use latest tools (updated by SetTools when MCP tools
 			// change), filtered for the session's channel and minus MCP
 			// servers disabled for this repository.
-			prepared.Tools = a.filterDisabledMCPTools(
-				callContext,
-				filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates()),
-			)
+			prepared.Tools = a.filterDisabledMCPTools(callContext, a.toolsForCall(call.Channel, call.headless))
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -1039,11 +1073,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// sequence so a follow-up queued after the cancel (higher seq)
 			// is not dropped. A dropped prompt carrying a RunID still gets
 			// its terminal cancelled RunComplete so a caller waiting on it
-			// does not hang. Uncanceled prompts without a RunID are folded
-			// into this turn; uncanceled prompts with a RunID are left
-			// queued so each runs as its own turn (with its own
-			// RunComplete) via the recursive run path below.
-			fold, canceled := a.drainQueueForStep(call.SessionID)
+			// does not hang. Only uncanceled prompts in the same mode and
+			// without a RunID are folded into this turn. The rest run on
+			// their own via the recursive run path below.
+			fold, canceled := a.drainQueueForStep(call.SessionID, call.headless)
 			a.settleDroppedCalls(canceled)
 			var foldedMessages []fantasy.Message
 			for _, queued := range fold {
@@ -1398,9 +1431,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, summarizeErr
 		case len(currentAssistant.ToolCalls()) > 0:
 			existing, _ := a.messageQueue.Get(call.SessionID)
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			// The rewritten prompt is a new message, not the report.
-			call.Report = nil
+			if !call.headless {
+				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+				// The rewritten prompt is a new message, not the report.
+				call.Report = nil
+			}
 			a.messageQueue.Set(call.SessionID, append(existing, call))
 			continued = true
 		}
@@ -1942,7 +1977,11 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 		if summaryMsgIndex != -1 {
 			msgs = msgs[summaryMsgIndex:]
-			msgs[0].Role = message.User
+			// Keep model-generated summaries in their original assistant role
+			// when user messages are the source of consent.
+			if !IsNonInteractiveRun(ctx) {
+				msgs[0].Role = message.User
+			}
 		}
 	}
 	return msgs, nil

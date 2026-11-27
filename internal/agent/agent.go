@@ -40,9 +40,11 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/ledger"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -55,11 +57,6 @@ import (
 
 const (
 	DefaultSessionName = "Untitled Session"
-
-	// Constants for auto-summarization thresholds
-	largeContextWindowThreshold = 200_000
-	largeContextWindowBuffer    = 20_000
-	smallContextWindowRatio     = 0.2
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -221,7 +218,11 @@ type SessionAgent interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	AddNote(sessionID, text string)
-	Summarize(context.Context, string, Model, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	Summarize(context.Context, string, Model, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	RestoreSummarize(context.Context, string) error
+	SummarizePreview(context.Context, string, Model, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) (compaction.Preview, error)
+	ConfirmSummarize(context.Context, string, compaction.Preview) error
+	DiscardSummarize(context.Context, string, string) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -270,9 +271,15 @@ type sessionAgent struct {
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
 	hooks       *hooks.Runner
+	// ledger is the session memory store; nil when observation is off.
+	ledger        ledger.Service
+	observeMemory bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
+	// pendingPreviews tracks staged, unaccepted checkpoint message IDs by
+	// session so they can be removed if the user keeps chatting or quits.
+	pendingPreviews *csync.Map[string, string]
 	// notes are what the host told the agent since its last turn, by
 	// session, to add to the next prompt. They are not chat messages.
 	notes *csync.Map[string, []string]
@@ -303,6 +310,9 @@ type sessionAgent struct {
 	// dispatchMu so two goroutines can't race to lock different mutex
 	// instances for the same session.
 	dispatchMuCreate sync.Mutex
+	// observeMu serializes background memory observation passes per session.
+	observeMu       *csync.Map[string, *sync.Mutex]
+	observeMuCreate sync.Mutex
 	// acceptedMu serializes increments/decrements of acceptedRuns and
 	// the assignment of accept sequence numbers from acceptSeqGen. It
 	// is separate from dispatchMu so AcceptedRun.Close (which may run
@@ -335,6 +345,12 @@ type SessionAgentOptions struct {
 	Tools       []fantasy.AgentTool
 	Notify      pubsub.Publisher[notify.Notification]
 	RunComplete pubsub.Publisher[notify.RunComplete]
+	// Ledger persists session memory for the observer and the renderer. Nil
+	// leaves observation off entirely, which is the default: this feature is
+	// opt-in until it has measured well enough to trust.
+	Ledger ledger.Service
+	// ObserveMemory distills each completed turn into the ledger when true.
+	ObserveMemory bool
 	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
 	Hooks *hooks.Runner
 	// titles is shared by a coordinator's agents so one drain covers all.
@@ -359,11 +375,15 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		hooks:                opts.Hooks,
+		ledger:               opts.Ledger,
+		observeMemory:        opts.ObserveMemory,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		notes:                csync.NewMap[string, []string](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
+		pendingPreviews:      csync.NewMap[string, string](),
 		titles:               cmp.Or(opts.titles, new(titleTracker)),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
+		observeMu:            csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
 	}
@@ -687,6 +707,19 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 // observes exactly one terminal event regardless of which Run branch ends
 // the turn.
 func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
+	// Memory is distilled before either terminal path is taken. The
+	// coordinator always supplies an OnComplete hook, so a call placed after
+	// the branch below never runs for an ordinary session - which is how this
+	// feature sat inert while its own tests passed, because they drove the
+	// distillation directly rather than through the event that triggers it.
+	//
+	// Firing on both paths is safe because observation is idempotent: a
+	// retried attempt reports the same messages, entry ids are content
+	// addressed, and covered messages are not read twice.
+	if complete.Error == "" && !complete.Cancelled {
+		a.observeTurn(complete)
+	}
+
 	if call.OnComplete != nil {
 		call.OnComplete(complete)
 		return
@@ -966,6 +999,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	sessionLock := sync.Mutex{}
+	a.discardPendingPreview(ctx, call.SessionID)
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -1065,7 +1099,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		fantasy.WithUserAgent(userAgent),
 	)
 
-	history, files := a.preparePrompt(msgs, turnModel.CatwalkCfg.Capabilities.Vision, turnModel.CatwalkCfg.Capabilities.Audio, call.Attachments...)
+	// Stale tool output is dropped from the request rather than from storage: it
+	// is the largest thing a long session carries, the least likely to still
+	// matter, and trivially re-derivable by re-running the call.
+	view, pruned := compaction.Prune(msgs, a.prunePolicy(int64(turnModel.CatwalkCfg.ContextWindow)))
+	if pruned > 0 {
+		slog.Debug("Pruned stale tool output from the request",
+			"session_id", call.SessionID, "tokens", pruned)
+	}
+	history, files := a.preparePrompt(view, turnModel.CatwalkCfg.Capabilities.Vision, turnModel.CatwalkCfg.Capabilities.Audio, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1376,25 +1418,26 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
+				if a.disableAutoSummarize {
+					return false
+				}
 				cw := int64(turnModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
 				// to avoid immediately truncating custom/local models.
 				if cw == 0 {
 					return false
 				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
+				// The reserve also covers the completion this turn would ask
+				// for, which the raw buffer did not.
+				if !compaction.ShouldCompact(
+					currentSession.PromptTokens+currentSession.CompletionTokens,
+					cw,
+					call.MaxOutputTokens,
+				) {
+					return false
 				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
-					shouldSummarize = true
-					return true
-				}
-				return false
+				shouldSummarize = true
+				return true
 			},
 			func(steps []fantasy.StepResult) bool {
 				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
@@ -1506,7 +1549,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	continued := false
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		summarizeErr := a.summarize(genCtx, largeModel, call.SessionID, compactTriggerAuto, call.ProviderOptions, call.OnAuthRefresh)
+		_, summarizeErr := a.runSummarize(genCtx, largeModel, call.SessionID, compactTriggerAuto, "", call.ProviderOptions, call.OnAuthRefresh, true)
 		switch {
 		case errors.Is(summarizeErr, ErrCompactionBlocked):
 			// Uncompacted, the next step would only hit the limit
@@ -1656,38 +1699,117 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 }
 
 // Summarize compacts the session on the user's request with model, which
-// must be the model opts were built for. It returns ErrCompactionBlocked
-// when a PreCompact hook blocks it.
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, model Model, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+// must be the model opts were built for, and adopts the checkpoint it writes.
+// It returns ErrCompactionBlocked when a PreCompact hook blocks it.
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, model Model, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
 	if a.HasPendingWork(sessionID) {
 		return ErrSessionBusy
 	}
-	return a.summarize(ctx, model, sessionID, compactTriggerManual, opts, onAuthRefresh)
+	_, err := a.runSummarize(ctx, model, sessionID, compactTriggerManual, instructions, opts, onAuthRefresh, true)
+	return err
 }
 
-// summarize compacts the session with largeModel, which must be the model
-// opts were built for.
-func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionID, trigger string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+// SummarizePreview writes a checkpoint without adopting it. The session keeps
+// its full history until ConfirmSummarize, so a preview the user rejects or
+// abandons costs the row and nothing else.
+func (a *sessionAgent) SummarizePreview(ctx context.Context, sessionID string, model Model, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) (compaction.Preview, error) {
+	if a.HasPendingWork(sessionID) {
+		return compaction.Preview{}, ErrSessionBusy
+	}
+	return a.runSummarize(ctx, model, sessionID, compactTriggerManual, instructions, opts, onAuthRefresh, false)
+}
+
+// runSummarize compacts the session with largeModel, which must be the model
+// opts were built for. Unless commit is set, the checkpoint is written but the
+// session does not adopt it.
+func (a *sessionAgent) runSummarize(ctx context.Context, largeModel Model, sessionID, trigger, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, commit bool) (compaction.Preview, error) {
 	systemPromptPrefix := a.systemPromptPrefix.Get()
+
+	a.discardPendingPreview(ctx, sessionID)
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to get session: %w", err)
+		return compaction.Preview{}, fmt.Errorf("failed to get session: %w", err)
 	}
 	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 	if len(msgs) == 0 {
 		// Nothing to summarize.
-		return nil
+		return compaction.Preview{}, nil
 	}
 
 	if pre := a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPreCompact, SessionID: sessionID, Trigger: trigger}); pre.Blocked() {
-		return fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
+		return compaction.Preview{}, fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
+	// Merge the checkpoint already in context instead of summarizing it a
+	// second time, and measure the cut against the live transcript ahead of
+	// it.
+	previousCheckpoint, body := splitCheckpoint(msgs)
+
+	// Plan against what the model actually sees. Pruning has already trimmed
+	// stale tool output from every request, so sizing a tail from the unpruned
+	// transcript would budget for a session nobody receives. Indices are
+	// unaffected: pruning rewrites messages, it never removes them.
+	contextWindow := int64(largeModel.CatwalkCfg.ContextWindow)
+	view, _ := compaction.Prune(body, a.prunePolicy(contextWindow))
+
+	// The system prompt and tool definitions occupy the window without
+	// appearing in any message, so a tail sized against the raw window is
+	// sized against space that is not there.
+	overhead := compaction.Overhead(
+		currentSession.PromptTokens,
+		compaction.Tokens(previousCheckpoint)+compaction.EstimateAll(view),
+		contextWindow,
+	)
+	usable := compaction.UsableWindow(contextWindow, overhead)
+	if usable != contextWindow {
+		slog.Debug("Sizing the checkpoint from the usable window",
+			"session_id", sessionID,
+			"context_window", contextWindow,
+			"estimated_overhead", overhead,
+			"usable_window", usable,
+		)
+	}
+	cut := compaction.Plan(view, a.compactionPolicy(usable))
+	region := body
+	if cut.Found {
+		// Keep the recent turns verbatim. The next model sees them as written
+		// instead of as somebody else's description of them, and this request
+		// stops re-sending a tail it is about to discard anyway.
+		region = body[:cut.Index]
+	}
+	if len(region) == 0 {
+		return compaction.Preview{}, nil
+	}
+	// A checkpoint wants the full text, because this is the last moment it is
+	// in hand. But a region larger than the request can carry is truncated by
+	// some servers rather than rejected, which would write a checkpoint that
+	// never saw most of what it replaced; when it cannot fit, summarize what
+	// the model was actually shown.
+	if limit := compaction.RegionLimit(usable); limit > 0 &&
+		compaction.EstimateAll(region) > limit {
+		slog.Debug("Summarizing the pruned view because the full region will not fit",
+			"session_id", sessionID,
+			"region_tokens", compaction.EstimateAll(region),
+			"limit", limit,
+		)
+		region = view[:len(region)]
+	}
+
+	aiMsgs, _ := a.preparePrompt(region, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
+
+	// Compaction is a visible pause, and a failed one is worse than a silent
+	// one, so observers are told when it starts and - always, including on
+	// cancel and failure - when the session is usable again. Registered
+	// before the other defers so the closing event follows the flush.
+	a.publishSummarizing(sessionID, currentSession.Title, false, "Compacting the session")
+	outcome := "Compaction failed"
+	defer func() {
+		a.publishSummarizing(sessionID, currentSession.Title, true, outcome)
+	}()
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1713,13 +1835,77 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 		IsSummaryMessage: true,
 	})
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	// Move the text this checkpoint is about to replace out of the context
+	// window rather than away from it. Best-effort: when it fails the
+	// checkpoint simply carries no pointer.
+	transcriptPath := ""
+	if path, err := compaction.WriteTranscript(
+		a.compactionTranscriptDir(), sessionID, summaryMessage.ID, region,
+	); err != nil {
+		slog.Warn("Failed to preserve the pre-checkpoint transcript",
+			"session_id", sessionID, "error", err)
+	} else {
+		transcriptPath = path
+	}
+
+	// Memory renders before the prompt is built so it can do two jobs at once:
+	// guide the summary, and take part of the room the summary would have had.
+	// Its budget is what a checkpoint over this region could occupy, so prose
+	// and memory share one allocation and carrying both cannot overflow the
+	// window either was sized for.
+	appendixBase, _ := compaction.CheckpointOutputBudget(
+		int64(largeModel.CatwalkCfg.ContextWindow),
+		compaction.EstimateAll(region),
+		largeModel.CatwalkCfg.DefaultMaxTokens,
+	)
+	// Memory keeps a small share of the window that is actually usable rather
+	// than everything a checkpoint could have held, so it cannot crowd out the
+	// verbatim tail; the share is a percentage because the same session moves
+	// between models with very different windows.
+	appendixBudget := compaction.RenderBudget(compaction.MemoryBudget(usable, appendixBase))
+	appendixText, appendixCount := a.renderedCheckpoint(genCtx, sessionID, appendixBudget)
+
+	// The division of labour is fixed: the model narrates the state of the
+	// work and compresses what was never observed, memory carries the decisions
+	// that must not drift. Neither can do the other's job - a summary cannot
+	// recover a rationale that was never recorded, and a render cannot compress
+	// what it never saw - so there is no mode to choose between.
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions, previousCheckpoint, transcriptPath, appendixText)
+
+	// The checkpoint request has to fit the window it is summarizing into.
+	// Left unset, the provider applies its own default, and a nearly-full
+	// session then fails as too long: the one failure compaction exists to
+	// prevent. The estimate omits tool definitions, so it runs a little
+	// optimistic rather than a little pessimistic.
+	checkpointTokens, tight := compaction.CheckpointOutputBudget(
+		int64(largeModel.CatwalkCfg.ContextWindow),
+		compaction.EstimateAll(region)+
+			compaction.Tokens(promptOrBuiltin(a.prompts, "summary"))+
+			compaction.Tokens(systemPromptPrefix)+
+			compaction.Tokens(summaryPromptText)+
+			compaction.Tokens(appendixText),
+		largeModel.CatwalkCfg.DefaultMaxTokens,
+	)
+	if tight {
+		slog.Warn("Very little room left for a session checkpoint",
+			"session_id", sessionID,
+			"context_window", largeModel.CatwalkCfg.ContextWindow,
+			"max_output_tokens", checkpointTokens,
+		)
+	}
+
+	progress := &compactionProgress{
+		replaced: len(region),
+		goal:     checkpointTokens,
+		last:     time.Now().Add(-progressInterval), // the first delta always reports
+	}
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
+		MaxOutputTokens: &checkpointTokens,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: opts,
@@ -1736,6 +1922,9 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
+			if note := progress.advance(0); note != "" {
+				a.publishSummarizing(sessionID, currentSession.Title, false, note)
+			}
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -1750,6 +1939,9 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 		},
 		OnTextDelta: func(id, text string) error {
 			summaryMessage.AppendContent(text)
+			if note := progress.advance(len(text)); note != "" {
+				a.publishSummarizing(sessionID, currentSession.Title, false, note)
+			}
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 	})
@@ -1757,62 +1949,122 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {
 			// User cancelled summarize we need to remove the summary message.
+			outcome = "Compaction canceled"
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-			return deleteErr
+			return compaction.Preview{}, deleteErr
 		}
 		// Mark the summary message as finished with an error so the UI
 		// stops spinning.
 		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
 		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
-			return updateErr
+			return compaction.Preview{}, updateErr
 		}
-		return err
+		return compaction.Preview{}, err
 	}
 
+	// In the default mode the appendix follows the summary: it is appended
+	// after the model finishes so deterministic text can never interleave with
+	// streaming deltas, and it rides inside the checkpoint row, which is what
+	// makes recorded memory survive every later compaction.
+	if appendixText != "" {
+		summaryMessage.AppendContent("\n\n" + appendixText)
+	}
+
+	// Say what this checkpoint stands in for and where the displaced text
+	// went. The footer is generated rather than model-written so the numbers
+	// and the path can be trusted.
+	summaryMessage.AppendContent("\n\n" + compaction.Info{
+		ReplacedMessages: len(region),
+		ReplacedTokens:   compaction.EstimateAll(region),
+		KeptMessages:     cut.Kept,
+		KeptTokens:       cut.KeptTokens,
+		TranscriptPath:   transcriptPath,
+		Observed:         appendixCount,
+	}.Render())
+
+	// A rendered checkpoint never reached a model, so it has no steps to price
+	// and no usage to bill. Either way the session's counters are set below
+	// from the request the checkpoint produces, and marked estimated.
 	var overrideCost *float64
-	for _, step := range resp.Steps {
-		summaryMessage.PrismModelID, summaryMessage.PrismModelName = extractPrismModel(step.ProviderMetadata)
-		summaryMessage.PrismHypercreditSavings, summaryMessage.PrismDollarSavings = extractPrismSavings(step.ProviderMetadata)
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if overrideCost != nil {
-				newCost += *overrideCost
+	if resp != nil {
+		for _, step := range resp.Steps {
+			summaryMessage.PrismModelID, summaryMessage.PrismModelName = extractPrismModel(step.ProviderMetadata)
+			summaryMessage.PrismHypercreditSavings, summaryMessage.PrismDollarSavings = extractPrismSavings(step.ProviderMetadata)
+			stepCost := a.openrouterCost(step.ProviderMetadata)
+			if stepCost != nil {
+				newCost := *stepCost
+				if overrideCost != nil {
+					newCost += *overrideCost
+				}
+				overrideCost = &newCost
 			}
-			overrideCost = &newCost
 		}
-	}
-	if hyperCost := a.hyperStepsCost(largeModel, resp.Steps); hyperCost != nil {
-		overrideCost = hyperCost
-	}
+		if hyperCost := a.hyperStepsCost(largeModel, resp.Steps); hyperCost != nil {
+			overrideCost = hyperCost
+		}
 
-	// A compaction summary that stopped short is the record the session
-	// goes on reading from, so record and log why it is incomplete
-	// rather than filing it under a clean end_turn. Unknown finishes
-	// (providers that never report one) keep the historical end_turn.
-	finishReason, finishMessage, finishDetails := turnFinish(largeModel, sessionID, resp.Response.FinishReason)
-	if finishReason == message.FinishReasonUnknown {
-		finishReason = message.FinishReasonEndTurn
+		// A compaction summary that stopped short is the record the session
+		// goes on reading from, so record and log why it is incomplete
+		// rather than filing it under a clean end_turn. Unknown finishes
+		// (providers that never report one) keep the historical end_turn.
+		finishReason, finishMessage, finishDetails := turnFinish(largeModel, sessionID, resp.Response.FinishReason)
+		if finishReason == message.FinishReasonUnknown {
+			finishReason = message.FinishReasonEndTurn
+		}
+		summaryMessage.AddFinish(finishReason, finishMessage, finishDetails)
+	} else {
+		summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
 	}
-	summaryMessage.AddFinish(finishReason, finishMessage, finishDetails)
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, overrideCost, false)
+	if resp != nil {
+		a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, overrideCost, false)
+	}
+	preview := compaction.Preview{
+		CheckpointID: summaryMessage.ID,
+		Text:         summaryMessage.Content().Text,
+		Replaced:     len(region),
+		Kept:         cut.Kept,
+	}
+	if a.ledger != nil && appendixText != "" {
+		preview.DecayBudget = appendixBudget
+	}
+	if cut.Found {
+		preview.CutID = cut.MessageID
+		// The next request sends this checkpoint plus the turns the cut kept,
+		// so count both. Zeroing the prompt counter used to advertise an empty
+		// context, which let a session be compacted again before it had done
+		// any work.
+		preview.PromptTokens = compaction.Tokens(summaryMessage.Content().Text) +
+			cut.KeptTokens + overhead
+	}
 
-	// Just in case, get just the last usage info.
-	usage := resp.Response.Usage
-	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
-	currentSession.PromptTokens = 0
-	currentSession.EstimatedUsage = usageIsZero(usage)
+	// A preview stops here. The row is staged for display and tracked so it
+	// is removed if the user abandons the preview; hooks, memory decay, and
+	// telemetry wait for acceptance.
+	if !commit {
+		a.pendingPreviews.Set(sessionID, summaryMessage.ID)
+		outcome = fmt.Sprintf("Previewed a checkpoint over %d messages", len(region))
+		return preview, nil
+	}
+
+	applyCheckpointCounters(&currentSession, preview)
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 	a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPostCompact, SessionID: sessionID, Trigger: trigger})
+
+	outcome = fmt.Sprintf("Compacted %d messages, kept %d verbatim", len(region), cut.Kept)
+	a.eventSessionCompacted(sessionID, len(region), cut.Kept)
+
+	// Memory decays when a checkpoint lands rather than on every turn: this is
+	// the moment that knows the window, and previewing must never mutate what
+	// a later checkpoint would be built from.
+	a.decayMemory(genCtx, sessionID, preview.CheckpointID, preview.DecayBudget)
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
@@ -1822,12 +2074,115 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 	// Process any messages that were queued while summarizing.
 	queuedMessages, ok := a.messageQueue.Get(sessionID)
 	if !ok || len(queuedMessages) == 0 {
-		return nil
+		return compaction.Preview{}, nil
 	}
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
-	return qErr
+	return compaction.Preview{}, qErr
+}
+
+// applyCheckpointCounters writes the session counters a checkpoint implies.
+// Both commit paths go through it so the adopted figure cannot disagree with
+// the one the preview showed.
+//
+// The prompt counter is the size of the request the session is about to make:
+// the checkpoint, the turns the cut kept, and the measured overhead. The
+// completion counter is then zero by necessity rather than neglect — the
+// checkpoint is the session's last message and already sits inside that prompt.
+// The summarizer's own output used to be recorded here as well, and because
+// every readout (the header percentage, the sidebar context line, `crush
+// session`) adds the two counters together, a compaction that freed most of the
+// window appeared to free almost none of it until the next provider report
+// overwrote the pair.
+//
+// Usage is flagged estimated because the figure describes a request that has not
+// been made, whatever the summarizer's provider reported about its own call.
+// The undo path already re-estimates the same way and marks it.
+func applyCheckpointCounters(current *session.Session, preview compaction.Preview) {
+	if current.SummaryMessageID != preview.CheckpointID {
+		current.PrevSummaryMessageID = current.SummaryMessageID
+		current.PrevSummaryCutMessageID = current.SummaryCutMessageID
+	}
+	current.SummaryMessageID = preview.CheckpointID
+	current.SummaryCutMessageID = preview.CutID
+	current.PromptTokens = preview.PromptTokens
+	current.CompletionTokens = 0
+	current.EstimatedUsage = true
+}
+
+func (a *sessionAgent) decayMemory(ctx context.Context, sessionID, checkpointID string, budget compaction.RenderBudget) {
+	if a.ledger == nil || budget <= 0 {
+		return
+	}
+	if retired, err := a.ledger.Decay(ctx, sessionID, checkpointID, budget); err != nil {
+		slog.Warn("Memory decay failed", "session_id", sessionID, "error", err)
+	} else if retired > 0 {
+		slog.Debug("Memory decayed", "session_id", sessionID, "entries", retired)
+	}
+}
+
+func (a *sessionAgent) clearPendingPreview(sessionID, checkpointID string) {
+	if a.pendingPreviews == nil {
+		return
+	}
+	if cur, ok := a.pendingPreviews.Get(sessionID); ok && cur == checkpointID {
+		a.pendingPreviews.Del(sessionID)
+	}
+}
+
+func (a *sessionAgent) discardPendingPreview(ctx context.Context, sessionID string) {
+	if a.pendingPreviews == nil {
+		return
+	}
+	checkpointID, ok := a.pendingPreviews.Take(sessionID)
+	if !ok || checkpointID == "" {
+		return
+	}
+	if err := a.messages.Delete(ctx, checkpointID); err != nil {
+		slog.Debug("Failed to clean up abandoned preview checkpoint", "session_id", sessionID, "checkpoint_id", checkpointID, "error", err)
+	}
+}
+
+// ConfirmSummarize adopts a previewed checkpoint, which is the moment the
+// session's older turns stop being sent.
+func (a *sessionAgent) ConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error {
+	if preview.CheckpointID == "" {
+		return errors.New("nothing to accept")
+	}
+	currentSession, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+	if _, err := a.messages.Get(ctx, preview.CheckpointID); err != nil {
+		return fmt.Errorf("the previewed checkpoint is gone: %w", err)
+	}
+
+	applyCheckpointCounters(&currentSession, preview)
+	if _, err := a.sessions.Save(ctx, currentSession); err != nil {
+		return fmt.Errorf("failed to save session: %w", err)
+	}
+	a.clearPendingPreview(sessionID, preview.CheckpointID)
+
+	a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPostCompact, SessionID: sessionID, Trigger: compactTriggerManual})
+	a.eventSessionCompacted(sessionID, preview.Replaced, preview.Kept)
+	a.decayMemory(ctx, sessionID, preview.CheckpointID, preview.DecayBudget)
+	slog.Info("Adopted a previewed checkpoint", "session_id", sessionID,
+		"replaced", preview.Replaced, "kept", preview.Kept)
+	return nil
+}
+
+// DiscardSummarize throws away a previewed checkpoint. The session was never
+// pointed at it, so this only removes the row.
+func (a *sessionAgent) DiscardSummarize(ctx context.Context, sessionID, checkpointID string) error {
+	if checkpointID == "" {
+		return errors.New("nothing to discard")
+	}
+	a.clearPendingPreview(sessionID, checkpointID)
+	if err := a.messages.Delete(ctx, checkpointID); err != nil {
+		return fmt.Errorf("failed to discard the previewed checkpoint: %w", err)
+	}
+	return nil
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
@@ -2048,25 +2403,258 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
 	// Read only the tail a compacted session actually sends. The full
 	// transcript can be tens of megabytes on the single shared connection.
-	msgs, err := a.messages.ListFromSummary(ctx, session.ID, session.SummaryMessageID)
+	//
+	// A checkpoint that kept turns verbatim sits after them in creation order
+	// but must be sent before them, so the boundary read is the cut and the
+	// checkpoint is moved back to the front afterwards.
+	boundaryID := session.SummaryMessageID
+	if session.SummaryCutMessageID != "" {
+		boundaryID = session.SummaryCutMessageID
+	}
+	msgs, err := a.messages.ListFromSummary(ctx, session.ID, boundaryID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list messages: %w", err)
 	}
+	if boundaryID == "" {
+		return filterInactiveSummaries(msgs, ""), nil
+	}
 
-	if session.SummaryMessageID != "" {
-		summaryMsgIndex := -1
-		for i, msg := range msgs {
-			if msg.ID == session.SummaryMessageID {
-				summaryMsgIndex = i
-				break
-			}
-		}
-		if summaryMsgIndex != -1 {
-			msgs = msgs[summaryMsgIndex:]
-			msgs[0].Role = message.User
+	summaryIndex, cutIndex := -1, -1
+	for i, msg := range msgs {
+		switch msg.ID {
+		case session.SummaryMessageID:
+			summaryIndex = i
+		case session.SummaryCutMessageID:
+			cutIndex = i
 		}
 	}
-	return msgs, nil
+
+	if session.SummaryCutMessageID == "" {
+		if summaryIndex != -1 {
+			msgs = filterInactiveSummaries(msgs[summaryIndex:], session.SummaryMessageID)
+			msgs[0].Role = message.User
+			return msgs, nil
+		}
+		return filterInactiveSummaries(msgs, ""), nil
+	}
+
+	if summaryIndex == -1 || cutIndex == -1 {
+		// A dangling checkpoint or cut must not silently erase history.
+		all, err := a.messages.List(ctx, session.ID)
+		if err != nil {
+			return nil, err
+		}
+		return filterInactiveSummaries(all, session.SummaryMessageID), nil
+	}
+
+	// The checkpoint is presented as the user turn carrying it, which is how
+	// every earlier summary was shown to the model.
+	checkpoint := msgs[summaryIndex]
+	checkpoint.Role = message.User
+	view := make([]message.Message, 0, len(msgs))
+	view = append(view, checkpoint)
+	for i, msg := range msgs {
+		if i < cutIndex || i == summaryIndex || msg.IsSummaryMessage {
+			continue
+		}
+		view = append(view, msg)
+	}
+	return view, nil
+}
+
+// filterInactiveSummaries drops summary rows that are not the session's active
+// checkpoint (such as abandoned previews or superseded checkpoints) so they
+// are never sent to the model.
+func filterInactiveSummaries(msgs []message.Message, activeSummaryID string) []message.Message {
+	out := make([]message.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if msg.IsSummaryMessage && msg.ID != activeSummaryID {
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// RestoreSummarize undoes the session's most recent compaction.
+//
+// A checkpoint never deletes the text it replaced, so undo is a pointer write
+// rather than a recovery: when a previous checkpoint exists it is restored,
+// otherwise the full transcript comes back. The undone checkpoint row goes
+// away and the prompt counter is re-estimated from the restored view.
+func (a *sessionAgent) RestoreSummarize(ctx context.Context, sessionID string) error {
+	if a.HasPendingWork(sessionID) {
+		return ErrSessionBusy
+	}
+	currentSession, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+	checkpointID := currentSession.SummaryMessageID
+	if checkpointID == "" {
+		return errors.New("this session has no compaction to undo")
+	}
+
+	if err := a.messages.Delete(ctx, checkpointID); err != nil {
+		return fmt.Errorf("failed to remove the checkpoint: %w", err)
+	}
+	if a.ledger != nil {
+		if _, err := a.ledger.UndoDecay(ctx, sessionID, checkpointID); err != nil {
+			return fmt.Errorf("failed to restore decayed memory: %w", err)
+		}
+	}
+
+	prevID := currentSession.PrevSummaryMessageID
+	prevCutID := currentSession.PrevSummaryCutMessageID
+	if prevID != "" {
+		if _, err := a.messages.Get(ctx, prevID); err != nil {
+			prevID = ""
+			prevCutID = ""
+		}
+	}
+
+	currentSession.SummaryMessageID = prevID
+	currentSession.SummaryCutMessageID = prevCutID
+	currentSession.PrevSummaryMessageID = ""
+	currentSession.PrevSummaryCutMessageID = ""
+
+	msgs, err := a.getSessionMessages(ctx, currentSession)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	currentSession.PromptTokens = compaction.EstimateAll(msgs)
+	currentSession.CompletionTokens = 0
+	currentSession.EstimatedUsage = true
+	if _, err := a.sessions.Save(ctx, currentSession); err != nil {
+		return fmt.Errorf("failed to save session: %w", err)
+	}
+
+	slog.Info("Restored a session from its checkpoint",
+		"session_id", sessionID, "messages", len(msgs))
+	return nil
+}
+
+// splitCheckpoint separates a checkpoint already in the session view from the
+// live transcript ahead of it.
+func splitCheckpoint(msgs []message.Message) (previous string, body []message.Message) {
+	if len(msgs) > 0 && msgs[0].IsSummaryMessage {
+		return compaction.Body(msgs[0].Content().Text), msgs[1:]
+	}
+	return "", msgs
+}
+
+// publishSummarizing tells observers that a session is being compacted, and
+// again when it is not. Without the closing event a compaction that fails or
+// is canceled leaves observers showing "summarizing" indefinitely.
+// progressInterval is how often a streaming compaction is allowed to say
+// something. Checkpoint deltas arrive many times a second, and a status line
+// that fast reads as noise and costs a wire event each.
+const progressInterval = 750 * time.Millisecond
+
+// compactionProgress reports how much of a checkpoint has arrived, in the
+// units the budget was set in. Reasoning models spend a long moment thinking
+// before the first token of the checkpoint exists, so the report names that
+// phase rather than claiming zero progress on a job that is clearly running.
+type compactionProgress struct {
+	replaced int
+	goal     int64
+	written  int64
+	last     time.Time
+}
+
+func (p *compactionProgress) advance(n int) string {
+	p.written += int64(n)
+	if time.Since(p.last) < progressInterval {
+		return ""
+	}
+	p.last = time.Now()
+	if p.written == 0 {
+		return fmt.Sprintf("Compacting %d messages \u00b7 thinking\u2026", p.replaced)
+	}
+	return fmt.Sprintf(
+		"Compacting %d messages \u00b7 checkpoint %s/%s tokens",
+		p.replaced,
+		humanTokens(compaction.TokensForChars(p.written)),
+		humanTokens(p.goal),
+	)
+}
+
+func humanTokens(n int64) string {
+	if n < 1000 {
+		return strconv.FormatInt(n, 10)
+	}
+	// Upper case, to match the context meter: the same number should never
+	// appear two ways on one screen.
+	return strings.Replace(fmt.Sprintf("%.1fK", float64(n)/1000), ".0K", "K", 1)
+}
+
+func (a *sessionAgent) publishSummarizing(sessionID, title string, done bool, progress string) {
+	if a.notify == nil {
+		return
+	}
+	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		SessionID:    sessionID,
+		SessionTitle: title,
+		Type:         notify.TypeSummarizing,
+		Done:         done,
+		Progress:     progress,
+	})
+}
+
+// compactionOptions returns the configured compaction options, or nil when
+// the agent has no config store.
+func (a *sessionAgent) compactionOptions() *config.CompactionOptions {
+	if a.cfg == nil {
+		return nil
+	}
+	cfg := a.cfg.Config()
+	if cfg == nil || cfg.Options == nil {
+		return nil
+	}
+	return cfg.Options.Compaction
+}
+
+// compactionPolicy is the checkpoint policy in force for a model with the
+// given context window. The window is a caller argument rather than agent
+// state because an agent's model can change underneath it.
+func (a *sessionAgent) compactionPolicy(contextWindow int64) compaction.Policy {
+	var configured int64
+	if opts := a.compactionOptions(); opts != nil {
+		configured = int64(opts.TailTokens)
+	}
+	p := compaction.DefaultPolicy
+	p.KeepRecentTokens = compaction.TailBudget(contextWindow, configured)
+	return p
+}
+
+// prunePolicy is the tool-output pruning policy in force for a model with the
+// given context window. Pruning is enabled unless the config says otherwise,
+// matching other tri-state options.
+func (a *sessionAgent) prunePolicy(contextWindow int64) compaction.PrunePolicy {
+	var configuredTail int64
+	if opts := a.compactionOptions(); opts != nil {
+		configuredTail = int64(opts.TailTokens)
+	}
+
+	p := compaction.PrunePolicyForWindow(contextWindow, configuredTail)
+	if opts := a.compactionOptions(); opts != nil && opts.PruneToolResults != nil {
+		p.Disabled = !*opts.PruneToolResults
+	}
+	return p
+}
+
+// compactionTranscriptDir is where displaced transcript regions are kept, or
+// "" when the session has no data directory to keep them in.
+func (a *sessionAgent) compactionTranscriptDir() string {
+	if a.cfg == nil {
+		return ""
+	}
+	cfg := a.cfg.Config()
+	if cfg == nil || cfg.Options == nil {
+		return ""
+	}
+	return compaction.TranscriptDir(cfg.Options.DataDirectory)
 }
 
 // hasUserTextMessage reports whether any user message in msgs contains
@@ -2404,13 +2992,6 @@ func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
 	}
 }
 
-func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message) int64 {
-	if usage.OutputTokens != 0 {
-		return usage.OutputTokens
-	}
-	return approxTokenCount(summaryMessage.Content().Text) + approxTokenCount(summaryMessage.ReasoningContent().String())
-}
-
 func (a *sessionAgent) Cancel(sessionID string) {
 	// Serialize against the dispatch handoff in Run so the accepted ->
 	// (cancel-on-entry | queued | active) transition is atomic against
@@ -2512,6 +3093,13 @@ func (a *sessionAgent) CancelAll() {
 	}
 	if !a.titles.wait(time.Until(deadline)) {
 		slog.Warn("Gave up waiting for session title generation to finish")
+	}
+	if a.pendingPreviews != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		for sessionID := range a.pendingPreviews.Seq2() {
+			a.discardPendingPreview(cleanupCtx, sessionID)
+		}
 	}
 }
 
@@ -2733,9 +3321,36 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo) string {
+func buildSummaryPrompt(todos []session.Todo, instructions, previousCheckpoint, transcriptPath, durableMemory string) string {
 	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
+	sb.WriteString("Write the checkpoint for the conversation above.")
+
+	if durableMemory != "" {
+		sb.WriteString("\n\n<recorded_memory>\n")
+		sb.WriteString(durableMemory)
+		sb.WriteString("\n</recorded_memory>\n\n")
+		sb.WriteString("The entries above were recorded as the session happened and are attached to this checkpoint verbatim, so do not restate them. ")
+		sb.WriteString("Use them as the ground truth for decisions and constraints: narrate the current state of the work, the order it happened in, and what the conversation did that the recorded memory does not already carry. ")
+		sb.WriteString("If the conversation above contradicts a recorded entry, say so explicitly rather than quietly following either. ")
+	}
+
+	if instructions != "" {
+		sb.WriteString("\n\n<instructions>\n")
+		sb.WriteString(instructions)
+		sb.WriteString("\n</instructions>\n\n")
+		sb.WriteString("The user asked that this checkpoint emphasize the above. ")
+		sb.WriteString("It changes what to foreground, not what to preserve: every constraint the user stated and every rejected approach still have to survive. ")
+	}
+
+	if previousCheckpoint != "" {
+		sb.WriteString("\n\n<previous_checkpoint>\n")
+		sb.WriteString(previousCheckpoint)
+		sb.WriteString("\n</previous_checkpoint>\n\n")
+		sb.WriteString("A model earlier in this session wrote the checkpoint above, and the messages it replaced are gone. ")
+		sb.WriteString("Carry forward everything in it that still matters, correct anything the conversation above contradicts, and drop only what has clearly been settled. ")
+		sb.WriteString("Do not compress it into a shorter restatement.")
+	}
+
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {
@@ -2744,6 +3359,13 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
+
+	if transcriptPath != "" {
+		sb.WriteString("\n\nThe full text of the conversation being replaced is saved at:\n\n")
+		sb.WriteString(transcriptPath)
+		sb.WriteString("\n\nDo not copy that transcript into the checkpoint. Record its path so the next model can look something up verbatim, and prefer keeping exact identifiers, error strings, and file paths over paraphrasing them.")
+	}
+
 	return sb.String()
 }
 

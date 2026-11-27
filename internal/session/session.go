@@ -57,11 +57,21 @@ type Session struct {
 	CompletionTokens int64
 	EstimatedUsage   bool
 	SummaryMessageID string
-	Cost             float64
-	Todos            []Todo
-	Channel          string
-	CreatedAt        int64
-	UpdatedAt        int64
+	// SummaryCutMessageID is the first message the checkpoint left untouched.
+	// Everything before it was folded into the summary; everything from it on
+	// still goes to the model verbatim. Empty when a checkpoint replaced the
+	// whole transcript.
+	SummaryCutMessageID string
+	// PrevSummaryMessageID and PrevSummaryCutMessageID hold the checkpoint
+	// that was active before the current one, so undo restores it instead of
+	// falling all the way back to the raw history.
+	PrevSummaryMessageID    string
+	PrevSummaryCutMessageID string
+	Cost                    float64
+	Todos                   []Todo
+	Channel                 string
+	CreatedAt               int64
+	UpdatedAt               int64
 }
 
 type Service interface {
@@ -212,6 +222,18 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: session.SummaryMessageID,
 			Valid:  session.SummaryMessageID != "",
 		},
+		SummaryCutMessageID: sql.NullString{
+			String: session.SummaryCutMessageID,
+			Valid:  session.SummaryCutMessageID != "",
+		},
+		PrevSummaryMessageID: sql.NullString{
+			String: session.PrevSummaryMessageID,
+			Valid:  session.PrevSummaryMessageID != "",
+		},
+		PrevSummaryCutMessageID: sql.NullString{
+			String: session.PrevSummaryCutMessageID,
+			Valid:  session.PrevSummaryCutMessageID != "",
+		},
 		Cost: session.Cost,
 		Todos: sql.NullString{
 			String: todosJSON,
@@ -334,11 +356,16 @@ func (s *service) fromDBItem(item db.Session) Session {
 		PromptTokens:     item.PromptTokens,
 		CompletionTokens: item.CompletionTokens,
 		SummaryMessageID: item.SummaryMessageID.String,
-		Cost:             item.Cost,
-		Todos:            todos,
-		Channel:          item.Channel.String,
-		CreatedAt:        item.CreatedAt,
-		UpdatedAt:        item.UpdatedAt,
+		// Deliberately not the column name: keep the domain field adjacent to
+		// the checkpoint it belongs to.
+		SummaryCutMessageID:     item.SummaryCutMessageID.String,
+		PrevSummaryMessageID:    item.PrevSummaryMessageID.String,
+		PrevSummaryCutMessageID: item.PrevSummaryCutMessageID.String,
+		Cost:                    item.Cost,
+		Todos:                   todos,
+		Channel:                 item.Channel.String,
+		CreatedAt:               item.CreatedAt,
+		UpdatedAt:               item.UpdatedAt,
 	}
 }
 

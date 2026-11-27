@@ -218,6 +218,14 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 				case ActionRunMCPPrompt:
 					action.Args = args
 					return action
+				case ActionSummarize:
+					action.Args = args
+					action.Instructions = args[CompactInstructionsArg]
+					return action
+				case ActionPreviewSummarize:
+					action.Args = args
+					action.Instructions = args[CompactInstructionsArg]
+					return action
 				}
 			}
 			a.focusInput(a.focused + 1)
@@ -286,6 +294,10 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 		if arg.Required {
 			labelText += markRequiredStyle.String()
+		} else {
+			// Required arguments are marked, so silence reads as "you must
+			// fill this in" on every field that happens to be optional.
+			labelText += " " + s.Dialog.Arguments.InputLabelBlurred.Render("optional")
 		}
 		label := labelStyle.Render(labelText)
 

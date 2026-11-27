@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/terminal"
 	uv "github.com/charmbracelet/ultraviolet"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const (
@@ -131,7 +132,7 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 				// from the agent, so it needs no permission.
 				return tool.response(tool.run(ctx, params.Action, params))
 			case terminalActionWrite, terminalActionPaste:
-				return tool.input(ctx, params)
+				return tool.input(ctx, params, blocked)
 			case terminalActionTake:
 				return tool.take(ctx, params)
 			default:
@@ -216,7 +217,17 @@ func (t terminalTool) start(ctx context.Context, params TerminalParams, blocked 
 // input asks the user before the agent types or pastes into a running
 // session: whatever runs there (a shell, a REPL) executes the input with
 // no further checks.
-func (t terminalTool) input(ctx context.Context, params TerminalParams) (fantasy.ToolResponse, error) {
+func (t terminalTool) input(ctx context.Context, params TerminalParams, blocked []string) (fantasy.ToolResponse, error) {
+	// A shell running in the session executes typed lines with no
+	// deny-list of its own, so check them here, before any prompt: yolo
+	// mode would approve them without asking.
+	if err := checkTypedLines(params.Text, blockFuncs(blocked)); err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"%v. This command is blocked for safety; nothing was sent",
+			err,
+		)), nil
+	}
+
 	info, err := t.run(ctx, terminalOpInspect, params)
 	if err != nil || info.IsError {
 		return t.response(info, err)
@@ -279,6 +290,24 @@ func (t terminalTool) input(ctx context.Context, params TerminalParams) (fantasy
 	// Act on the session that was approved, not whichever is newest now.
 	params.SessionID = session.SessionID
 	return t.response(t.run(ctx, params.Action, params))
+}
+
+// checkTypedLines runs the deny-list over each line of text that parses
+// as a shell command. Lines that do not parse are input for something
+// other than a shell (a REPL, an editor) and pass.
+//
+// ponytail: per write; a command split across several writes is not
+// reassembled. Track the shell's pending line if that becomes a problem.
+func checkTypedLines(text string, funcs []shell.BlockFunc) error {
+	for line := range strings.FieldsFuncSeq(text, func(r rune) bool { return r == '\r' || r == '\n' }) {
+		if _, err := syntax.NewParser().Parse(strings.NewReader(line), ""); err != nil {
+			continue
+		}
+		if err := shell.CheckBlocked(line, funcs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // take asks for the keyboard of a terminal the user holds: one they opened

@@ -750,6 +750,35 @@ func TestTerminalStartGrantCoversOnlyThatCommand(t *testing.T) {
 	require.Equal(t, "git commit", permissions.requests[0].GrantKey)
 }
 
+func TestTerminalInputChecksBlockedCommands(t *testing.T) {
+	needsPOSIXShell(t)
+
+	resetTerminalManager(t)
+	workingDir := t.TempDir()
+
+	session, err := shell.GetInteractiveSessionManager().Start(shell.InteractiveSessionOptions{
+		Command:     "cat",
+		WorkingDir:  workingDir,
+		Owner:       "test-session",
+		AgentDriven: true,
+	})
+	require.NoError(t, err)
+
+	permissions := &denyingPermissionService{}
+	tool := NewTerminalTool(permissions, newFakeTerminalService(), workingDir, workingDir, nil)
+
+	for _, action := range []string{"write", "paste"} {
+		resp := runTerminalTool(t, tool, TerminalParams{Action: action, SessionID: session.ID(), Text: "ls\rsudo shutdown now\r"})
+		require.True(t, resp.IsError, action)
+		require.Contains(t, resp.Content, "blocked", action)
+	}
+	require.Empty(t, permissions.requests, "a blocked command never reaches a prompt, so yolo mode cannot approve it")
+
+	// Input that is not a shell command still goes to the prompt.
+	runTerminalTool(t, tool, TerminalParams{Action: "write", SessionID: session.ID(), Text: "print('sudo')\r"})
+	require.Len(t, permissions.requests, 1)
+}
+
 func TestTerminalRefusesSessionsItDoesNotOwn(t *testing.T) {
 	needsPOSIXShell(t)
 

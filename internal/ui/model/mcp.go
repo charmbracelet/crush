@@ -256,7 +256,7 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		}, width))
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedMcps, maxItems, t.Resource.AdditionalText)...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedMcps, maxItems, width, t.Resource.AdditionalText)...)
 }
 
 // openMCPTogglesDialog opens the repository-scoped MCP toggles dialog.

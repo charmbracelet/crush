@@ -33,3 +33,26 @@ func TestFormatTokensAndCostOmitsEstimatedPrefix(t *testing.T) {
 	require.Contains(t, actual, "12%")
 	require.NotContains(t, actual, "~12%")
 }
+
+func TestStatusFitsNarrowWidth(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+
+	for _, tc := range []struct {
+		name string
+		opts StatusOpts
+		want string
+	}{
+		{"long title", StatusOpts{Icon: "●", Title: "thermo-nuclear-code-review"}, "● thermo-nucl…"},
+		{"title squeezes description", StatusOpts{Icon: "●", Title: "cloudflare-mcp", Description: "error"}, "● cloudflare-…"},
+		{"fits", StatusOpts{Icon: "●", Title: "jj", Description: "2 tools"}, "● jj 2 tools"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Status(&sty, tc.opts, 14)
+			require.Equal(t, tc.want, ansi.Strip(got))
+			require.LessOrEqual(t, ansi.StringWidth(got), 14)
+		})
+	}
+}

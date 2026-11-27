@@ -161,7 +161,7 @@ func skillsList(t *styles.Styles, items []skillStatusItem, width, maxItems int) 
 			Description: item.description,
 		}, width))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedItems, maxItems, t.Resource.AdditionalText)...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedItems, maxItems, width, t.Resource.AdditionalText)...)
 }
 
 // skillsTogglesList builds the toggle-skills dialog items from the

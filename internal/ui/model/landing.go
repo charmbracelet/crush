@@ -1,12 +1,9 @@
 package model
 
 import (
-	"image"
-
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
-	"github.com/charmbracelet/ultraviolet/layout"
 )
 
 // selectedLargeModel returns the currently selected large language model as
@@ -36,12 +33,6 @@ func (m *UI) landingView() string {
 	parts = append(parts, "", m.modelInfo(width))
 	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	var remainingHeightArea image.Rectangle
-	layout.Vertical(
-		layout.Len(lipgloss.Height(infoSection)+1),
-		layout.Fill(1),
-	).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
-
 	// Channels are experimental and opt-in, so their column only appears
 	// once a server is opted in; otherwise the other columns keep their
 	// full width.
@@ -51,7 +42,11 @@ func (m *UI) landingView() string {
 		columns = 4
 	}
 	mcpLspSectionWidth := min(30, (width-(columns-1))/columns)
-	sectionHeight := max(1, remainingHeightArea.Dy())
+	// Rows left for list items once the page frame (top padding, info
+	// section, spacer) and each column's heading and blank line are spent.
+	// Overshooting this clips the "and N more" hint off the bottom.
+	pageHeight := m.layout.main.Dy() - 1
+	sectionHeight := max(1, pageHeight-1-lipgloss.Height(infoSection)-1-2)
 
 	lspSection := m.lspInfo(mcpLspSectionWidth, sectionHeight, false)
 	mcpSection := m.mcpInfo(mcpLspSectionWidth, sectionHeight, false)
@@ -65,7 +60,7 @@ func (m *UI) landingView() string {
 
 	return lipgloss.NewStyle().
 		Width(width).
-		Height(m.layout.main.Dy() - 1).
+		Height(pageHeight).
 		PaddingTop(1).
 		Render(
 			lipgloss.JoinVertical(lipgloss.Left, infoSection, "", content),

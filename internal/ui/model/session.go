@@ -261,7 +261,7 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 		renderedFiles = append(renderedFiles, line)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedFiles, maxItems, t.Files.TruncationHint)...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedFiles, maxItems, width, t.Files.TruncationHint)...)
 }
 
 // startLSPs starts LSP servers for the given file paths.

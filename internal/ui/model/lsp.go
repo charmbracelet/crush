@@ -193,5 +193,5 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		}, width))
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedLsps, maxItems, t.Resource.AdditionalText)...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedLsps, maxItems, width, t.Resource.AdditionalText)...)
 }

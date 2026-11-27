@@ -121,7 +121,7 @@ func (m *UI) subAgentsInfo(statuses []chat.DispatchStatus, width, maxItems int, 
 	for _, status := range statuses {
 		rows = append(rows, m.subAgentRow(status, width))
 	}
-	rows = truncateRows(rows, maxItems, t.Resource.AdditionalText)
+	rows = truncateRows(rows, maxItems, width, t.Resource.AdditionalText)
 
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf(
 		"%s\n\n%s", title, lipgloss.JoinVertical(lipgloss.Left, rows...),

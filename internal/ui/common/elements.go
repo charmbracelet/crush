@@ -199,6 +199,13 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	titleColor := cmp.Or(opts.TitleColor, t.Resource.DefaultTitleFg)
 	descriptionColor := cmp.Or(opts.DescriptionColor, t.Resource.DefaultDescFg)
 
+	// The title gets first claim on the row; truncating it keeps long names
+	// from wrapping inside narrow columns.
+	iconWidth := 0
+	if icon != "" {
+		iconWidth = lipgloss.Width(icon) + 1
+	}
+	title = ansi.Truncate(title, max(0, width-iconWidth), "…")
 	title = t.Resource.RowTitleBase.Foreground(titleColor).Render(title)
 
 	if description != "" {
@@ -206,8 +213,13 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 		if extraContentWidth > 0 {
 			extraContentWidth += 1
 		}
-		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContentWidth, "…")
-		description = t.Resource.RowDescBase.Foreground(descriptionColor).Render(description)
+		descWidth := width - iconWidth - lipgloss.Width(title) - 1 - extraContentWidth
+		if descWidth < 2 {
+			description = ""
+		} else {
+			description = ansi.Truncate(description, descWidth, "…")
+			description = t.Resource.RowDescBase.Foreground(descriptionColor).Render(description)
+		}
 	}
 
 	var content []string

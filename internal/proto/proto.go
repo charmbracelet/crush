@@ -35,6 +35,10 @@ type Workspace struct {
 	Version        string                  `json:"version,omitempty"`
 	ClientID       string                  `json:"client_id,omitempty"`
 	Config         *config.Config          `json:"config,omitempty"`
+	// ShouldOnboard reports whether the client should show the
+	// interactive onboarding flow. It stays true for a fresh install even
+	// when environment credentials already make a provider usable.
+	ShouldOnboard bool `json:"should_onboard,omitempty"`
 	// Env carries the client's environment on workspace creation requests
 	// only. Server responses omit it so secrets in the environment are not
 	// exposed to other clients.

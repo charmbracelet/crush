@@ -246,6 +246,7 @@ type Workspace interface {
 
 	// Config (read-only data)
 	Config() *config.Config
+	ShouldOnboard() bool
 	WorkingDir() string
 	GitBranch(ctx context.Context) (string, error)
 	Resolver() config.VariableResolver

@@ -112,6 +112,59 @@ func TestConfigStore_HasConfigField_WorkspaceScopeGuard(t *testing.T) {
 	require.False(t, has)
 }
 
+func TestConfigStore_ShouldOnboard(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fresh install with environment credentials", func(t *testing.T) {
+		t.Parallel()
+
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("openai", ProviderConfig{APIKey: "env-key"})
+		store := &ConfigStore{
+			config: &Config{Providers: providers},
+		}
+
+		require.True(t, store.ShouldOnboard())
+	})
+
+	t.Run("configured from a global user config", func(t *testing.T) {
+		t.Parallel()
+
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("openai", ProviderConfig{APIKey: "key"})
+		store := &ConfigStore{
+			config:      &Config{Providers: providers},
+			loadedPaths: []string{GlobalConfigData()},
+		}
+
+		require.False(t, store.ShouldOnboard())
+	})
+
+	t.Run("project config alone does not mark the install onboarded", func(t *testing.T) {
+		t.Parallel()
+
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("openai", ProviderConfig{APIKey: "env-key"})
+		store := &ConfigStore{
+			config:      &Config{Providers: providers},
+			loadedPaths: []string{"/project/crush.json"},
+		}
+
+		require.True(t, store.ShouldOnboard())
+	})
+
+	t.Run("config file without usable providers", func(t *testing.T) {
+		t.Parallel()
+
+		store := &ConfigStore{
+			config:      &Config{Providers: csync.NewMap[string, ProviderConfig]()},
+			loadedPaths: []string{GlobalConfigData()},
+		}
+
+		require.True(t, store.ShouldOnboard())
+	})
+}
+
 func TestConfigStore_RuntimeOverrides_Independent(t *testing.T) {
 	t.Parallel()
 

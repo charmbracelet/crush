@@ -198,6 +198,32 @@ func (s *ConfigStore) KnownProviders() []catwalk.Provider {
 	return s.knownProviders
 }
 
+// ShouldOnboard reports whether the interactive onboarding flow should be
+// shown. It stays true for a fresh install even when environment
+// credentials already make a default provider usable. Project and
+// workspace config files do not count: onboarding state lives in the
+// system, global user, and global data configs, so a repository-local
+// config (LSPs, MCPs, etc.) alone must not suppress onboarding.
+func (s *ConfigStore) ShouldOnboard() bool {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
+	if !s.config.IsConfigured() {
+		return true
+	}
+	userScoped := []string{
+		systemConfigPath,
+		GlobalConfig(),
+		shellConfigSibling(GlobalConfig()),
+		GlobalConfigData(),
+	}
+	for _, loaded := range s.loadedPaths {
+		if slices.Contains(userScoped, filepath.Clean(loaded)) {
+			return false
+		}
+	}
+	return true
+}
+
 // RefetchHyperProvider re-fetches the Hyper provider catalog from the
 // remote API and updates the in-memory known providers list and config.
 // This is called after OAuth authentication completes so the latest

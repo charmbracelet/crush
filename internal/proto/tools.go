@@ -137,6 +137,13 @@ type LSParams struct {
 	Ignore []string `json:"ignore"`
 }
 
+// TerminalToolName is the name of the interactive terminal tool.
+const TerminalToolName = tools.TerminalToolName
+
+// TerminalPermissionsParams represents the permission parameters for the
+// terminal tool.
+type TerminalPermissionsParams = tools.TerminalPermissionsParams
+
 // LSPermissionsParams represents the permission parameters for the ls tool.
 type LSPermissionsParams = tools.LSPermissionsParams
 

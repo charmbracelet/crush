@@ -42,6 +42,21 @@ func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 			},
 		},
 		{
+			name:     "terminal",
+			toolName: tools.TerminalToolName,
+			params: tools.TerminalPermissionsParams{
+				Description: "Hand your terminal to the agent",
+				Command:     "htop",
+				WorkingDir:  "/tmp",
+			},
+			assert: func(t *testing.T, got any) {
+				v, ok := got.(tools.TerminalPermissionsParams)
+				require.True(t, ok, "params must decode as tools.TerminalPermissionsParams, got %T", got)
+				require.Equal(t, "htop", v.Command)
+				require.Equal(t, "/tmp", v.WorkingDir)
+			},
+		},
+		{
 			name:     "edit",
 			toolName: tools.EditToolName,
 			params: tools.EditPermissionsParams{

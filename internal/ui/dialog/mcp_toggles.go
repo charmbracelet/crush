@@ -83,6 +83,7 @@ type MCPToggles struct {
 	scope   MCPToggleScope
 	help    help.Model
 	keyMap  struct {
+		UpDown key.Binding
 		Up     key.Binding
 		Down   key.Binding
 		Toggle key.Binding
@@ -105,6 +106,10 @@ func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
 
+	m.keyMap.UpDown = key.NewBinding(
+		key.WithKeys("up", "down", "k", "j"),
+		key.WithHelp("↑/↓", "choose"),
+	)
 	m.keyMap.Up = key.NewBinding(
 		key.WithKeys("up", "k"),
 		key.WithHelp("↑/k", "up"),
@@ -388,5 +393,5 @@ func (m *MCPToggles) ShortHelp() []key.Binding {
 		// Nothing to move between or toggle: only closing does anything.
 		return []key.Binding{m.keyMap.Close}
 	}
-	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
+	return []key.Binding{m.keyMap.UpDown, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
 }

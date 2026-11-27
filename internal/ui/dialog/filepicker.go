@@ -72,23 +72,23 @@ func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
 	)
 	f.km.Down = key.NewBinding(
 		key.WithKeys("down", "j"),
-		key.WithHelp("down/j", "move down"),
+		key.WithHelp("↓/j", "move down"),
 	)
 	f.km.Up = key.NewBinding(
 		key.WithKeys("up", "k"),
-		key.WithHelp("up/k", "move up"),
+		key.WithHelp("↑/k", "move up"),
 	)
 	f.km.Forward = key.NewBinding(
 		key.WithKeys("right", "l"),
-		key.WithHelp("right/l", "move forward"),
+		key.WithHelp("→/l", "move forward"),
 	)
 	f.km.Backward = key.NewBinding(
 		key.WithKeys("left", "h"),
-		key.WithHelp("left/h", "move backward"),
+		key.WithHelp("←/h", "move backward"),
 	)
 	f.km.Navigate = key.NewBinding(
 		key.WithKeys("right", "l", "left", "h", "up", "k", "down", "j"),
-		key.WithHelp("↑↓←→", "navigate"),
+		key.WithHelp("↑/↓/←/→", "navigate"),
 	)
 	f.km.Close = CloseKey
 

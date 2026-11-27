@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
+
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -21,4 +23,23 @@ func TestSessionsHelpKeepsEsc(t *testing.T) {
 		require.Contains(t, text, "enter open")
 		require.Contains(t, text, "esc exit")
 	}
+}
+
+// TestArrowHelpNotation verifies pickers write arrow keys as "↑/↓" (and
+// "←/→") rather than mixing "↑↓", "↑/k up" and similar forms.
+func TestArrowHelpNotation(t *testing.T) {
+	t.Parallel()
+	com := newPickerTestCommon()
+	fp, _ := NewFilePicker(com)
+	keys := func(km interface{ ShortHelp() []key.Binding }) []string {
+		var out []string
+		for _, b := range km.ShortHelp() {
+			out = append(out, b.Help().Key)
+		}
+		return out
+	}
+	items := []MCPToggleItem{{Name: "docker", Status: "connected"}}
+	require.Contains(t, keys(NewMCPToggles(com, items)), "↑/↓")
+	require.Contains(t, keys(NewSkillsToggles(com, []SkillToggleItem{{Name: "s"}})), "↑/↓")
+	require.Contains(t, keys(fp), "↑/↓/←/→")
 }

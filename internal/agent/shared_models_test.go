@@ -51,14 +51,18 @@ func TestSubAgentRetriesWithRenewedCredential(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	env := testEnv(t)
+	keyFile := filepath.Join(t.TempDir(), "provider-key")
+	require.NoError(t, os.WriteFile(keyFile, []byte("first"), 0o600))
+	t.Setenv("CRUSH_SHARED_MODELS_TEST_KEY_FILE", keyFile)
+	const keyTemplate = `$(cat "$CRUSH_SHARED_MODELS_TEST_KEY_FILE")`
 	crushJSON := fmt.Sprintf(`{
   "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
   "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai-compat",
-    "base_url": %q, "api_key": "first",
+    "base_url": %q, "api_key": %q,
     "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128}]}},
   "models": {"large": {"provider": "mock", "model": "mock-model"},
              "small": {"provider": "mock", "model": "mock-model"}}
-}`, srv.URL)
+}`, srv.URL, keyTemplate)
 	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "crush.json"), []byte(crushJSON), 0o644))
 	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 	require.NoError(t, err)
@@ -78,13 +82,8 @@ func TestSubAgentRetriesWithRenewedCredential(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, coord.readyWg.Wait())
 
-	// The credential is renewed from a key template, the simplest refresh
-	// that needs no token endpoint.
-	t.Setenv("CRUSH_SHARED_MODELS_TEST_KEY", "second")
-	pc, ok := cfg.Config().Providers.Get("mock")
-	require.True(t, ok)
-	pc.APIKeyTemplate = "$CRUSH_SHARED_MODELS_TEST_KEY"
-	cfg.Config().Providers.Set("mock", pc)
+	// Rotate the command's output after the models have read the first key.
+	require.NoError(t, os.WriteFile(keyFile, []byte("second"), 0o600))
 
 	parent, err := env.sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
@@ -102,7 +101,7 @@ func TestSubAgentRetriesWithRenewedCredential(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	require.Equal(t, "Bearer second", seen[len(seen)-1])
+	require.Equal(t, []string{"Bearer first", "Bearer second"}, seen)
 }
 
 func TestTurnKeepsItsModelAcrossARebuild(t *testing.T) {

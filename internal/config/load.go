@@ -682,6 +682,8 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			providerConfig.ExtraHeaders[k] = resolved
 		}
 
+		// Keep the unresolved API key so a 401 can refresh the credential.
+		providerConfig.APIKeyTemplate = providerConfig.APIKey
 		c.Providers.Set(id, providerConfig)
 	}
 

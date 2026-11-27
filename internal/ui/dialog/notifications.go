@@ -5,6 +5,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/notification"
@@ -173,15 +174,20 @@ func (n *Notifications) Cursor() *tea.Cursor {
 func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := n.com.Styles
 	width := max(0, min(notificationsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(notificationsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	// Reserve room for the tallest description so moving between
+	// options doesn't resize the dialog.
+	descHeight := n.descriptionHeight(innerWidth)
+	height := max(0, min(notificationsDialogMaxHeight+descHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+		t.Dialog.View.GetVerticalFrameSize() + descHeight
 
 	n.input.SetWidth(dialogInputTextWidth(t, n.input, innerWidth))
-	n.list.SetSize(innerWidth, max(0, height-heightOffset))
+	// Size the list to its options so no blank rows pile up between
+	// the last one and the help line.
+	n.list.SetSize(innerWidth, min(max(0, height-heightOffset), len(n.list.Items())))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Notification Style"
@@ -197,6 +203,9 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	listView := t.Dialog.List.Height(n.list.Height()).Render(n.list.Render())
 	rc.AddPart(listView)
+	if descHeight > 0 {
+		rc.AddPart(n.descriptionStyle(innerWidth).Height(descHeight).MarginBottom(1).Render(n.selectedDescription()))
+	}
 	rc.Help = renderDialogHelp(t, &n.help, n, innerWidth)
 
 	view := rc.Render()
@@ -204,6 +213,32 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	cur := n.Cursor()
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
+}
+
+// descriptionStyle is the subtle, wrapped style of the highlighted
+// option's description, inset to line up with the list items.
+func (n *Notifications) descriptionStyle(width int) lipgloss.Style {
+	return n.com.Styles.Dialog.ListItem.InfoBlurred.Padding(0, 1).Width(max(0, width))
+}
+
+// descriptionHeight returns the rows of the tallest option
+// description wrapped at width.
+func (n *Notifications) descriptionHeight(width int) int {
+	st := n.descriptionStyle(width)
+	h := 0
+	for _, style := range AllNotificationStyles {
+		h = max(h, lipgloss.Height(st.Render(style.Description)))
+	}
+	return h
+}
+
+// selectedDescription returns the description of the highlighted
+// option, or "" when nothing matches the filter.
+func (n *Notifications) selectedDescription() string {
+	if item, ok := n.list.SelectedItem().(*NotificationItem); ok {
+		return item.style.Description
+	}
+	return ""
 }
 
 // ShortHelp implements [help.KeyMap].

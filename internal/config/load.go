@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -837,29 +836,13 @@ var (
 	powernapDefaults     *powernapConfig.Manager
 )
 
-// lspCatalog is crush's default LSP server catalog. It is kept here rather
-// than taken from powernap's own defaults so crush keeps auto-configuring
-// the full set of servers it always has.
-//
-//go:embed lsps.json
-var lspCatalog []byte
-
-// LoadLSPDefaults fills m with crush's default LSP server catalog.
-func LoadLSPDefaults(m *powernapConfig.Manager) {
-	var servers map[string]any
-	if err := json.Unmarshal(lspCatalog, &servers); err != nil {
-		slog.Error("Failed to parse embedded LSP catalog", "error", err)
-		return
-	}
-	if err := m.LoadFromMap(map[string]any{"servers": servers}); err != nil {
-		slog.Error("Failed to load embedded LSP catalog", "error", err)
-	}
-}
-
 func lspDefaultsManager() *powernapConfig.Manager {
 	powernapDefaultsOnce.Do(func() {
 		m := powernapConfig.NewManager()
-		LoadLSPDefaults(m)
+		// LoadDefaults only fails on malformed embedded defaults, which
+		// would be a build-time bug; treat the manager as usable either
+		// way so a transient error never wedges config loading.
+		_ = m.LoadDefaults()
 		powernapDefaults = m
 	})
 	return powernapDefaults

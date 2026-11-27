@@ -306,7 +306,7 @@ func (m *MCPAuth) innerContent() string {
 
 	case MCPAuthStateAuthenticating:
 		waiting := successStyle.Render(m.spinner.View()) +
-			statusStyle.Render(" Waiting for authorization...")
+			statusStyle.Render("Waiting for authorization...")
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			"",

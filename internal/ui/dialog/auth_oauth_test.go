@@ -65,3 +65,23 @@ func TestOAuthPasteFieldFitsOneLine(t *testing.T) {
 	require.Contains(t, out, "> Paste the code from the browser")
 	require.NotContains(t, out, "browser..  ")
 }
+
+// TestOAuthBusyStatesShowTitleAndHelp verifies the initializing and
+// saving screens keep the dialog title, and that initializing tells the
+// user esc cancels.
+func TestOAuthBusyStatesShowTitleAndHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range []int{100, 40} {
+		m := newTestOAuth(false)
+		out := strings.Join(drawFits(t, m, w, 30), "\n")
+		require.Contains(t, out, "Grok")
+		require.Contains(t, out, "Initializing...")
+		require.Contains(t, out, "esc cancel")
+
+		m.State = OAuthStateSaving
+		out = strings.Join(drawFits(t, m, w, 30), "\n")
+		require.Contains(t, out, "Grok")
+		require.Contains(t, out, "Fetching models...")
+	}
+}

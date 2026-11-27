@@ -355,19 +355,13 @@ func (m *OAuth) cursor() *tea.Cursor {
 func (m *OAuth) dialogContent() string {
 	t := m.com.Styles
 
-	switch m.State {
-	case OAuthStateInitializing, OAuthStateSaving:
-		return m.innerDialogContent()
-
-	default:
-		innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-		elements := []string{
-			m.headerContent(),
-			m.innerDialogContent(),
-			renderDialogHelp(t, &m.help, m, innerWidth),
-		}
-		return strings.Join(elements, "\n")
+	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	elements := []string{
+		m.headerContent(),
+		m.innerDialogContent(),
+		renderDialogHelp(t, &m.help, m, innerWidth),
 	}
+	return strings.Join(elements, "\n")
 }
 
 func (m *OAuth) headerContent() string {
@@ -403,13 +397,14 @@ func (m *OAuth) innerDialogContent() string {
 
 	switch m.State {
 	case OAuthStateInitializing:
-		return lipgloss.NewStyle().
+		status := statusTextStyle.
 			Width(innerWidth).
-			Align(lipgloss.Center).
+			Padding(0, 1).
 			Render(
 				successStyle.Render(m.spinner.View()) +
 					statusTextStyle.Render("Initializing..."),
 			)
+		return lipgloss.JoinVertical(lipgloss.Left, "", status, "")
 
 	case OAuthStateDisplay:
 		// Render each text segment with its own style. Wrapping the
@@ -485,13 +480,16 @@ func (m *OAuth) innerDialogContent() string {
 			Render("Authentication successful!")
 
 	case OAuthStateSaving:
-		return lipgloss.NewStyle().
+		status := statusTextStyle.
 			Width(innerWidth).
-			Align(lipgloss.Center).
+			Padding(0, 1).
 			Render(
 				successStyle.Render(m.spinner.View()) +
-					statusTextStyle.Render(" Fetching models..."),
+					statusTextStyle.Render("Fetching models..."),
 			)
+		// No keys work while saving, so the empty help row below
+		// stands in for the trailing blank line.
+		return lipgloss.JoinVertical(lipgloss.Left, "", status)
 
 	case OAuthStateError:
 		return errorStyle.
@@ -526,6 +524,10 @@ func (m *OAuth) ShortHelp() []key.Binding {
 	case OAuthStateSaving:
 		// No actionable keys while the save completes.
 		return nil
+
+	case OAuthStateInitializing:
+		// Only esc does anything yet: it abandons the sign-in.
+		return []key.Binding{cancelKey}
 
 	default:
 		if m.codeEntryActive() && m.codeInput.Focused() {

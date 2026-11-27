@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
@@ -281,29 +280,20 @@ func (d *Channels) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-
-	d.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1))
-
-	listHeight := height - heightOffset
-	listWidth := max(0, innerWidth-3)
-	d.list.SetSize(listWidth, listHeight)
-	d.help.SetWidth(innerWidth)
+	d.input.SetWidth(dialogInputTextWidth(t, d.input, innerWidth))
+	listHeight, listTotalHeight, _ := sizeDialogList(t, d.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Channels"
 	inputView := t.Dialog.InputPrompt.Render(d.input.View())
 	rc.AddPart(inputView)
-	listView := t.Dialog.List.Height(d.list.Height()).Render(d.list.Render())
-	scrollbar := common.Scrollbar(t, listHeight, d.list.TotalHeight(), listHeight, d.list.Offset())
-	if scrollbar != "" {
-		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
+	// With no room for list rows, skip the body: an empty list still
+	// renders a line plus its margin, pushing the dialog past the area.
+	if listHeight > 0 {
+		listView := t.Dialog.List.Height(d.list.Height()).Render(d.list.Render())
+		rc.AddPart(joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, d.list.Offset()))
 	}
-	rc.AddPart(listView)
-	rc.Help = d.help.View(d)
+	rc.Help = renderDialogHelp(t, &d.help, d, innerWidth)
 
 	view := rc.Render()
 	cur := d.Cursor()

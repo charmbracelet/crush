@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -226,4 +227,22 @@ func TestChannelItem_FilterMatchesName(t *testing.T) {
 	s := styles.CharmtonePantera()
 	item := NewChannelItem(&s, mcp.ClientInfo{Name: "signal-channel"})
 	require.Equal(t, "signal-channel", item.Filter())
+}
+
+// TestChannels_FitsSmallTerminal verifies that the dialog fits a small
+// terminal: the input subtracts its "> " prompt so the placeholder no
+// longer wraps, the help line is padded and truncated, and a list with no
+// room for rows is skipped instead of adding a line plus its margin.
+func TestChannels_FitsSmallTerminal(t *testing.T) {
+	t.Parallel()
+
+	states := map[string]mcp.ClientInfo{
+		"alpha": {Name: "alpha", Channel: true, ChannelOptIn: true, State: mcp.StateConnected},
+	}
+	for _, sz := range [][2]int{{20, 8}, {40, 7}, {40, 10}} {
+		lines := drawFits(t, newTestChannels(t, states), sz[0], sz[1])
+		text := strings.Join(lines, "\n")
+		require.NotContains(t, text, "│filter", "placeholder wrapped at %dx%d", sz[0], sz[1])
+		require.NotContains(t, text, "│↑", "help flush against the border at %dx%d", sz[0], sz[1])
+	}
 }

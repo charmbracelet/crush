@@ -16,7 +16,7 @@ import (
 // Usage: option <key> <value>
 //
 // Sets a single option field. The key is a kebab-case name; for list fields
-// (context-path, disable-skill, etc.) each call appends to the list.
+// (context-path, disable-skill, etc.) each argument appends to the list.
 //
 // "option reset <list-key>" wipes a list back to empty, dropping values set
 // earlier in the script or via source. Values added after the reset are kept.
@@ -144,11 +144,16 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 
 	switch spec.kind {
 	case optList:
-		if val == "" {
+		if len(args) < 3 {
 			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
 		}
-		o[spec.jsonKey] = appendArr(o, spec.jsonKey, val)
-		slog.Info("Option set in shell config", "key", key, "value", val)
+		for _, value := range args[2:] {
+			if value == "" {
+				return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
+			}
+			o[spec.jsonKey] = appendArr(o, spec.jsonKey, value)
+			slog.Info("Option set in shell config", "key", key, "value", value)
+		}
 		return nil
 
 	case optBool:
@@ -245,7 +250,7 @@ var optionSpecs = map[string]optionSpec{
 	"max-background-jobs":    {jsonKey: "max_background_jobs", kind: optInt},
 	"pinentry-cache-timeout": {jsonKey: "pinentry_cache_timeout", kind: optInt},
 
-	// List fields. Keys are singular because each call appends one value.
+	// List fields. Keys are singular because each argument appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},
 	"global-context-path": {jsonKey: "global_context_paths", kind: optList},
 	"skill-path":          {jsonKey: "skills_paths", kind: optList},

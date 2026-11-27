@@ -778,8 +778,8 @@ func tigraBlancaOpts() quickStyleOpts {
 
 		separator: tone.Steep,
 
-		destructive:       tone.Sriracha,
-		destructiveSubtle: tone.Coral,
+		destructive:       tone.Chili,
+		destructiveSubtle: tone.Cherry,
 		error:             tone.Pom,
 		warningSubtle:     tone.Yam,
 		warning:           tone.Zest,
@@ -843,6 +843,9 @@ func tigraBlancaOverrides(s Styles) Styles {
 	s.Status.ModeBannerPlan = s.Status.ModeBannerPlan.
 		Foreground(tone.Salt)
 	s.Editor.PromptPlanIconFocused = s.Editor.PromptPlanIconFocused.
+		Foreground(tone.Salt)
+
+	s.Status.ModeBannerSysadmin = s.Status.ModeBannerSysadmin.
 		Foreground(tone.Salt)
 
 	return s

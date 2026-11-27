@@ -69,3 +69,35 @@ func TestSSHHostKeyConfirm(t *testing.T) {
 	require.Contains(t, out, "esc cancel")
 	require.NotContains(t, out, "Press enter")
 }
+
+// TestSSHHostKeyKeepsFingerprintWhenShort verifies a short terminal cuts
+// the message before the fingerprint: trusting a host key without seeing
+// it defeats the prompt.
+func TestSSHHostKeyKeepsFingerprintWhenShort(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	req := sshaskpass.ParsePrompt("The authenticity of host 'beef (100.64.0.3)' can't be established.\n" +
+		"ED25519 key fingerprint is: SHA256:Hjs/OG4xvJbcRBLKRPAq7WduRSISxINIG/0s4ZlaHI4\n" +
+		"Are you sure you want to continue connecting (yes/no/[fingerprint])? ")
+	for h := 7; h <= 16; h++ {
+		m := NewSSH(&common.Common{Styles: &s}, req)
+		out := strings.Join(drawFits(t, m, 60, h), "\n")
+		require.Contains(t, out, "SHA256:Hjs/OG4xvJbcRBLKRPAq7WduRSISxINIG/0s4ZlaHI4", "fingerprint cut at height %d", h)
+	}
+}
+
+// TestSSHHostKeyKeepsGapBeforeFingerprint verifies the blank row between
+// the message and the fingerprint is the last spacer to go when short.
+func TestSSHHostKeyKeepsGapBeforeFingerprint(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	req := sshaskpass.ParsePrompt("The authenticity of host 'beef (100.64.0.3)' can't be established.\n" +
+		"ED25519 key fingerprint is: SHA256:Hjs/OG4xvJbcRBLKRPAq7WduRSISxINIG/0s4ZlaHI4\n" +
+		"Are you sure you want to continue connecting (yes/no/[fingerprint])? ")
+	lines := drawFits(t, NewSSH(&common.Common{Styles: &s}, req), 60, 9)
+	row := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Fingerprint:") })
+	require.Positive(t, row)
+	require.Equal(t, "││", strings.ReplaceAll(strings.TrimSpace(lines[row-1]), " ", ""), "a blank row sits above the fingerprint")
+}

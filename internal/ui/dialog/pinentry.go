@@ -1,13 +1,10 @@
 package dialog
 
 import (
-	"strings"
-
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -116,36 +113,20 @@ func (m *Pinentry) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
 
 	// What is being unlocked comes before the input, the way a terminal
-	// pinentry lays out its description. The header, input and help always
-	// get their rows; the description is trimmed to whatever is left.
-	header := m.headerView()
-	input := t.Dialog.InputPrompt.Render(m.input.View())
-	help := renderDialogHelp(t, &m.help, m, contentWidth)
-	budget := area.Dy() - t.Dialog.View.GetVerticalFrameSize() -
-		lipgloss.Height(header) - 1 - lipgloss.Height(input) - lipgloss.Height(help)
-	description := clampDialogLines(m.descriptionView(contentWidth), budget)
-	// The blank row under the header goes too when even that doesn't fit.
-	gap := 1
-	if budget < 0 {
-		gap = 0
-	}
-	lines := []string{header}
-	if gap > 0 {
-		lines = append(lines, "")
-	}
-	if description != "" {
-		lines = append(lines, description)
-	}
-	lines = append(lines, input, help)
+	// pinentry lays out its description.
+	content, above := credentialLayout{
+		header:  m.headerView(),
+		message: t.Dialog.PromptMessage.Width(contentWidth).Render(m.req.Prompt),
+		keyRows: m.keyRows(contentWidth),
+		body:    t.Dialog.InputPrompt.Render(m.input.View()),
+		help:    renderDialogHelp(t, &m.help, m, contentWidth),
+	}.fit(area.Dy() - t.Dialog.View.GetVerticalFrameSize())
 
-	view := t.Dialog.View.Width(m.width).Render(strings.Join(lines, "\n"))
+	view := t.Dialog.View.Width(m.width).Render(content)
 	cur := InputCursor(t, m.input.Cursor())
 	if cur != nil {
 		// InputCursor assumes the input sits right under the title.
-		cur.Y += gap
-		if description != "" {
-			cur.Y += lipgloss.Height(description)
-		}
+		cur.Y += above
 	}
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
@@ -163,18 +144,15 @@ func (m *Pinentry) headerView() string {
 	return common.DialogTitle(t, titleStyle.Render(title), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 
-// descriptionView renders the prompt message and the key rows, wrapped
-// to width so continuation lines keep their padding.
-func (m *Pinentry) descriptionView(width int) string {
+// keyRows renders the key rows, wrapped to width so continuation lines
+// keep their padding.
+func (m *Pinentry) keyRows(width int) []string {
 	t := m.com.Styles
-	lines := []string{t.Dialog.PromptMessage.Width(width).Render(m.req.Prompt)}
-	if keyLines := m.req.Key.Lines(); len(keyLines) > 0 {
-		lines = append(lines, "")
-		for _, line := range keyLines {
-			lines = append(lines, t.Dialog.PromptKey.Width(width).Render(line))
-		}
+	var rows []string
+	for _, line := range m.req.Key.Lines() {
+		rows = append(rows, t.Dialog.PromptKey.Width(width).Render(line))
 	}
-	return strings.Join(lines, "\n")
+	return rows
 }
 
 // noun returns the credential noun for titles.

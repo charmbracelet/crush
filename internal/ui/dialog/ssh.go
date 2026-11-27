@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -141,42 +140,25 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.input.Prompt = "> "
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
 
-	// What OpenSSH is asking for comes before the input. The header, input
-	// (or confirm hint) and help always get their rows; the description is
-	// trimmed to whatever is left.
-	header := m.headerView()
-	var body []string
-	if m.confirm {
-		body = []string{""}
-	} else {
-		body = []string{t.Dialog.InputPrompt.Render(m.input.View())}
+	// What OpenSSH is asking for comes before the input; confirmations
+	// have no input, just a blank row before the help.
+	body := ""
+	if !m.confirm {
+		body = t.Dialog.InputPrompt.Render(m.input.View())
 	}
-	help := renderDialogHelp(t, &m.help, m, contentWidth)
-	budget := area.Dy() - t.Dialog.View.GetVerticalFrameSize() -
-		lipgloss.Height(header) - 1 - lipgloss.Height(strings.Join(body, "\n")) - lipgloss.Height(help)
-	description := clampDialogLines(m.descriptionView(contentWidth), budget)
-	// The blank row under the header goes too when even that doesn't fit.
-	gap := 1
-	if budget < 0 {
-		gap = 0
-	}
-	lines := []string{header}
-	if gap > 0 {
-		lines = append(lines, "")
-	}
-	if description != "" {
-		lines = append(lines, description)
-	}
-	lines = append(append(lines, body...), help)
+	content, above := credentialLayout{
+		header:  m.headerView(),
+		message: t.Dialog.SSHMessage.Width(contentWidth).Render(m.messageView()),
+		keyRows: m.keyRows(contentWidth),
+		body:    body,
+		help:    renderDialogHelp(t, &m.help, m, contentWidth),
+	}.fit(area.Dy() - t.Dialog.View.GetVerticalFrameSize())
 
-	view := t.Dialog.View.Width(m.width).Render(strings.Join(lines, "\n"))
+	view := t.Dialog.View.Width(m.width).Render(content)
 	cur := InputCursor(t, m.input.Cursor())
 	if cur != nil {
 		// InputCursor assumes the input sits right under the title.
-		cur.Y += gap
-		if description != "" {
-			cur.Y += lipgloss.Height(description)
-		}
+		cur.Y += above
 	}
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
@@ -199,17 +181,16 @@ func (m *SSH) headerView() string {
 	return common.DialogTitle(t, titleStyle.Render(title), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 
-// descriptionView renders the message and key row, wrapped to width so
-// continuation lines keep their padding.
-func (m *SSH) descriptionView(width int) string {
-	t := m.com.Styles
-	lines := []string{t.Dialog.SSHMessage.Width(width).Render(m.messageView())}
-	if m.req.KeyInfo != "" {
-		label := sshaskpass.KeyInfoLabel(m.req.Prompt, m.req.Kind)
-		row := label + ": " + t.Dialog.SSHKeyValue.Render(m.req.KeyInfo)
-		lines = append(lines, "", t.Dialog.SSHKey.Width(width).Render(row))
+// keyRows renders the account, key or fingerprint row, wrapped to width
+// so continuation lines keep their padding.
+func (m *SSH) keyRows(width int) []string {
+	if m.req.KeyInfo == "" {
+		return nil
 	}
-	return strings.Join(lines, "\n")
+	t := m.com.Styles
+	label := sshaskpass.KeyInfoLabel(m.req.Prompt, m.req.Kind)
+	row := label + ": " + t.Dialog.SSHKeyValue.Render(m.req.KeyInfo)
+	return []string{t.Dialog.SSHKey.Width(width).Render(row)}
 }
 
 // messageView returns the friendly description of what OpenSSH is

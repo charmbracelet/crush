@@ -147,7 +147,7 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	header := m.headerView()
 	var body []string
 	if m.confirm {
-		body = []string{"", lipgloss.NewStyle().Width(contentWidth).Render(m.hintView())}
+		body = []string{""}
 	} else {
 		body = []string{t.Dialog.InputPrompt.Render(m.input.View())}
 	}
@@ -192,7 +192,7 @@ func (m *SSH) headerView() string {
 	headerOffset := titleStyle.GetHorizontalFrameSize() + t.Dialog.View.GetHorizontalFrameSize()
 	var title string
 	if m.confirm {
-		title = textStyle.Render(cmp.Or(m.req.Title, "Confirm") + ".")
+		title = textStyle.Render(cmp.Or(m.req.Title, "Confirm"))
 	} else {
 		title = textStyle.Render("Enter your ") + accentStyle.Render(m.noun()) + textStyle.Render(".")
 	}
@@ -220,15 +220,6 @@ func (m *SSH) messageView() string {
 		return msg
 	}
 	return strings.TrimRight(strings.TrimSpace(m.req.Prompt), ": ")
-}
-
-// hintView tells the user what a confirmation prompt is waiting for.
-func (m *SSH) hintView() string {
-	lower := strings.ToLower(m.req.Prompt)
-	if strings.Contains(lower, "presence") || strings.Contains(lower, "touch") {
-		return "Touch your security key, then press enter to continue."
-	}
-	return "Press enter to confirm, esc to cancel."
 }
 
 // noun returns the credential noun for titles.

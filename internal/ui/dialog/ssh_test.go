@@ -48,3 +48,24 @@ func TestSSHSmallTerminalKeepsInputVisible(t *testing.T) {
 		require.Contains(t, lines[cur.Y], "> ", "cursor lands on the input row at %dx%d", sz[0], sz[1])
 	}
 }
+
+func TestSSHHostKeyConfirm(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	req := sshaskpass.ParsePrompt("The authenticity of host 'beef (100.64.0.3)' can't be established.\n" +
+		"ED25519 key fingerprint is SHA256:Kx3nZ0h1nqk8m3QYV9Z5Qk2b0dF7Yw3sXo4n0eJt6aE.\n" +
+		"Are you sure you want to continue connecting (yes/no/[fingerprint])? ")
+	req.ID = "req"
+	m := NewSSH(&common.Common{Styles: &s}, req)
+	scr := uv.NewScreenBuffer(100, 30)
+	require.Nil(t, m.Draw(scr, scr.Bounds()))
+
+	out := scr.String()
+	require.Contains(t, out, "New Host ")
+	require.NotContains(t, out, "New Host.")
+	require.Contains(t, out, "beef (100.64.0.3)")
+	require.Contains(t, out, "SHA256:Kx3nZ0h1nqk8m3QYV9Z5Qk2b0dF7Yw3sXo4n0eJt6aE")
+	require.Contains(t, out, "esc cancel")
+	require.NotContains(t, out, "Press enter")
+}

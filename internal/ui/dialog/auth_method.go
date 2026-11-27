@@ -185,8 +185,13 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	cardWidth := max(0, (innerWidth-authMethodCardGap-2*authMethodCardMargin)/2)
 	sideBySide := cardWidth >= authMethodMinCardWidth
-	if !sideBySide {
-		cardWidth = innerWidth
+	// The gap takes up any odd leftover cell so the margins on both sides
+	// match and the pair sits exactly centered.
+	cardGap := authMethodCardGap
+	if sideBySide {
+		cardGap = innerWidth - 2*authMethodCardMargin - 2*cardWidth
+	} else {
+		cardWidth = max(0, innerWidth-2*authMethodCardMargin)
 	}
 	// The OAuth card names the account the sign-in uses, which is
 	// provider-specific: ChatGPT for OpenAI, Grok for xAI.
@@ -204,10 +209,11 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		apiKeyCard := m.renderCard("API Key", m.selected == 1, cardWidth, cardHeight)
 		var cards string
 		if sideBySide {
-			row := lipgloss.JoinHorizontal(lipgloss.Top, oauthCard, strings.Repeat(" ", authMethodCardGap), apiKeyCard)
+			row := lipgloss.JoinHorizontal(lipgloss.Top, oauthCard, strings.Repeat(" ", cardGap), apiKeyCard)
 			cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, row)
 		} else {
-			cards = lipgloss.JoinVertical(lipgloss.Left, oauthCard, "", apiKeyCard)
+			stack := lipgloss.JoinVertical(lipgloss.Left, oauthCard, "", apiKeyCard)
+			cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, stack)
 		}
 		rc.AddPart(cards)
 
@@ -231,7 +237,7 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		cardHeight = max(authMethodMinCardHeight, cardHeight-(over+cards-1)/cards)
 		view = render(cardHeight)
 	}
-	m.updateCardAreas(area, view, sideBySide, cardWidth, innerWidth, cardHeight, lipgloss.Height(prompt))
+	m.updateCardAreas(area, view, sideBySide, cardWidth, cardGap, innerWidth, cardHeight, lipgloss.Height(prompt))
 	if m.isOnboarding {
 		DrawOnboardingCursor(scr, area, view, nil)
 	} else {
@@ -242,7 +248,7 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // updateCardAreas records where each card lands on screen so mouse clicks
 // can be mapped back to a choice.
-func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide bool, cardWidth, innerWidth, cardHeight, promptHeight int) {
+func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide bool, cardWidth, cardGap, innerWidth, cardHeight, promptHeight int) {
 	m.oauthCardArea = image.Rectangle{}
 	m.apiKeyCardArea = image.Rectangle{}
 
@@ -270,13 +276,13 @@ func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide 
 
 	groupWidth := cardWidth
 	if sideBySide {
-		groupWidth = 2*cardWidth + authMethodCardGap
+		groupWidth = 2*cardWidth + cardGap
 	}
 	cardsLeft := contentLeft + max(0, (innerWidth-groupWidth)/2)
 
 	m.oauthCardArea = image.Rect(cardsLeft, cardsTop, cardsLeft+cardWidth, cardsTop+cardHeight)
 	if sideBySide {
-		left := cardsLeft + cardWidth + authMethodCardGap
+		left := cardsLeft + cardWidth + cardGap
 		m.apiKeyCardArea = image.Rect(left, cardsTop, left+cardWidth, cardsTop+cardHeight)
 	} else {
 		top := cardsTop + cardHeight + 1

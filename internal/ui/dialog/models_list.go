@@ -1,8 +1,6 @@
 package dialog
 
 import (
-	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -11,12 +9,20 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
+// filterCache holds precomputed filter strings for each model item.
+type filterCache struct {
+	strings  []string
+	items    []list.FilterableItem
+	groupIdx []int
+}
+
 // ModelsList is a list specifically for model items and groups.
 type ModelsList struct {
 	*list.List
-	groups []ModelGroup
-	query  string
-	t      *styles.Styles
+	groups      []ModelGroup
+	query       string
+	t           *styles.Styles
+	filterCache *filterCache
 }
 
 // NewModelsList creates a new list suitable for model items and groups.
@@ -42,6 +48,7 @@ func (f *ModelsList) Len() int {
 // SetGroups sets the model groups and updates the list items.
 func (f *ModelsList) SetGroups(groups ...ModelGroup) {
 	f.groups = groups
+	f.filterCache = nil // Invalidate cache when groups change
 	items := []list.Item{}
 	for _, g := range f.groups {
 		items = append(items, &g)
@@ -190,66 +197,93 @@ func (f *ModelsList) VisibleItems() []list.Item {
 		return items
 	}
 
-	filterableItems := make([]list.FilterableItem, 0, f.Len())
-	for _, g := range f.groups {
-		for _, item := range g.Items {
-			filterableItems = append(filterableItems, item)
-		}
+	// Build or reuse filter cache
+	if f.filterCache == nil {
+		f.filterCache = f.buildFilterCache()
 	}
 
+	cache := f.filterCache
+	if len(cache.items) == 0 {
+		return []list.Item{}
+	}
+
+	// Run fuzzy matching once on all items
+	matches := fuzzy.Find(query, cache.strings)
+
+	// Sort matches by score (descending), then by original index (ascending)
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].Score != matches[j].Score {
+			return matches[i].Score > matches[j].Score
+		}
+		return matches[i].Index < matches[j].Index
+	})
+
+	// Group matched items by their group index
+	groupMatches := make(map[int][]fuzzy.Match)
+	for _, match := range matches {
+		gi := cache.groupIdx[match.Index]
+		groupMatches[gi] = append(groupMatches[gi], match)
+	}
+
+	// Build result items preserving group order
 	items := []list.Item{}
-	visitedGroups := map[int]bool{}
-
-	// Reconstruct groups with matched items
-	// Find which group this item belongs to
 	for gi, g := range f.groups {
-		addedCount := 0
-		name := strings.ToLower(g.Title) + " "
-
-		names := make([]string, len(filterableItems))
-		for i, item := range filterableItems {
-			ms := item.(*ModelItem)
-			names[i] = fmt.Sprintf("%s%s", name, ms.Filter())
+		matches := groupMatches[gi]
+		if len(matches) == 0 {
+			continue
 		}
 
-		matches := fuzzy.Find(query, names)
+		// Add section header
+		items = append(items, &g)
 
-		// Sort by original index to preserve order within the group
+		// Sort matches within this group by original index to preserve order
 		sort.SliceStable(matches, func(i, j int) bool {
 			return matches[i].Index < matches[j].Index
 		})
 
+		name := strings.ToLower(g.Title) + " "
 		for _, match := range matches {
-			item := filterableItems[match.Index].(*ModelItem)
-			idxs := []int{}
+			item := cache.items[match.Index].(*ModelItem)
+			// Adjust matched indexes to remove provider name prefix
+			idxs := make([]int, 0, len(match.MatchedIndexes))
 			for _, idx := range match.MatchedIndexes {
-				// Adjusts removing provider name highlights
-				if idx < len(name) {
-					continue
+				if idx >= len(name) {
+					idxs = append(idxs, idx-len(name))
 				}
-				idxs = append(idxs, idx-len(name))
 			}
-
 			match.MatchedIndexes = idxs
-			if slices.Contains(g.Items, item) {
-				if !visitedGroups[gi] {
-					// Add section header
-					items = append(items, &g)
-					visitedGroups[gi] = true
-				}
-				// Add the matched item
-				item.SetMatch(match)
-				items = append(items, item)
-				addedCount++
-			}
+			item.SetMatch(match)
+			items = append(items, item)
 		}
-		if addedCount > 0 {
-			// Add a space separator after each provider section
-			items = append(items, list.NewSpacerItem(1))
-		}
+
+		// Add a space separator after each provider section
+		items = append(items, list.NewSpacerItem(1))
 	}
 
 	return items
+}
+
+// buildFilterCache builds the filter cache for all items.
+func (f *ModelsList) buildFilterCache() *filterCache {
+	var filterStrings []string
+	var items []list.FilterableItem
+	var groupIdx []int
+
+	for gi, g := range f.groups {
+		name := strings.ToLower(g.Title) + " "
+		for _, item := range g.Items {
+			ms := item
+			filterStrings = append(filterStrings, name+ms.Filter())
+			items = append(items, item)
+			groupIdx = append(groupIdx, gi)
+		}
+	}
+
+	return &filterCache{
+		strings:  filterStrings,
+		items:    items,
+		groupIdx: groupIdx,
+	}
 }
 
 // Render renders the filterable list.

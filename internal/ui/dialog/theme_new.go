@@ -96,7 +96,7 @@ func (d *ThemeNew) Cursor() *tea.Cursor {
 
 func (d *ThemeNew) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := d.com.Styles
-	width := max(0, min(themeNewDialogMaxWidth, area.Dx()))
+	width := max(0, min(themeNewDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
 	d.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)

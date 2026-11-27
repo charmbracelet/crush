@@ -31,3 +31,12 @@ func TestThemeEditorFitsArea(t *testing.T) {
 		drawFits(t, NewThemeEditor(newPickerTestCommon(), "charmtone-panther"), sz[0], sz[1])
 	}
 }
+
+// TestThemeNewFitsArea verifies the new theme prompt keeps its whole border
+// on narrow screens.
+func TestThemeNewFitsArea(t *testing.T) {
+	t.Parallel()
+	for _, sz := range [][2]int{{100, 30}, {40, 30}, {100, 12}} {
+		drawFits(t, NewThemeNew(newPickerTestCommon(), ""), sz[0], sz[1])
+	}
+}

@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 )
 
@@ -205,14 +204,10 @@ func (m *AWSSSO) innerDialogContent() string {
 			// URL found; show it and wait for auth to complete.
 			// Show the whole URL, broken at fixed widths: the user code
 			// sits at its end. Each piece keeps the hyperlink.
-			var linkLines []string
-			for _, line := range strings.Split(ansi.Hardwrap(m.url, max(1, innerWidth-2), false), "\n") { // -2 for padding
-				linkLines = append(linkLines, linkStyle.Hyperlink(m.url, "id=aws-sso-verify").Render(line))
-			}
 			urlBox := lipgloss.NewStyle().
 				Width(innerWidth).
 				Padding(0, 1).
-				Render(strings.Join(linkLines, "\n"))
+				Render(wrappedLink(linkStyle, m.url, "id=aws-sso-verify", innerWidth-2)) // -2 for padding
 
 			waiting := statusTextStyle.
 				Width(innerWidth).

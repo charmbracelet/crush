@@ -17,7 +17,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 )
 
@@ -425,15 +424,7 @@ func (m *OAuth) innerDialogContent() string {
 			elements = append(elements, codeBox, "")
 		}
 
-		// Break the URL at fixed character widths rather than at
-		// hyphens so it reads as one unbroken token. Each piece keeps
-		// the hyperlink, so clicking any line opens the full URL.
-		urlWidth := max(1, innerWidth-2) // -2 for padding
-		var linkLines []string
-		for _, line := range strings.Split(ansi.Hardwrap(m.verificationURL, urlWidth, false), "\n") {
-			linkLines = append(linkLines, linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(line))
-		}
-		link := strings.Join(linkLines, "\n")
+		link := wrappedLink(linkStyle, m.verificationURL, "id=oauth-verify", innerWidth-2) // -2 for padding
 		url := statusTextStyle.
 			Width(innerWidth).
 			Padding(0, 1).

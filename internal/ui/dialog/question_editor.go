@@ -168,16 +168,11 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, f
 
 	if isActive && e.fillIn.Focused() {
 		e.fillIn.SetWidth(innerWidth - 2 - prefixWidth)
-		indent := strings.Repeat(" ", prefixWidth)
-		for j, tl := range strings.Split(e.fillIn.View(), "\n") {
+		for j, tl := range hangIndent(fillPrefix, strings.Split(e.fillIn.View(), "\n")) {
 			// The prompt leads only the first row, but the bar runs the
 			// whole height: a typed answer that spans lines is one item,
 			// and a gutter that stops partway reads as several.
-			text := bar + fillPrefix + tl
-			if j > 0 {
-				text = bar + indent + tl
-			}
-			*lines = append(*lines, contentLine{text: text, fillInRow: j == 0, cursorItem: true, choiceIdx: -1})
+			*lines = append(*lines, contentLine{text: bar + tl, fillInRow: j == 0, cursorItem: true, choiceIdx: -1})
 		}
 		return
 	}
@@ -190,13 +185,8 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, f
 		}
 		// Wrap the saved answer under its prompt so a long one stays
 		// readable instead of being clipped at the edge.
-		indent := strings.Repeat(" ", prefixWidth)
-		for j, ln := range wrapLines(val, innerWidth-lipgloss.Width(bar)-prefixWidth) {
-			lead := fillPrefix
-			if j > 0 {
-				lead = indent
-			}
-			*lines = append(*lines, contentLine{text: bar + lead + style.Render(ln), cursorItem: isActive, choiceIdx: -1})
+		for _, ln := range wrapHanging(val, innerWidth-lipgloss.Width(bar), fillPrefix, style) {
+			*lines = append(*lines, contentLine{text: bar + ln, cursorItem: isActive, choiceIdx: -1})
 		}
 		return
 	}
@@ -214,28 +204,17 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, not
 	if isEditing && e.noteEditor.Focused() {
 		prefixWidth := lipgloss.Width(notePrefix)
 		e.noteEditor.SetWidth(innerWidth - 2 - prefixWidth)
-		indent := strings.Repeat(" ", prefixWidth)
-		for j, tl := range strings.Split(e.noteEditor.View(), "\n") {
+		for j, tl := range hangIndent(notePrefix, strings.Split(e.noteEditor.View(), "\n")) {
 			// As with the fill-in: prompt on the first row, bar on all
 			// of them.
-			text := bar + notePrefix + tl
-			if j > 0 {
-				text = bar + indent + tl
-			}
-			*lines = append(*lines, contentLine{text: text, noteRow: j == 0, cursorItem: true, choiceIdx: -1})
+			*lines = append(*lines, contentLine{text: bar + tl, noteRow: j == 0, cursorItem: true, choiceIdx: -1})
 		}
 		return
 	}
 
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
-		prefixWidth := lipgloss.Width(notePrefix)
-		indent := strings.Repeat(" ", prefixWidth)
-		for j, ln := range wrapLines(saved, innerWidth-lipgloss.Width(bar)-prefixWidth) {
-			lead := notePrefix
-			if j > 0 {
-				lead = indent
-			}
-			*lines = append(*lines, contentLine{text: bar + lead + noteStyle.Render(ln), cursorItem: isActive, choiceIdx: -1})
+		for _, ln := range wrapHanging(saved, innerWidth-lipgloss.Width(bar), notePrefix, noteStyle) {
+			*lines = append(*lines, contentLine{text: bar + ln, cursorItem: isActive, choiceIdx: -1})
 		}
 	}
 }
@@ -300,11 +279,7 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 		e.noteEditor.SetWidth(area.Dx() - 2 - prefixWidth)
 		noteView := e.noteEditor.View()
 		var cur *tea.Cursor
-		for j, ln := range strings.Split(noteView, "\n") {
-			text := notePrefix + ln
-			if j > 0 {
-				text = strings.Repeat(" ", prefixWidth) + ln
-			}
+		for j, text := range hangIndent(notePrefix, strings.Split(noteView, "\n")) {
 			lines := drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), text)
 			if j == 0 {
 				if tc := e.noteEditor.Cursor(); tc != nil {
@@ -321,13 +296,8 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
 		y++
 		noteStyle := e.Styles.Editor.QuestionNote
-		indent := strings.Repeat(" ", lipgloss.Width(notePrefix))
-		for j, ln := range wrapLines(saved, area.Dx()-lipgloss.Width(notePrefix)) {
-			lead := notePrefix
-			if j > 0 {
-				lead = indent
-			}
-			drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), lead+noteStyle.Render(ln))
+		for _, ln := range wrapHanging(saved, area.Dx(), notePrefix, noteStyle) {
+			drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), ln)
 			y++
 		}
 	}

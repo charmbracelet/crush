@@ -323,17 +323,12 @@ func (c *ConfirmComponent) UpdateAnswers(answers []*question.Answer) {
 // confirms it.
 func (c *ConfirmComponent) summaryLines(width int) []string {
 	const bullet = "• "
-	indent := strings.Repeat(" ", ansi.StringWidth(bullet))
 	style := c.Styles.Editor.QuestionUnselected
 	var out []string
 	for i, label := range c.QuestionLabels {
 		text := label + ": " + c.answerSummary(i)
-		for j, ln := range wrapLines(text, width-len(indent)) {
-			lead := bullet
-			if j > 0 {
-				lead = indent
-			}
-			out = append(out, style.Render(lead+ln))
+		for _, ln := range hangIndent(bullet, wrapLines(text, width-ansi.StringWidth(bullet))) {
+			out = append(out, style.Render(ln))
 		}
 	}
 	return out

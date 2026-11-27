@@ -341,11 +341,7 @@ func (p *PlanHandoffInline) drawEditor(scr uv.Screen, area uv.Rectangle) *tea.Cu
 		)
 	}
 	var cursor *tea.Cursor
-	for row, line := range strings.Split(editorView, "\n") {
-		text := promptPrefix + line
-		if row > 0 {
-			text = strings.Repeat(" ", prefixWidth) + line
-		}
+	for row, text := range hangIndent(promptPrefix, strings.Split(editorView, "\n")) {
 		drawStyledText(scr, image.Rect(blockX, y+row, area.Max.X, y+row+1), text)
 		if editorCursor != nil && editorCursor.Y == row {
 			current := *editorCursor

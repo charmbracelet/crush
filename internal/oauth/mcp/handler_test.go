@@ -36,6 +36,9 @@ type fakeASOpts struct {
 	// in the authorization response, and the SDK rejects the authorization
 	// if no issuer comes back.
 	issSupported bool
+	// trailingSlashIssuer makes the metadata issuer end in "/", modelling
+	// servers that publish an issuer the SDK normalizes away.
+	trailingSlashIssuer bool
 }
 
 // newFakeAS starts an httptest server speaking enough of the OAuth
@@ -55,6 +58,11 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 		expiresIn = 3600
 	}
 
+	issuerSuffix := ""
+	if opts.trailingSlashIssuer {
+		issuerSuffix = "/"
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
@@ -64,7 +72,7 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 	})
 	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
 		meta := map[string]any{
-			"issuer":                           baseURL,
+			"issuer":                           baseURL + issuerSuffix,
 			"authorization_endpoint":           baseURL + "/authorize",
 			"token_endpoint":                   baseURL + "/token",
 			"registration_endpoint":            baseURL + "/register",
@@ -683,6 +691,65 @@ func TestHandler_PassesIssuerThrough(t *testing.T) {
 	require.Equal(t, int64(1), opens.Load())
 	require.NotNil(t, h.Token())
 	require.Equal(t, "a", h.Token().AccessToken)
+}
+
+// TestHandler_NormalizesTrailingSlashIssuer is a regression test for logins
+// failing against authorization servers whose issuer ends in a trailing
+// slash. The metadata fixup strips that slash before the SDK validates it,
+// while the redirect carries the server's verbatim iss, so the SDK's exact
+// RFC 9207 comparison of "https://as/" against "https://as" rejected a
+// login the user had already completed in the browser.
+func TestHandler_NormalizesTrailingSlashIssuer(t *testing.T) {
+	tests := []struct {
+		name          string
+		metadataSlash bool
+	}{
+		{"issuer has a trailing slash", true},
+		{"redirect names an issuer with a trailing slash", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, mcpURL := newFakeAS(t, fakeASOpts{
+				clientID:            "c",
+				accessToken:         "a",
+				issSupported:        true,
+				trailingSlashIssuer: tt.metadataSlash,
+			})
+			h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+			require.NoError(t, err)
+			t.Cleanup(h.Close)
+
+			var opens atomic.Int64
+			redirect := browserRedirectIss("code123", base+"/")
+			h.openURL = func(u string) error {
+				opens.Add(1)
+				return redirect(u)
+			}
+
+			require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+			require.Equal(t, int64(1), opens.Load(), "one login must open exactly one browser tab")
+			require.NotNil(t, h.Token())
+			require.Equal(t, "a", h.Token().AccessToken)
+		})
+	}
+}
+
+// TestHandler_RejectsWrongIssuerWithTrailingSlash guards the normalization
+// above from turning into a blanket acceptance: stripping a trailing slash
+// must not let a redirect naming a different server through.
+func TestHandler_RejectsWrongIssuerWithTrailingSlash(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:     "c",
+		accessToken:  "a",
+		issSupported: true,
+	})
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	h.openURL = browserRedirectIss("code123", "https://attacker.example.com/")
+
+	require.ErrorContains(t, authorizeWith401(t, h, base, mcpURL), "issuer")
 }
 
 // TestHandler_RejectsWrongIssuer confirms the issuer is passed through for

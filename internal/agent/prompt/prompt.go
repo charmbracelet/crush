@@ -23,13 +23,14 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   *template.Template
-	now        func() time.Time
-	platform   string
-	workingDir string
-	canWrite   bool
-	toolNames  []string
+	name         string
+	template     *template.Template
+	now          func() time.Time
+	platform     string
+	workingDir   string
+	canWrite     bool
+	toolNames    []string
+	toolNamesSet bool
 
 	// skillOverrides fetches the repository-scoped skill toggle state at
 	// Build time: which skills the repository disabled and which it
@@ -52,7 +53,21 @@ type PromptDat struct {
 	CanWrite           bool
 	// ToolNames are the tools the agent is actually given, which is not
 	// always its whole configured set: some tools depend on the run mode.
-	ToolNames []string
+	ToolNames    []string
+	toolNamesSet bool
+}
+
+// HasTool reports whether the named tool is available to the agent. When
+// ToolNames was provided via WithToolNames, membership is checked against
+// that list; otherwise it falls back to checking Config.Options.DisabledTools.
+func (d PromptDat) HasTool(name string) bool {
+	if d.toolNamesSet {
+		return slices.Contains(d.ToolNames, name)
+	}
+	if d.Config.Options != nil {
+		return !slices.Contains(d.Config.Options.DisabledTools, name)
+	}
+	return true
 }
 
 type ContextFile struct {
@@ -86,6 +101,7 @@ func WithCanWrite(canWrite bool) Option {
 func WithToolNames(names []string) Option {
 	return func(p *Prompt) {
 		p.toolNames = names
+		p.toolNamesSet = true
 	}
 }
 
@@ -286,6 +302,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		AvailSkillXML: availSkillXML,
 		CanWrite:      p.canWrite,
 		ToolNames:     p.toolNames,
+		toolNamesSet:  p.toolNamesSet,
 	}
 	if isGit {
 		var err error

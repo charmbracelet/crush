@@ -295,7 +295,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.promptTexts = promptTexts
 
-	coderPrompt, err := c.newPrompt("coder", c.skillOverrideOptions()...)
+	coderPrompt, err := c.newPrompt("coder", append(
+		c.skillOverrideOptions(),
+		prompt.WithToolNames(c.effectiveToolNames(agentCfg, false)),
+	)...)
 	if err != nil {
 		return nil, err
 	}

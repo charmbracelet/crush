@@ -160,19 +160,20 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 
 	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize() - 2
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+	contentWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	// The prompt icon differs per state (the error icon is wider), so
+	// set it before sizing the text area around it.
+	m.applyInputState()
+	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
 
 	textStyle := t.Dialog.SecondaryText
 	dialogStyle := t.Dialog.View.Width(m.width)
 	inputStyle := t.Dialog.InputPrompt
-	helpView := renderDialogHelp(t, &m.help, m, m.width-dialogStyle.GetHorizontalFrameSize())
-
-	m.input.Prompt = m.spinner.View()
+	helpView := renderDialogHelp(t, &m.help, m, contentWidth)
 
 	content := strings.Join([]string{
 		m.headerView(),
-		inputStyle.Render(m.inputView()),
+		inputStyle.Render(m.input.View()),
 		textStyle.Render("This will be written in your global configuration:"),
 		textStyle.Render(config.GlobalConfigData()),
 		"",
@@ -226,7 +227,9 @@ func (m *APIKeyInput) dialogTitle() string {
 	return ""
 }
 
-func (m *APIKeyInput) inputView() string {
+// applyInputState sets the input's prompt, styles and focus for the
+// current state.
+func (m *APIKeyInput) applyInputState() {
 	t := m.com.Styles
 
 	switch m.state {
@@ -256,7 +259,6 @@ func (m *APIKeyInput) inputView() string {
 		m.input.SetStyles(ts)
 		m.input.Focus()
 	}
-	return m.input.View()
 }
 
 // Cursor returns the cursor position relative to the dialog.

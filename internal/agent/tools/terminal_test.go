@@ -733,6 +733,8 @@ func TestTerminalWriteAsksPermission(t *testing.T) {
 	require.Len(t, permissions.requests, 2)
 	require.Equal(t, "write", permissions.requests[0].Action)
 	require.Contains(t, permissions.requests[0].Description, "rm -rf ~")
+	require.Contains(t, permissions.requests[0].GrantKey, "rm -rf ~\r", "a session grant covers only this exact input")
+	require.NotEqual(t, permissions.requests[0].GrantKey, permissions.requests[1].GrantKey, "typing and pasting are granted apart")
 }
 
 func TestTerminalStartGrantCoversOnlyThatCommand(t *testing.T) {

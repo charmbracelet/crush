@@ -265,6 +265,9 @@ func (t terminalTool) input(ctx context.Context, params TerminalParams) (fantasy
 			Command:     input,
 			WorkingDir:  session.WorkingDir,
 		},
+		// Whatever runs in the terminal executes the input, so a session
+		// grant covers only this exact input into this program.
+		GrantKey: verb + "\x00" + session.Command + "\x00" + input,
 	})
 	if err != nil {
 		return fantasy.ToolResponse{}, err

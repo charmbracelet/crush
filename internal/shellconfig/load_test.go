@@ -364,15 +364,25 @@ func TestLoadShellConfig_EnvVarExpansion(t *testing.T) {
 }
 
 // TestLoadShellConfig_UnknownFlag verifies error handling for unknown flags.
+// TestLoadShellConfig_UnknownFlag verifies that a line with an unknown flag
+// is dropped instead of failing the load.
 func TestLoadShellConfig_UnknownFlag(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider add openai --bogus-flag "value"`
+	script := "provider add openai --bogus-flag \"value\"\noption notifications bell"
 	path := filepath.Join(dir, "crushrc")
 
-	_, err := LoadShellConfig(t.Context(), path, []byte(script))
-	require.Error(t, err)
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	providers, _ := result["providers"].(map[string]any)
+	require.NotContains(t, providers, "openai",
+		"the dropped line must leave no partial provider entry")
+	require.Equal(t, "bell", result["options"].(map[string]any)["notifications"],
+		"lines after the dropped one still apply")
 }
 
 // TestLoadShellConfig_MissingRequiredArgs verifies error handling for missing args.
@@ -399,6 +409,62 @@ func TestLoadShellConfig_NoBuiltins(t *testing.T) {
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
 	require.Nil(t, jsonBytes)
+}
+
+// TestLoadShellConfig_TerminalUnknownCommandTolerated verifies that a script
+// ending in an unknown command, e.g. a config builtin only a fork or a newer
+// version registers, keeps the config built so far instead of failing.
+func TestLoadShellConfig_TerminalUnknownCommandTolerated(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := "option notifications bell\nagent add myagent"
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+	require.NotNil(t, jsonBytes)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	require.Equal(t, "bell", result["options"].(map[string]any)["notifications"])
+}
+
+// TestLoadShellConfig_BuiltinUsageErrorStillFails verifies that a malformed
+// line for a builtin this build knows still fails the load; only unknown
+// commands and unknown option keys are dropped.
+func TestLoadShellConfig_BuiltinUsageErrorStillFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := "option notifications bell\noption request-timeout abc"
+	path := filepath.Join(dir, "crushrc")
+
+	_, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects a number")
+}
+
+// TestLoadShellConfig_UnknownFlagDropsLine verifies that a line using a flag
+// this build does not know, e.g. a fork-only MCP flag, is dropped while the
+// rest of the config still applies.
+func TestLoadShellConfig_UnknownFlagDropsLine(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := "option notifications bell\nmcp add myserver --oauth-client-id-metadata https://example.com\noption notifications osc"
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	mcp, _ := result["mcp"].(map[string]any)
+	require.NotContains(t, mcp, "myserver",
+		"the dropped line must not leave a partial MCP entry")
+	require.Equal(t, "osc", result["options"].(map[string]any)["notifications"],
+		"lines after the dropped one still apply")
 }
 
 func TestLoadShellConfig_ProviderJSONFlagsRequireObjects(t *testing.T) {

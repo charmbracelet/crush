@@ -56,8 +56,15 @@ func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, erro
 			slog.Error("Shell config execution timed out or was cancelled", "path", path, "error", err)
 			return nil, fmt.Errorf("shell config %s: execution timed out or was cancelled: %w", path, err)
 		}
-		slog.Error("Shell config execution failed", "path", path, "error", err)
-		return nil, fmt.Errorf("executing shell config %s: %w", path, err)
+		if !shell.IsExitStatus(err) {
+			slog.Error("Shell config execution failed", "path", path, "error", err)
+			return nil, fmt.Errorf("executing shell config %s: %w", path, err)
+		}
+		// A terminal command failure, e.g. a config builtin that only a
+		// fork or a newer version registers, still leaves the config
+		// built so far usable. Keep it with a warning instead of
+		// failing startup on a build that does not know the command.
+		slog.Warn("Shell config ended with a failing command; using the config built so far", "path", path, "error", err)
 	}
 
 	if builder.empty() {

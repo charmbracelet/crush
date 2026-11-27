@@ -2,12 +2,19 @@ package shellconfig
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"strconv"
 	"strings"
 )
+
+// errUnknownFlag marks an unrecognized flag on a config builtin. LoadShellConfig
+// drops the offending line instead of failing the whole load, so a crushrc
+// written for a fork or a newer version does not break this build.
+var errUnknownFlag = errors.New("unknown flag")
 
 // flagKind is the value type a flag parses from the command line.
 type flagKind int
@@ -77,7 +84,9 @@ func applyFlags(specs []flagSpec, args []string, start int, target map[string]an
 	for i < len(args) {
 		spec, ok := findFlag(specs, args[i])
 		if !ok {
-			return usage(stderr, fmt.Sprintf("%s: unknown flag %s", cmd, args[i]))
+			slog.Warn("Unknown flag in shell config; dropping the line",
+				"command", cmd, "flag", args[i])
+			return fmt.Errorf("%s: unknown flag %s: %w", cmd, args[i], errUnknownFlag)
 		}
 
 		val, next, err := parseFlagValue(spec, args, i)

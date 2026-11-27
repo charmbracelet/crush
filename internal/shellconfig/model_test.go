@@ -64,14 +64,18 @@ model add anthropic/claude-x --price-input 3 --price-output 15 --price-cache-cre
 	require.Equal(t, 0.3, pricing["cache_hit"])
 }
 
-func TestModelAddRejectsLegacyPricingFlags(t *testing.T) {
+func TestModelAddDropsLegacyPricingFlags(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "crushrc")
-	_, err := LoadShellConfig(t.Context(), path, []byte(`provider add openai --api-key k
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`provider add openai --api-key k
 model add openai/gpt-x --cost-per-1m-in 1`))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "unknown flag")
+	require.NoError(t, err, "unknown legacy flags drop the line instead of failing")
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	openai := result["providers"].(map[string]any)["openai"].(map[string]any)
+	require.Empty(t, openai["models"], "the dropped model add must leave no entry")
 }
 
 func TestModelSelectRejectsInvalidTopP(t *testing.T) {

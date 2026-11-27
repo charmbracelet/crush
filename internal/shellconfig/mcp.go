@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -69,7 +70,9 @@ func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 	name := args[2]
 	slog.Info("MCP server defined in shell config", "name", name)
-	m := childMap(b.section("mcp"), name)
+	servers := b.section("mcp")
+	_, existed := servers[name]
+	m := childMap(servers, name)
 
 	// Default type is stdio.
 	if _, ok := m["type"]; !ok {
@@ -77,6 +80,12 @@ func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 
 	if err := applyFlags(mcpAddFlags, args, 3, m, "mcp add", stderr); err != nil {
+		if errors.Is(err, errUnknownFlag) {
+			if !existed {
+				delete(servers, name)
+			}
+			return nil
+		}
 		return err
 	}
 

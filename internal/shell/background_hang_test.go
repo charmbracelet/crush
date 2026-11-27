@@ -139,17 +139,23 @@ func TestRun_NonZeroExitKeptWhenBackgroundedChildHoldsPipe(t *testing.T) {
 
 // The shebang dispatch path must kill the interpreter's whole process group,
 // not just the interpreter PID, or the script's child keeps the pipes open
-// and cmd.Wait blocks forever. The child ignores SIGINT as a background job
-// of a non-interactive shell, so this also covers the SIGKILL escalation.
+// and cmd.Wait blocks forever. The child ignores SIGINT, so this also covers
+// the SIGKILL escalation.
 func TestKill_ShebangScriptChild(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hang.sh")
-	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nsleep 15 &\necho $! > child.pid\nwait\n"), 0o755))
-	reapSleep(t, "15")
+	// The child records its own PID only once SIGINT is ignored.
+	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nsh -c 'trap \"\" INT; echo $$ > child.pid; exec sleep 15' &\nwait\n"), 0o755))
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(context.Background(), nil, dir, nil, CoreutilsTurtle, "./hang.sh", "", testMaxJobs)
+	// t.Context cancels the job before cleanup, so a failed assertion cannot leak it.
+	bgShell, err := manager.Start(t.Context(), nil, dir, nil, CoreutilsTurtle, "./hang.sh", "", testMaxJobs)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultKillTimeout+4*time.Second)
+		defer cancel()
+		bgShell.WaitContext(ctx)
+	})
 
 	var pid int
 	require.Eventually(t, func() bool {

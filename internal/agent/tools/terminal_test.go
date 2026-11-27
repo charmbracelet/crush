@@ -446,6 +446,30 @@ func TestTerminalReadWaitForExit(t *testing.T) {
 	require.Contains(t, read.Content, "slow-done")
 }
 
+func TestTerminalReadWaitsForText(t *testing.T) {
+	needsPOSIXShell(t)
+
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	resp := runTerminalTool(t, tool, TerminalParams{
+		Action:  "start",
+		Command: `sh -c 'sleep 0.3; printf "Password: "; sleep 30'`,
+		Wait:    agentDriven(),
+	})
+	require.False(t, resp.IsError)
+
+	start := time.Now()
+	read := runTerminalTool(t, tool, TerminalParams{Action: "read", WaitFor: "Password:", WaitSeconds: 20})
+	require.False(t, read.IsError)
+	require.Contains(t, read.Content, `"Password:" is on the screen`)
+	require.Less(t, time.Since(start), 10*time.Second, "the read returns once the text shows, not after the wait")
+
+	missing := runTerminalTool(t, tool, TerminalParams{Action: "read", WaitFor: "never-printed", WaitSeconds: 1})
+	require.False(t, missing.IsError)
+	require.Contains(t, missing.Content, `"never-printed" did not show up`)
+}
+
 func TestTerminalReadNoSession(t *testing.T) {
 	resetTerminalManager(t)
 

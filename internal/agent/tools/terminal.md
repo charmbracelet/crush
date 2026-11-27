@@ -9,7 +9,7 @@ At any moment either you or the user holds a terminal's keyboard. The wait param
 
 <actions>
 - start: run a command in a new terminal session. Blocks for the user by default (see above); with wait: false it returns a session ID immediately and the user gets a read-only view.
-- read: show the session's current screen, its status (running / exited with code), its size, and the cursor position (reported even when the program hid its cursor), plus the working directory it last reported and whether a full-screen TUI is drawing. include_scrollback adds everything that scrolled off; wait_seconds blocks until the session exits or the keyboard changes hands. It also says who holds the keyboard.
+- read: show the session's current screen, its status (running / exited with code), its size, and the cursor position (reported even when the program hid its cursor), plus the working directory it last reported and whether a full-screen TUI is drawing. include_scrollback adds everything that scrolled off; wait_seconds blocks until the session exits or the keyboard changes hands; wait_for returns as soon as that exact text is on the screen (a prompt like "Password:"), which beats guessing settle_ms or reading in a loop. It also says who holds the keyboard.
 - write: drive the session. Send literal text (text), named keys (keys), and/or a mouse event (mouse), then it returns the screen after the session has redrawn (settle_ms, default 250). Writes are not echoed back on their own.
 - paste: send text as a paste. When the program enabled bracketed paste mode the text is wrapped in paste markers, so a multi-line paste is inserted into an editor or command line instead of being executed line by line. Prefer this over write for multi-line text.
 - kill: terminate the session and get its final transcript (screen, scrollback, exit code). The terminal closes in the UI.
@@ -70,5 +70,6 @@ The user can take the keyboard from you at any time: re-read before assuming sta
 - Interrupt a running command: { "action": "write", "keys": ["ctrl+c"] }
 - Click an item: { "action": "write", "mouse": { "action": "click", "button": "left", "x": 12, "y": 4 } }
 - Wait for a slow command: { "action": "read", "wait_seconds": 120 }
+- Wait for a prompt before answering it: { "action": "read", "wait_for": "Password:", "wait_seconds": 60 }
 - End it and read the transcript: { "action": "kill" }
 </examples>

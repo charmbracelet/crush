@@ -67,7 +67,8 @@ type TerminalParams struct {
 
 	// read
 	IncludeScrollback bool `json:"include_scrollback,omitempty" description:"Also return everything that scrolled off the visible screen (read only)"`
-	WaitSeconds       int  `json:"wait_seconds,omitempty" description:"Block until the session exits, the keyboard changes hands, or this many seconds elapse (read only, 0 returns immediately). Prefer this over polling in a loop"`
+	WaitSeconds       int    `json:"wait_seconds,omitempty" description:"Block until the session exits, the keyboard changes hands, or this many seconds elapse (read only, 0 returns immediately). Prefer this over polling in a loop"`
+	WaitFor           string `json:"wait_for,omitempty" description:"Return as soon as this exact text shows up on the screen, like \"Password:\" or \"$ \" (read only). wait_seconds bounds the wait and defaults to 30 when this is set"`
 
 	// write (mouse)
 	Mouse *TerminalMouse `json:"mouse,omitempty" description:"Send a mouse event instead of keys (write only). Programs that enabled mouse tracking receive it; others ignore it"`
@@ -426,8 +427,46 @@ func terminalCallBudget(op string, params TerminalParams) time.Duration {
 // readWait is how long a read may block, capped before it is multiplied so
 // a huge wait_seconds cannot overflow into no wait at all.
 func readWait(params TerminalParams) time.Duration {
+	if params.WaitFor != "" && params.WaitSeconds <= 0 {
+		return terminalWaitForDefault
+	}
 	limit := int(TerminalMaxReadWait / time.Second)
 	return time.Duration(min(max(params.WaitSeconds, 0), limit)) * time.Second
+}
+
+// terminalWaitForDefault bounds a wait_for read that sets no wait_seconds.
+const terminalWaitForDefault = 30 * time.Second
+
+// terminalWaitForPoll is how often a wait_for read checks the screen.
+//
+// ponytail: polls; the PTY's change signal has a single consumer (the UI).
+// Broadcast it if polling ever shows up in a profile.
+const terminalWaitForPoll = 50 * time.Millisecond
+
+// waitForText blocks until text is on the screen, the session exits, the
+// keyboard changes hands, or wait elapses. It reports whether text showed.
+func waitForText(ctx context.Context, session *shell.InteractiveSession, text string, wait time.Duration) (bool, error) {
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	tick := time.NewTicker(terminalWaitForPoll)
+	defer tick.Stop()
+	changed := session.ControlChanged()
+	for {
+		if strings.Contains(session.ScreenText(), text) {
+			return true, nil
+		}
+		select {
+		case <-session.Done():
+			return strings.Contains(session.ScreenText(), text), nil
+		case <-changed:
+			return strings.Contains(session.ScreenText(), text), nil
+		case <-deadline.C:
+			return false, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-tick.C:
+		}
+	}
 }
 
 // response turns a terminal result into the tool's response. Oversized
@@ -789,7 +828,18 @@ func (h terminalHost) read(ctx context.Context, params TerminalParams) (terminal
 		return terminalError(err.Error()), nil
 	}
 
-	if wait := readWait(params); wait > 0 && !session.Exited() {
+	var waitNote string
+	if params.WaitFor != "" {
+		found, err := waitForText(ctx, session, params.WaitFor, readWait(params))
+		if err != nil {
+			return terminal.Result{}, err
+		}
+		if found {
+			waitNote = fmt.Sprintf("%q is on the screen.", params.WaitFor)
+		} else {
+			waitNote = fmt.Sprintf("%q did not show up on the screen.", params.WaitFor)
+		}
+	} else if wait := readWait(params); wait > 0 && !session.Exited() {
 		changed := session.ControlChanged()
 		select {
 		case <-session.Done():
@@ -815,6 +865,9 @@ func (h terminalHost) read(ctx context.Context, params TerminalParams) (terminal
 	status := fmt.Sprintf("Session %s: %s.", session.ID(), sessionStatus(session))
 	if !session.Exited() {
 		status += " " + keyboardHolder(session, h.chat)
+	}
+	if waitNote != "" {
+		status = waitNote + " " + status
 	}
 	parts = append(parts, status)
 	parts = append(parts, sessionGeometry(session))

@@ -47,3 +47,16 @@ func TestMCPAuthErrorCanSkipToNextServer(t *testing.T) {
 	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: 's', Text: "s"}))
 	require.Equal(t, MCPAuthStateError, m.state)
 }
+
+// TestMCPAuthHelpKeepsEscWhenNarrow verifies esc stays in the help bar
+// when the optional hints are truncated.
+func TestMCPAuthHelpKeepsEscWhenNarrow(t *testing.T) {
+	t.Parallel()
+
+	for _, st := range []MCPAuthState{MCPAuthStatePrompt, MCPAuthStateAuthenticating} {
+		m := newTestMCPAuth("linear", "notion")
+		m.state = st
+		out := strings.Join(drawFits(t, m, 40, 30), "\n")
+		require.Contains(t, out, "esc exit", "state %d", st)
+	}
+}

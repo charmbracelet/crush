@@ -344,13 +344,15 @@ func (m *MCPAuth) FullHelp() [][]key.Binding {
 func (m *MCPAuth) ShortHelp() []key.Binding {
 	switch m.state {
 	case MCPAuthStatePrompt:
-		bindings := []key.Binding{m.keyMap.Submit, m.keyMap.Copy}
+		// The main action and esc come first so a narrow help bar
+		// truncates the optional hints rather than the way out.
+		bindings := []key.Binding{m.keyMap.Submit, m.keyMap.Close}
 		if len(m.pending) > 1 {
 			bindings = append(bindings, m.keyMap.Skip)
 		}
-		return append(bindings, m.keyMap.Close)
+		return append(bindings, m.keyMap.Copy)
 	case MCPAuthStateAuthenticating:
-		return []key.Binding{m.keyMap.Submit, m.keyMap.Copy, m.keyMap.Close}
+		return []key.Binding{m.keyMap.Submit, m.keyMap.Close, m.keyMap.Copy}
 	case MCPAuthStateSuccess:
 		label := "finish"
 		if m.current+1 < len(m.pending) {

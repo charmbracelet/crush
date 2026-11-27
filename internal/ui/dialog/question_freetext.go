@@ -229,6 +229,8 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		contentWidth--
 		lines, cursorRow = build(contentWidth)
 	}
+	textClip := area
+	textClip.Max.X = area.Min.X + contentWidth
 
 	// Clamp scroll, then keep the cursor row visible unless the
 	// user is wheel-scrolling.
@@ -255,7 +257,7 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 		ln := lines[idx]
 		y := area.Min.Y + screenRow
-		drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
+		drawStyledText(scr, textClip, area.Min.X, y, ln.text)
 		if ln.cursorX >= 0 && ln.cursorX < contentWidth && baseCursor != nil {
 			c := *baseCursor
 			c.X = ln.cursorX

@@ -25,6 +25,11 @@ const (
 	// finished. Message carries the error text when it failed, empty on
 	// success.
 	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
+	// TypeSummarizing indicates the agent is compacting a session: writing a
+	// checkpoint and dropping the transcript it replaces. Published again
+	// with Done set when the session resumes, whether the compaction
+	// succeeded, failed, or was canceled.
+	TypeSummarizing Type = "summarize"
 )
 
 // Notification represents a domain event published by the agent.
@@ -47,6 +52,15 @@ type Notification struct {
 	// AWSSOURL carries the SSO verification URL for TypeAWSSSOAuth once it
 	// appears in the refresh command's output.
 	AWSSOURL string
+	// Progress carries a human-readable status for TypeSummarizing: what is
+	// about to happen as it starts, and the outcome once Done is set. It is
+	// deliberately not Message, which crosses the wire as an error and would
+	// make a successful compaction look like a failed run to non-interactive
+	// clients.
+	Progress string
+	// Done marks the closing half of a TypeSummarizing pair. Ignored by
+	// other notification types.
+	Done bool
 }
 
 // RunComplete is the authoritative end-of-run signal for a session.

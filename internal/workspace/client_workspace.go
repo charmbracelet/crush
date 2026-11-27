@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
@@ -412,8 +413,30 @@ func (w *ClientWorkspace) AgentSetMain(agentID string) error {
 	return nil
 }
 
-func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
-	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID)
+// errPreviewOverWireIsUnsupported marks the checkpoint-preview methods as
+// local-only. A remote workspace could stage through a new endpoint, but until
+// it exists the honest answer is "not here" rather than a preview that quietly
+// commits.
+var errPreviewOverWireIsUnsupported = errors.New("checkpoint preview requires a local workspace")
+
+func (w *ClientWorkspace) AgentSummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, errPreviewOverWireIsUnsupported
+}
+
+func (w *ClientWorkspace) AgentConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return errPreviewOverWireIsUnsupported
+}
+
+func (w *ClientWorkspace) AgentDiscardSummarize(context.Context, string, string) error {
+	return errPreviewOverWireIsUnsupported
+}
+
+func (w *ClientWorkspace) AgentRestoreSummarize(ctx context.Context, sessionID string) error {
+	return w.client.AgentRestoreSummarizeSession(ctx, w.workspaceID(), sessionID)
+}
+
+func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {
+	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID, instructions)
 }
 
 func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
@@ -1537,6 +1560,8 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			ProviderID:   e.Payload.ProviderID,
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
+			Progress:     e.Payload.Progress,
+			Done:         e.Payload.Done,
 		}
 		if e.Payload.Error != nil {
 			n.Message = e.Payload.Error.Error()

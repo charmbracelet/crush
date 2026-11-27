@@ -94,7 +94,7 @@ func TestAssistantMessageItem_PlanCardDoesNotReWrapContent(t *testing.T) {
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 
 	const width = 72
-	_, innerWidth := planBoxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
+	_, innerWidth := boxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
 
 	renderer := common.PlanMarkdownRenderer(&sty, innerWidth)
 	mu := common.LockMarkdownRenderer(renderer)
@@ -334,7 +334,7 @@ func TestAssistantMessageItem_PlanCardBordersAlign(t *testing.T) {
 					item.SetPlanAgent(true)
 					rendered := item.RawRender(width)
 					if name == "family_emoji" || name == "oversize_only" {
-						_, inner := planBoxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
+						_, inner := boxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
 						if inner >= 8 {
 							require.Contains(t, rendered, "👨‍👩‍👧‍👦")
 						} else {

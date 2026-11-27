@@ -24,8 +24,14 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.countLedgerEntriesStmt, err = db.PrepareContext(ctx, countLedgerEntries); err != nil {
+		return nil, fmt.Errorf("error preparing query CountLedgerEntries: %w", err)
+	}
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
+	}
+	if q.createLedgerEntryStmt, err = db.PrepareContext(ctx, createLedgerEntry); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateLedgerEntry: %w", err)
 	}
 	if q.createMessageStmt, err = db.PrepareContext(ctx, createMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateMessage: %w", err)
@@ -35,6 +41,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteFileStmt, err = db.PrepareContext(ctx, deleteFile); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteFile: %w", err)
+	}
+	if q.deleteLedgerEntryStmt, err = db.PrepareContext(ctx, deleteLedgerEntry); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteLedgerEntry: %w", err)
 	}
 	if q.deleteMCPDisabledServerStmt, err = db.PrepareContext(ctx, deleteMCPDisabledServer); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteMCPDisabledServer: %w", err)
@@ -132,6 +141,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listLatestSessionFilesStmt, err = db.PrepareContext(ctx, listLatestSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListLatestSessionFiles: %w", err)
 	}
+	if q.listLedgerEntriesStmt, err = db.PrepareContext(ctx, listLedgerEntries); err != nil {
+		return nil, fmt.Errorf("error preparing query ListLedgerEntries: %w", err)
+	}
 	if q.listMCPDisabledServersStmt, err = db.PrepareContext(ctx, listMCPDisabledServers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListMCPDisabledServers: %w", err)
 	}
@@ -162,6 +174,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
 	}
+	if q.maxLedgerSeqStmt, err = db.PrepareContext(ctx, maxLedgerSeq); err != nil {
+		return nil, fmt.Errorf("error preparing query MaxLedgerSeq: %w", err)
+	}
 	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
 	}
@@ -185,9 +200,19 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.countLedgerEntriesStmt != nil {
+		if cerr := q.countLedgerEntriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countLedgerEntriesStmt: %w", cerr)
+		}
+	}
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
+		}
+	}
+	if q.createLedgerEntryStmt != nil {
+		if cerr := q.createLedgerEntryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createLedgerEntryStmt: %w", cerr)
 		}
 	}
 	if q.createMessageStmt != nil {
@@ -203,6 +228,11 @@ func (q *Queries) Close() error {
 	if q.deleteFileStmt != nil {
 		if cerr := q.deleteFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteFileStmt: %w", cerr)
+		}
+	}
+	if q.deleteLedgerEntryStmt != nil {
+		if cerr := q.deleteLedgerEntryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteLedgerEntryStmt: %w", cerr)
 		}
 	}
 	if q.deleteMCPDisabledServerStmt != nil {
@@ -365,6 +395,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listLatestSessionFilesStmt: %w", cerr)
 		}
 	}
+	if q.listLedgerEntriesStmt != nil {
+		if cerr := q.listLedgerEntriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listLedgerEntriesStmt: %w", cerr)
+		}
+	}
 	if q.listMCPDisabledServersStmt != nil {
 		if cerr := q.listMCPDisabledServersStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listMCPDisabledServersStmt: %w", cerr)
@@ -413,6 +448,11 @@ func (q *Queries) Close() error {
 	if q.listUserMessagesBySessionStmt != nil {
 		if cerr := q.listUserMessagesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listUserMessagesBySessionStmt: %w", cerr)
+		}
+	}
+	if q.maxLedgerSeqStmt != nil {
+		if cerr := q.maxLedgerSeqStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing maxLedgerSeqStmt: %w", cerr)
 		}
 	}
 	if q.recordFileReadStmt != nil {
@@ -484,10 +524,13 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                                   DBTX
 	tx                                   *sql.Tx
+	countLedgerEntriesStmt               *sql.Stmt
 	createFileStmt                       *sql.Stmt
+	createLedgerEntryStmt                *sql.Stmt
 	createMessageStmt                    *sql.Stmt
 	createSessionStmt                    *sql.Stmt
 	deleteFileStmt                       *sql.Stmt
+	deleteLedgerEntryStmt                *sql.Stmt
 	deleteMCPDisabledServerStmt          *sql.Stmt
 	deleteMCPEnabledServerStmt           *sql.Stmt
 	deleteMessageStmt                    *sql.Stmt
@@ -520,6 +563,7 @@ type Queries struct {
 	listFilesByPathStmt                  *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
 	listLatestSessionFilesStmt           *sql.Stmt
+	listLedgerEntriesStmt                *sql.Stmt
 	listMCPDisabledServersStmt           *sql.Stmt
 	listMCPEnabledServersStmt            *sql.Stmt
 	listMessagesBySessionStmt            *sql.Stmt
@@ -530,6 +574,7 @@ type Queries struct {
 	listSkillsDisabledStmt               *sql.Stmt
 	listSkillsEnabledStmt                *sql.Stmt
 	listUserMessagesBySessionStmt        *sql.Stmt
+	maxLedgerSeqStmt                     *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
 	setSessionChannelStmt                *sql.Stmt
@@ -542,7 +587,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                                   tx,
 		tx:                                   tx,
+		countLedgerEntriesStmt:               q.countLedgerEntriesStmt,
 		createFileStmt:                       q.createFileStmt,
+		createLedgerEntryStmt:                q.createLedgerEntryStmt,
 		createMessageStmt:                    q.createMessageStmt,
 		createSessionStmt:                    q.createSessionStmt,
 		deleteFileStmt:                       q.deleteFileStmt,
@@ -578,6 +625,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listFilesByPathStmt:                  q.listFilesByPathStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:           q.listLatestSessionFilesStmt,
+		listLedgerEntriesStmt:                q.listLedgerEntriesStmt,
 		listMCPDisabledServersStmt:           q.listMCPDisabledServersStmt,
 		listMCPEnabledServersStmt:            q.listMCPEnabledServersStmt,
 		listMessagesBySessionStmt:            q.listMessagesBySessionStmt,
@@ -588,6 +636,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSkillsDisabledStmt:               q.listSkillsDisabledStmt,
 		listSkillsEnabledStmt:                q.listSkillsEnabledStmt,
 		listUserMessagesBySessionStmt:        q.listUserMessagesBySessionStmt,
+		maxLedgerSeqStmt:                     q.maxLedgerSeqStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
 		renameSessionStmt:                    q.renameSessionStmt,
 		setSessionChannelStmt:                q.setSessionChannelStmt,

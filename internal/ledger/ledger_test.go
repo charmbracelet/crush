@@ -1,0 +1,258 @@
+package ledger
+
+import (
+	"fmt"
+	"sync"
+	"testing"
+
+	"github.com/charmbracelet/crush/internal/compaction"
+	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/session"
+	"github.com/stretchr/testify/require"
+)
+
+func newTestService(t *testing.T) (Service, string) {
+	t.Helper()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	return NewService(q), sess.ID
+}
+
+func TestAppendAssignsSeqAndRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	stored, err := svc.Append(t.Context(), sessionID, []compaction.Entry{
+		{
+			ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceNotable,
+			Text: "Migration applied cleanly", Sources: []string{"m-1"},
+		},
+		{
+			ID: "b", Kind: compaction.KindReflection, Relevance: compaction.RelevanceDecision,
+			Text: "Ledger stays append-only so an earlier reading can be reconstructed",
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+
+	// The store owns the clock; callers never assign seq.
+	require.Equal(t, 1, stored[0].Seq)
+	require.Equal(t, 2, stored[1].Seq)
+
+	got, err := svc.Ledger(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, got.Entries, 2)
+	require.Equal(t, "Migration applied cleanly", got.Entries[0].Text)
+	require.Equal(t, []string{"m-1"}, got.Entries[0].Sources)
+	require.Equal(t, compaction.KindReflection, got.Entries[1].Kind)
+	require.Equal(t, 2, got.CoversThrough, "the watermark is the last stored seq")
+
+	n, err := svc.Count(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+}
+
+func TestAppendIsIdempotentForRetriedTurns(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	entries := []compaction.Entry{{ID: "a", Kind: compaction.KindObservation, Text: "same fact"}}
+	first, err := svc.Append(t.Context(), sessionID, entries)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	// A retried observer must not fail the append; the conflict means the
+	// work is already done.
+	second, err := svc.Append(t.Context(), sessionID, entries)
+	require.NoError(t, err)
+	require.Empty(t, second, "the entry was already stored")
+
+	n, err := svc.Count(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}
+
+func TestLedgerSurvivesRetirementAndRenders(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	_, err := svc.Append(t.Context(), sessionID, []compaction.Entry{
+		{
+			ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceContext,
+			Text: "Listed files",
+		},
+		{
+			ID: "b", Kind: compaction.KindObservation, Relevance: compaction.RelevanceDecision,
+			Text: "User rejected splitting the ledger across sessions",
+		},
+		{ID: "c", Kind: compaction.KindDrop, Text: "superseded", Retires: []int{1}},
+	})
+	require.NoError(t, err)
+
+	l, err := svc.Ledger(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, l.Entries, 3, "retiring an entry removes no row")
+
+	rendered := l.Render(0)
+	require.NotContains(t, rendered.Text, "Listed files")
+	require.Contains(t, rendered.Text, "User rejected splitting")
+
+	// End to end: a stored ledger that renders deterministically is the whole
+	// promise of this store, so assert the render twice.
+	require.Equal(t, rendered.Text, l.Render(0).Text)
+}
+
+func TestDecayRetiresLowRelevanceEntriesBeyondBudget(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	_, err := svc.Append(t.Context(), sessionID, []compaction.Entry{
+		{
+			ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceContext,
+			Text: "Listed files in directory",
+		},
+		{
+			ID: "b", Kind: compaction.KindObservation, Relevance: compaction.RelevanceNotable,
+			Text: "Applied migration 20261007",
+		},
+		{
+			ID: "c", Kind: compaction.KindReflection, Relevance: compaction.RelevanceDecision,
+			Text: "Always prefer append-only ledger rows to prevent rationale loss",
+		},
+	})
+	require.NoError(t, err)
+
+	// Budget of 16 tokens fits only the 16-token decision. The lower relevance
+	// entries (7 tokens each) should both be dropped and retired.
+	retired, err := svc.Decay(t.Context(), sessionID, "cp-1", compaction.RenderBudget(16))
+	require.NoError(t, err)
+	require.Equal(t, 2, retired, "context and notable entries should decay")
+
+	// Render after decay: only the decision remains active.
+	l, err := svc.Ledger(t.Context(), sessionID)
+	require.NoError(t, err)
+
+	rendered := l.Render(0)
+	require.Contains(t, rendered.Text, "Always prefer append-only ledger rows")
+	require.NotContains(t, rendered.Text, "Listed files")
+	require.NotContains(t, rendered.Text, "Applied migration 20261007")
+
+	// Undoing decay for that checkpoint brings the retired entries back.
+	restored, err := svc.UndoDecay(t.Context(), sessionID, "cp-1")
+	require.NoError(t, err)
+	require.Equal(t, 2, restored)
+
+	l, err = svc.Ledger(t.Context(), sessionID)
+	require.NoError(t, err)
+	rendered = l.Render(0)
+	require.Contains(t, rendered.Text, "Listed files")
+	require.Contains(t, rendered.Text, "Applied migration 20261007")
+}
+
+func TestAppendDistinguishesMarkersBySessionAndSources(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	s1, err := sessions.Create(t.Context(), "s1")
+	require.NoError(t, err)
+	s2, err := sessions.Create(t.Context(), "s2")
+	require.NoError(t, err)
+	svc := NewService(q)
+
+	marker := func(sources ...string) []compaction.Entry {
+		return []compaction.Entry{{
+			Kind:    compaction.KindDrop,
+			Text:    "observed; nothing durable to record",
+			Sources: sources,
+		}}
+	}
+
+	first, err := svc.Append(t.Context(), s1.ID, marker("m-1"))
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	second, err := svc.Append(t.Context(), s1.ID, marker("m-2"))
+	require.NoError(t, err)
+	require.Len(t, second, 1, "marker for different messages must not collide")
+
+	retry, err := svc.Append(t.Context(), s1.ID, marker("m-2"))
+	require.NoError(t, err)
+	require.Empty(t, retry, "retrying the exact same marker stays idempotent")
+
+	l1, err := svc.Ledger(t.Context(), s1.ID)
+	require.NoError(t, err)
+	require.Empty(t, l1.Unobserved([]string{"m-1", "m-2"}))
+
+	other, err := svc.Append(t.Context(), s2.ID, marker("m-1"))
+	require.NoError(t, err)
+	require.Len(t, other, 1, "same marker in another session must not collide")
+}
+
+func TestConcurrentAppendAndDecayDropNoWrites(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+	ctx := t.Context()
+
+	const writers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, writers+1)
+	for i := range writers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			stored, err := svc.Append(ctx, sessionID, []compaction.Entry{{
+				Kind:      compaction.KindObservation,
+				Relevance: compaction.RelevanceContext,
+				Text:      fmt.Sprintf("concurrent observation %d", i),
+				Sources:   []string{fmt.Sprintf("m-%d", i)},
+			}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if len(stored) != 1 {
+				errs <- fmt.Errorf("writer %d stored %d rows, want 1", i, len(stored))
+			}
+		}(i)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, err := svc.Decay(ctx, sessionID, "cp-concurrent", compaction.RenderBudget(1)); err != nil {
+			errs <- err
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	l, err := svc.Ledger(ctx, sessionID)
+	require.NoError(t, err)
+	obs := 0
+	for _, e := range l.Entries {
+		if e.Kind == compaction.KindObservation {
+			obs++
+		}
+	}
+	require.Equal(t, writers, obs, "no concurrent observation may be dropped by seq collision")
+}

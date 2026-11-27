@@ -8,6 +8,18 @@ import (
 	"database/sql"
 )
 
+type CompactionLedger struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Seq       int64  `json:"seq"`
+	Kind      string `json:"kind"`
+	Text      string `json:"text"`
+	Relevance int64  `json:"relevance"`
+	Sources   string `json:"sources"`
+	Retires   string `json:"retires"`
+	CreatedAt int64  `json:"created_at"`
+}
+
 type DisabledSkill struct {
 	Name string `json:"name"`
 }
@@ -59,16 +71,19 @@ type ReadFile struct {
 }
 
 type Session struct {
-	ID               string         `json:"id"`
-	ParentSessionID  sql.NullString `json:"parent_session_id"`
-	Title            string         `json:"title"`
-	MessageCount     int64          `json:"message_count"`
-	PromptTokens     int64          `json:"prompt_tokens"`
-	CompletionTokens int64          `json:"completion_tokens"`
-	Cost             float64        `json:"cost"`
-	UpdatedAt        int64          `json:"updated_at"`
-	CreatedAt        int64          `json:"created_at"`
-	SummaryMessageID sql.NullString `json:"summary_message_id"`
-	Todos            sql.NullString `json:"todos"`
-	Channel          sql.NullString `json:"channel"`
+	ID                      string         `json:"id"`
+	ParentSessionID         sql.NullString `json:"parent_session_id"`
+	Title                   string         `json:"title"`
+	MessageCount            int64          `json:"message_count"`
+	PromptTokens            int64          `json:"prompt_tokens"`
+	CompletionTokens        int64          `json:"completion_tokens"`
+	Cost                    float64        `json:"cost"`
+	UpdatedAt               int64          `json:"updated_at"`
+	CreatedAt               int64          `json:"created_at"`
+	SummaryMessageID        sql.NullString `json:"summary_message_id"`
+	Todos                   sql.NullString `json:"todos"`
+	Channel                 sql.NullString `json:"channel"`
+	SummaryCutMessageID     sql.NullString `json:"summary_cut_message_id"`
+	PrevSummaryMessageID    sql.NullString `json:"prev_summary_message_id"`
+	PrevSummaryCutMessageID sql.NullString `json:"prev_summary_cut_message_id"`
 }

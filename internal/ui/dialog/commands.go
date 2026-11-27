@@ -292,25 +292,20 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-
 	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
-
-	c.list.SetSize(innerWidth, max(0, height-heightOffset))
+	listHeight, listTotalHeight, listWidth := sizeDialogList(t, c.list, innerWidth, height)
 
 	// Hide the shortcut hints uniformly when the widest would crowd names.
-	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
+	applyInfoColumnVisibility(c.list.FilteredItems(), listWidth, commandInfoMaxPercent)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
 	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
 	inputView := t.Dialog.InputPrompt.Render(c.input.View())
 	rc.AddPart(inputView)
-	listBody := renderDialogListBody(t, c.list.Render(), len(c.list.FilteredItems()) == 0, emptyNoMatches, innerWidth)
+	listBody := renderDialogListBody(t, c.list.Render(), len(c.list.FilteredItems()) == 0, emptyNoMatches, listWidth)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(listBody)
+	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, c.list.Offset())
 	rc.AddPart(listView)
 	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
 

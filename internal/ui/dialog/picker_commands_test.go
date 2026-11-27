@@ -29,3 +29,12 @@ func TestCommandsResizeKeepsFilter(t *testing.T) {
 	require.Contains(t, text, "> sess")
 	require.Len(t, c.list.FilteredItems(), filtered)
 }
+
+// TestCommandsShowsScrollbar verifies the command list shows a scrollbar
+// when it overflows, like the other pickers.
+func TestCommandsShowsScrollbar(t *testing.T) {
+	t.Parallel()
+	c := newPickerTestCommands(t)
+	text := strings.Join(drawFits(t, c, 100, 12), "\n")
+	require.Contains(t, text, "┃")
+}

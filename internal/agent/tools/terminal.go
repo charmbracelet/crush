@@ -13,6 +13,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/terminal"
@@ -66,7 +67,7 @@ type TerminalParams struct {
 	SettleMs int      `json:"settle_ms,omitempty" description:"How long to wait for the session to redraw after writing or pasting before reporting the screen (default 250)"`
 
 	// read
-	IncludeScrollback bool `json:"include_scrollback,omitempty" description:"Also return everything that scrolled off the visible screen (read only)"`
+	IncludeScrollback bool   `json:"include_scrollback,omitempty" description:"Also return everything that scrolled off the visible screen (read only)"`
 	WaitSeconds       int    `json:"wait_seconds,omitempty" description:"Block until the session exits, the keyboard changes hands, or this many seconds elapse (read only, 0 returns immediately). Prefer this over polling in a loop"`
 	WaitFor           string `json:"wait_for,omitempty" description:"Return as soon as this exact text shows up on the screen, like \"Password:\" or \"$ \" (read only). wait_seconds bounds the wait and defaults to 30 when this is set"`
 
@@ -114,6 +115,7 @@ const terminalUnavailableMessage = "the terminal tool is unavailable in this env
 
 func NewTerminalTool(permissions permission.Service, terminals terminal.Service, workingDir, spillDir string, perms *config.Permissions) fantasy.AgentTool {
 	blocked := resolveBlockedCommands(perms)
+	navApproved := csync.NewMap[string, struct{}]()
 	return fantasy.NewAgentTool(
 		TerminalToolName,
 		terminalDescription,
@@ -124,6 +126,7 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 				workingDir:  workingDir,
 				spillDir:    spillDir,
 				call:        call,
+				navApproved: navApproved,
 			}
 			switch params.Action {
 			case terminalActionStart:
@@ -159,6 +162,9 @@ type terminalTool struct {
 	workingDir  string
 	spillDir    string
 	call        fantasy.ToolCall
+	// navApproved holds the terminals, per chat, where the user approved
+	// a navigation-only write; later ones there go through unasked.
+	navApproved *csync.Map[string, struct{}]
 }
 
 // start checks and approves a command, then spawns it in the embedded
@@ -265,13 +271,26 @@ func (t terminalTool) input(ctx context.Context, params TerminalParams, blocked 
 		}
 	}
 
+	navKey := GetSessionFromContext(ctx) + "\x00" + session.SessionID + "\x00" + session.Command
+	navigating := params.Action == terminalActionWrite && navigationOnly(params)
+	if navigating {
+		if _, ok := t.navApproved.Get(navKey); ok {
+			params.SessionID = session.SessionID
+			return t.response(t.run(ctx, params.Action, params))
+		}
+	}
+
+	description := fmt.Sprintf("%s the interactive terminal running %s: %q", verb, commandLabel(session.Command), input)
+	if navigating {
+		description += " (approving lets later arrow keys, Tab, Esc, and scrolling in this terminal through without asking)"
+	}
 	granted, err := t.permissions.Request(ctx, permission.CreatePermissionRequest{
 		SessionID:   GetSessionFromContext(ctx),
 		Path:        session.WorkingDir,
 		ToolCallID:  t.call.ID,
 		ToolName:    TerminalToolName,
 		Action:      terminalActionWrite,
-		Description: fmt.Sprintf("%s the interactive terminal running %s: %q", verb, commandLabel(session.Command), input),
+		Description: description,
 		Params: TerminalPermissionsParams{
 			Description: verb + " the running terminal",
 			Command:     input,
@@ -287,10 +306,35 @@ func (t terminalTool) input(ctx context.Context, params TerminalParams, blocked 
 	if !granted {
 		return NewPermissionDeniedResponse(), nil
 	}
+	if navigating {
+		t.navApproved.Set(navKey, struct{}{})
+	}
 
 	// Act on the session that was approved, not whichever is newest now.
 	params.SessionID = session.SessionID
 	return t.response(t.run(ctx, params.Action, params))
+}
+
+// navigationKeys move around a program without entering anything. Enter,
+// typed text, and control keys are left out: they can run things.
+var navigationKeys = map[string]bool{
+	"up": true, "down": true, "left": true, "right": true,
+	"home": true, "end": true, "pageup": true, "pagedown": true,
+	"tab": true, "shift+tab": true, "esc": true,
+}
+
+// navigationOnly reports whether a write only moves around: navigation
+// keys and mouse scrolling, with no text.
+func navigationOnly(params TerminalParams) bool {
+	if params.Text != "" || (len(params.Keys) == 0 && params.Mouse == nil) {
+		return false
+	}
+	for _, k := range params.Keys {
+		if !navigationKeys[strings.ToLower(strings.TrimSpace(k))] {
+			return false
+		}
+	}
+	return params.Mouse == nil || params.Mouse.Action == "wheel"
 }
 
 // checkTypedLines runs the deny-list over each line of text that parses

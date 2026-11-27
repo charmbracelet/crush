@@ -774,6 +774,52 @@ func TestTerminalStartGrantCoversOnlyThatCommand(t *testing.T) {
 	require.Equal(t, "git commit", permissions.requests[0].GrantKey)
 }
 
+// grantingPermissionService records requests and grants them.
+type grantingPermissionService struct {
+	mockBashPermissionService
+	requests []permission.CreatePermissionRequest
+}
+
+func (g *grantingPermissionService) Request(_ context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	g.requests = append(g.requests, req)
+	return true, nil
+}
+
+func TestTerminalNavigationAsksOnce(t *testing.T) {
+	needsPOSIXShell(t)
+
+	resetTerminalManager(t)
+	workingDir := t.TempDir()
+
+	session, err := shell.GetInteractiveSessionManager().Start(shell.InteractiveSessionOptions{
+		Command:     "cat",
+		WorkingDir:  workingDir,
+		Owner:       "test-session",
+		AgentDriven: true,
+	})
+	require.NoError(t, err)
+
+	permissions := &grantingPermissionService{}
+	tool := NewTerminalTool(permissions, newFakeTerminalService(), workingDir, workingDir, nil)
+	write := func(params TerminalParams) {
+		t.Helper()
+		params.Action, params.SessionID, params.SettleMs = "write", session.ID(), 1
+		resp := runTerminalTool(t, tool, params)
+		require.False(t, resp.IsError, resp.Content)
+	}
+
+	write(TerminalParams{Keys: []string{"down"}})
+	require.Len(t, permissions.requests, 1, "the first navigation asks")
+	write(TerminalParams{Keys: []string{"up", "Tab", "esc"}})
+	write(TerminalParams{Mouse: &TerminalMouse{Action: "wheel", Button: "wheeldown", X: 1, Y: 1}})
+	require.Len(t, permissions.requests, 1, "later navigation goes through")
+
+	write(TerminalParams{Keys: []string{"down", "enter"}})
+	write(TerminalParams{Text: "x"})
+	write(TerminalParams{Mouse: &TerminalMouse{Action: "click", Button: "left", X: 1, Y: 1}})
+	require.Len(t, permissions.requests, 4, "enter, text, and clicks still ask")
+}
+
 func TestTerminalInputChecksBlockedCommands(t *testing.T) {
 	needsPOSIXShell(t)
 

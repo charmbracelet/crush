@@ -17,7 +17,7 @@ At any moment either you or the user holds a terminal's keyboard. The wait param
 - take: ask the user for the keyboard of a terminal they hold: one they opened themselves, or one you handed them. The user approves it like any other permission; then you drive it and they watch.
 </actions>
 
-Each write and paste asks the user for permission, since a shell or REPL runs whatever you type. You can only write to, paste into, or kill a terminal while you hold its keyboard. A terminal the user opened themselves, or one you handed to them, is read-only to you until you take it. In a terminal you started or took, the user can press ctrl+t in the panel at any time to hand the keyboard back to you or to take it from you; a write then reports who holds it.
+Each write and paste asks the user for permission, since a shell or REPL runs whatever you type. Navigation is the exception: once the user approves a write of only arrow keys, home/end, pageup/pagedown, tab, shift+tab, esc, or mouse wheel scrolling into a terminal, later navigation-only writes there go through without asking, so keep navigation in writes of its own. Text, enter, and clicks always ask. Commands on the block list are refused in written or pasted text too. You can only write to, paste into, or kill a terminal while you hold its keyboard. A terminal the user opened themselves, or one you handed to them, is read-only to you until you take it. In a terminal you started or took, the user can press ctrl+t in the panel at any time to hand the keyboard back to you or to take it from you; a write then reports who holds it.
 
 <keys>
 Send named keys instead of raw escape sequences; they are encoded for whatever mode the program enabled, which raw byte sequences cannot know:

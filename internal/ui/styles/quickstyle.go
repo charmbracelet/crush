@@ -1233,7 +1233,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.OAuth.UserCodeBg = o.bgLeastVisible
 
 	s.Dialog.Arguments.Content = base.Padding(1)
-	s.Dialog.Arguments.Description = base.MarginBottom(1).MaxHeight(3)
+	s.Dialog.Arguments.Description = base.MarginBottom(1)
 	s.Dialog.Arguments.InputLabelBlurred = base.Foreground(o.fgMoreSubtle)
 	s.Dialog.Arguments.InputLabelFocused = base.Bold(true)
 	s.Dialog.Arguments.InputRequiredMarkBlurred = base.Foreground(o.fgMoreSubtle).SetString("*")

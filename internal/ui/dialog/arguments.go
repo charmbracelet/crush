@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ArgumentsID is the identifier for the arguments dialog.
@@ -29,6 +30,9 @@ const (
 	minInputWidth        = 30
 	maxViewportHeight    = 20
 	argumentsFieldHeight = 3 // label + input + spacing per field
+	// argumentsMinWidth is the narrowest the dialog content gets when
+	// the screen allows it, wide enough for the whole help line.
+	argumentsMinWidth = 50
 )
 
 // Arguments represents a dialog for collecting command arguments.
@@ -93,12 +97,9 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 		input.SetVirtualCursor(false)
 		input.SetStyles(com.Styles.TextInput)
 		input.Prompt = "> "
-		// Use description as placeholder if available, otherwise title
-		if arg.Description != "" {
-			input.Placeholder = arg.Description
-		} else {
-			input.Placeholder = arg.Title
-		}
+		// Use the description as a placeholder; without one, leave it
+		// blank rather than repeat the label above the input.
+		input.Placeholder = arg.Description
 
 		if i == 0 {
 			input.Focus()
@@ -259,7 +260,9 @@ func (a *Arguments) Cursor(descriptionHeight int) *tea.Cursor {
 func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s := a.com.Styles
 
-	dialogContentStyle := s.Dialog.Arguments.Content
+	// Each field already ends in a blank row, so drop the content's
+	// bottom padding to keep a single blank row above the help.
+	dialogContentStyle := s.Dialog.Arguments.Content.PaddingBottom(0)
 	possibleWidth := area.Dx() - s.Dialog.View.GetHorizontalFrameSize() - dialogContentStyle.GetHorizontalFrameSize()
 	// Build fields with label and input.
 	caser := cases.Title(language.English)
@@ -304,9 +307,11 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	renderedFields := lipgloss.JoinVertical(lipgloss.Left, fields...)
 
-	// Anchor width to the longest field, capped at maxInputWidth.
+	// Anchor width to the longest field, capped at maxInputWidth, but
+	// keep enough room for the help line so its hints are not cut off.
 	const scrollbarWidth = 1
 	width := lipgloss.Width(renderedFields)
+	width = max(width, min(argumentsMinWidth, possibleWidth-scrollbarWidth))
 	height := lipgloss.Height(renderedFields)
 
 	// Use standard header
@@ -316,16 +321,21 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	header := common.DialogTitle(s, titleText, width, s.Dialog.TitleGradFromColor, s.Dialog.TitleGradToColor)
 
-	// Add description if available.
-	var description string
-	if a.description != "" {
-		descStyle := s.Dialog.Arguments.Description.Width(width)
-		description = descStyle.Render(a.description)
-	}
-
 	helpView := renderDialogHelp(s, &a.help, a, width)
 	if a.loading {
-		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
+		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + "Generating prompt...")
+	}
+
+	// Add description if available. It wraps in full when there is
+	// room; on short screens it gives way to the first field and ends
+	// in an ellipsis so the cut is visible.
+	var description string
+	if a.description != "" {
+		descStyle := s.Dialog.Arguments.Description
+		maxLines := area.Dy() - s.Dialog.View.GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() -
+			lipgloss.Height(header) - lipgloss.Height(helpView) - 2 - // extra spacing, as below
+			argumentsFieldHeight - descStyle.GetVerticalFrameSize()
+		description = descStyle.Render(clampDialogLines(ansi.Wrap(a.description, width, ""), max(1, maxLines)))
 	}
 
 	availableHeight := area.Dy() - s.Dialog.View.GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() - lipgloss.Height(header) - lipgloss.Height(description) - lipgloss.Height(helpView) - 2 // extra spacing
@@ -377,10 +387,12 @@ func (a *Arguments) StopLoading() {
 
 // ShortHelp implements help.KeyMap.
 func (a *Arguments) ShortHelp() []key.Binding {
+	// Esc comes before navigation so it survives truncation on
+	// narrow screens.
 	return []key.Binding{
 		a.keyMap.Confirm,
-		a.keyMap.Next,
 		a.keyMap.Close,
+		a.keyMap.Next,
 	}
 }
 

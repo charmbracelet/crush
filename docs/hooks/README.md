@@ -817,6 +817,35 @@ Present in every hook event:
 }
 ```
 
+Both post-tool events also include `tool_metadata` when the tool provides valid
+JSON metadata. Its shape depends on the tool. Metadata is separate from
+`tool_response` and is not changed by `updated_output`.
+
+For `bash`, the metadata includes the command's completion state:
+
+```jsonc
+{
+  "tool_metadata": {
+    "completed": true,
+    "exit_code": 0,
+    "interrupted": false,
+  },
+}
+```
+
+`completed` is false and `exit_code` is absent while a command is still running
+in the background. A completed command includes `exit_code`, including zero;
+`interrupted` reports whether execution was interrupted. Commands explicitly
+started in the background can finish before the tool returns, so `background`
+alone does not establish completion. Older builds and other tools may omit
+these fields.
+
+`PostToolUse` means the tool returned a non-error response, not that a shell
+command exited zero. Bash preserves nonzero command exits as text responses.
+Hooks that only transform successful completed commands should check
+`completed == true`, `exit_code == 0`, and `interrupted == false`, and leave
+output unchanged when the metadata is absent.
+
 `PermissionResult` adds how the prompt was resolved:
 
 ```jsonc

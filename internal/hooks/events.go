@@ -1,6 +1,9 @@
 package hooks
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Hook event names.
 const (
@@ -95,6 +98,8 @@ type Event struct {
 
 	// ToolResponse is the tool's output (PostToolUse).
 	ToolResponse *string
+	// ToolMetadata is the tool's raw JSON metadata (post-tool events).
+	ToolMetadata json.RawMessage
 	// Error describes the failure (PostToolUseFailure, StopFailure).
 	Error string
 	// LastAssistantMessage is the assistant's text for the turn (TurnEnd).

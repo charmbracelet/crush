@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -242,6 +243,7 @@ func TestBuildPayload(t *testing.T) {
 		// tool_input should be an object, not a string.
 		require.Contains(t, s, `"tool_input":{"command":"ls"}`)
 		require.NotContains(t, s, `"tool_response"`)
+		require.NotContains(t, s, `"tool_metadata"`)
 	})
 
 	t.Run("lifecycle event omits tool fields", func(t *testing.T) {
@@ -256,6 +258,20 @@ func TestBuildPayload(t *testing.T) {
 		t.Parallel()
 		s := string(BuildPayload(Event{Name: EventPostToolUse, Tool: &ToolCall{Name: "bash", Input: `{}`}, ToolResponse: new("")}, "/work"))
 		require.Contains(t, s, `"tool_response":""`)
+	})
+
+	t.Run("post tool metadata retains JSON types", func(t *testing.T) {
+		t.Parallel()
+		metadata := json.RawMessage(`{"completed":true,"exit_code":0,"interrupted":false}`)
+		s := string(BuildPayload(Event{Name: EventPostToolUse, ToolMetadata: metadata}, "/work"))
+		require.Contains(t, s, `"tool_metadata":`+string(metadata))
+	})
+
+	t.Run("invalid metadata does not discard the event", func(t *testing.T) {
+		t.Parallel()
+		s := string(BuildPayload(Event{Name: EventPostToolUseFailure, Error: "failed", ToolMetadata: json.RawMessage(`not json`)}, "/work"))
+		require.Contains(t, s, `"error":"failed"`)
+		require.NotContains(t, s, `"tool_metadata"`)
 	})
 
 	t.Run("turn end carries last_assistant_message", func(t *testing.T) {

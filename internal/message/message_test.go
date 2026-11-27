@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,45 @@ func (s *slowUpdateQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMess
 		return ctx.Err()
 	}
 	return s.Querier.UpdateMessage(ctx, arg)
+}
+
+// deleteHookQuerier wraps a [db.Querier] and runs beforeDelete inside
+// DeleteMessage, before the row goes. An error from it fails the delete.
+type deleteHookQuerier struct {
+	db.Querier
+	beforeDelete func() error
+}
+
+func (d *deleteHookQuerier) DeleteMessage(ctx context.Context, id string) error {
+	if err := d.beforeDelete(); err != nil {
+		return err
+	}
+	return d.Querier.DeleteMessage(ctx, id)
+}
+
+// receive returns the next value from ch, failing the test if none
+// arrives in time, so a missing event fails instead of hanging.
+func receive[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for a value")
+		var zero T
+		return zero
+	}
+}
+
+// waitForDeleting waits until Delete has marked id.
+func waitForDeleting(t *testing.T, impl *service, id string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		impl.mu.Lock()
+		defer impl.mu.Unlock()
+		p, ok := impl.pending[id]
+		return ok && p.deletion() == deleting
+	}, time.Second, time.Millisecond)
 }
 
 // newTestService spins up a fresh in-memory message.Service backed by a
@@ -528,7 +568,7 @@ func TestFlush_WaitsForInFlightWrite(t *testing.T) {
 		t.Fatal("timer-fired flush never reached UpdateMessage")
 	}
 
-	// At this point the buffer is dirty=false but flushing=true. A
+	// At this point the buffer is clean but a flush is in flight. A
 	// naive Flush would early-return on !dirty. Spawn Flush in a
 	// goroutine and assert it has not returned while the write is
 	// still blocked.
@@ -665,6 +705,190 @@ func TestFlushAll_WaitsForInFlightWrite(t *testing.T) {
 	got, err := svc.Get(t.Context(), msg.ID)
 	require.NoError(t, err)
 	require.Equal(t, "payload", got.Content().Text)
+}
+
+func TestUpdate_PublishesSnapshotsInWriteOrder(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	svc := NewService(q, WithDebounce(time.Hour))
+	impl := svc.(*service)
+	impl.Shutdown()
+	impl.Broker = pubsub.NewBrokerWithOptions[Message](1)
+	impl.SetMustDeliverTimeout(2 * time.Second)
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := svc.Subscribe(subCtx)
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AddToolCall(ToolCall{ID: "tc1", Name: "view"})
+
+	// The subscriber's pump holds the Created event because nothing reads
+	// yet. This filler waits for the one-slot queue behind it and then fills
+	// that queue, so the next must-deliver publication blocks.
+	impl.PublishMustDeliver(t.Context(), pubsub.CreatedEvent, Message{ID: "filler"})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- svc.Update(t.Context(), msg)
+	}()
+
+	// The subscriber queue is full, so this update blocks in
+	// PublishMustDeliver after its SQL write. The per-message flushing guard
+	// must remain held through publication so a newer update cannot overtake it.
+	require.Eventually(t, func() bool {
+		stored, getErr := svc.Get(t.Context(), msg.ID)
+		return getErr == nil && len(stored.ToolCalls()) == 1
+	}, time.Second, time.Millisecond)
+	impl.mu.Lock()
+	flushing := impl.pending[msg.ID].flushDone != nil
+	impl.mu.Unlock()
+	require.True(t, flushing)
+
+	newer := msg.Clone()
+	newer.FinishToolCall("tc1")
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- svc.Update(t.Context(), newer)
+	}()
+
+	select {
+	case err := <-secondDone:
+		require.Failf(t, "newer update overtook blocked publication", "Update returned: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	created := receive(t, sub)
+	require.Equal(t, pubsub.CreatedEvent, created.Type)
+	require.Equal(t, msg.ID, created.Payload.ID)
+	filler := receive(t, sub)
+	require.Equal(t, "filler", filler.Payload.ID)
+	first := receive(t, sub)
+	require.Equal(t, pubsub.UpdatedEvent, first.Type)
+	require.False(t, first.Payload.ToolCalls()[0].Finished)
+	second := receive(t, sub)
+	require.Equal(t, pubsub.UpdatedEvent, second.Type)
+	require.True(t, second.Payload.ToolCalls()[0].Finished)
+
+	require.NoError(t, receive(t, firstDone))
+	require.NoError(t, receive(t, secondDone))
+}
+
+func TestDeleteSuppressesInFlightUpdatePublication(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	svc := NewService(slow, WithDebounce(0))
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := svc.Subscribe(subCtx)
+
+	msg.AppendContent("stale update")
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- svc.Update(t.Context(), msg)
+	}()
+	receive(t, slow.started)
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- svc.Delete(t.Context(), msg.ID)
+	}()
+	waitForDeleting(t, svc.(*service), msg.ID)
+	select {
+	case err := <-deleteDone:
+		require.Failf(t, "delete did not wait for the in-flight update", "Delete returned: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(slow.release)
+	require.NoError(t, receive(t, updateDone))
+	require.NoError(t, receive(t, deleteDone))
+
+	event := receive(t, sub)
+	require.Equal(t, pubsub.DeletedEvent, event.Type)
+	select {
+	case event := <-sub:
+		require.Failf(t, "stale event published after delete", "Event type: %s", event.Type)
+	case <-time.After(25 * time.Millisecond):
+	}
+	_, err = svc.Get(t.Context(), msg.ID)
+	require.Error(t, err)
+}
+
+func TestCanceledDeleteRestoresPendingUpdates(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	svc := NewService(slow, WithDebounce(0))
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	msg.AppendContent("before cancel")
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- svc.Update(t.Context(), msg)
+	}()
+	receive(t, slow.started)
+
+	deleteCtx, cancelDelete := context.WithCancel(t.Context())
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- svc.Delete(deleteCtx, msg.ID)
+	}()
+	waitForDeleting(t, svc.(*service), msg.ID)
+	msg.AppendContent(" during cancel")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	cancelDelete()
+	require.ErrorIs(t, receive(t, deleteDone), context.Canceled)
+
+	close(slow.release)
+	require.NoError(t, receive(t, updateDone))
+	// The update held during the delete lands on its own, before a later
+	// update could carry the same text.
+	require.Eventually(t, func() bool {
+		stored, err := svc.Get(t.Context(), msg.ID)
+		return err == nil && stored.Content().Text == "before cancel during cancel"
+	}, time.Second, time.Millisecond)
+	msg.AppendContent(" after cancel")
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	stored, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "before cancel during cancel after cancel", stored.Content().Text)
 }
 
 // TestUpdate_StructuralFlushUsesMustDeliver covers the second review
@@ -926,4 +1150,243 @@ func TestStalledSubscriberHoldsOnlyNewestUpdate(t *testing.T) {
 	require.True(t, got[0].MustDeliver)
 	require.True(t, got[0].Payload.IsFinished())
 	require.Zero(t, svc.(*service).DropCount())
+}
+
+// TestUpdatesAfterDeleteBeganStayUnpublished covers updates that reach
+// the service once Delete has begun but had nothing pending to mark,
+// and once it has returned.
+func TestUpdatesAfterDeleteBeganStayUnpublished(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	hook := &deleteHookQuerier{Querier: slow}
+	svc := NewService(hook, WithDebounce(0))
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := svc.Subscribe(subCtx)
+
+	msg.AppendContent("racing")
+	updateDone := make(chan error, 1)
+	hook.beforeDelete = func() error {
+		go func() {
+			updateDone <- svc.Update(context.Background(), msg)
+		}()
+		// Let the update either be held or start its write.
+		select {
+		case <-slow.started:
+		case err := <-updateDone:
+			updateDone <- err
+		}
+		return nil
+	}
+	require.NoError(t, svc.Delete(t.Context(), msg.ID))
+	close(slow.release)
+	require.NoError(t, <-updateDone)
+
+	msg.AppendContent(" trailing")
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	require.Equal(t, pubsub.DeletedEvent, (<-sub).Type)
+	select {
+	case event := <-sub:
+		require.Failf(t, "update published after delete", "Event type: %s", event.Type)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+// A Delete that fails after another one removed the message keeps the
+// other's tombstone, so a late update stays unpublished.
+func TestFailedDeleteKeepsConcurrentTombstone(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	hook := &deleteHookQuerier{Querier: q}
+	svc := NewService(hook, WithDebounce(0))
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := svc.Subscribe(subCtx)
+
+	// The first delete reaches SQL and waits there, then fails once the
+	// second one has removed the row.
+	reached, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	hook.beforeDelete = func() error {
+		if calls.Add(1) == 1 {
+			close(reached)
+			<-release
+			return errors.New("delete failed")
+		}
+		return nil
+	}
+	failed := make(chan error, 1)
+	go func() { failed <- svc.Delete(context.Background(), msg.ID) }()
+	receive(t, reached)
+	require.NoError(t, svc.Delete(t.Context(), msg.ID))
+	close(release)
+	require.Error(t, receive(t, failed))
+
+	msg.AppendContent("late")
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	require.Equal(t, pubsub.DeletedEvent, receive(t, sub).Type)
+	select {
+	case event := <-sub:
+		require.Failf(t, "update published after delete", "Event type: %s", event.Type)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+// A sync update whose write fails while a delete begins reports the
+// failure to its caller.
+func TestUpdateReportsWriteErrorDuringDelete(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	svc := NewService(slow, WithDebounce(0))
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	updateCtx, cancelUpdate := context.WithCancel(t.Context())
+	msg.AppendContent("payload")
+	updateDone := make(chan error, 1)
+	go func() { updateDone <- svc.Update(updateCtx, msg) }()
+	receive(t, slow.started)
+
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- svc.Delete(t.Context(), msg.ID) }()
+	waitForDeleting(t, svc.(*service), msg.ID)
+	cancelUpdate()
+
+	require.ErrorIs(t, receive(t, updateDone), context.Canceled)
+	require.NoError(t, receive(t, deleteDone))
+}
+
+// Flush waits for a write in progress even while the message is being
+// deleted, so it never returns with that write still running.
+func TestFlushWaitsForInFlightWriteDuringDelete(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	svc := NewService(slow, WithDebounce(10*time.Millisecond))
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	msg.AppendContent("payload")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	receive(t, slow.started)
+
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- svc.Delete(t.Context(), msg.ID) }()
+	waitForDeleting(t, svc.(*service), msg.ID)
+
+	flushDone := make(chan error, 1)
+	go func() { flushDone <- svc.Flush(t.Context(), msg.ID) }()
+	select {
+	case err := <-flushDone:
+		require.Failf(t, "Flush returned while a write was still running", "Flush returned: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(slow.release)
+	require.NoError(t, receive(t, flushDone))
+	require.NoError(t, receive(t, deleteDone))
+}
+
+// A delete that fails while another is still running keeps holding
+// updates until the other one finishes.
+func TestFailedDeleteKeepsHoldingWhileAnotherRuns(t *testing.T) {
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	hook := &deleteHookQuerier{Querier: q}
+	svc := NewService(hook, WithDebounce(0))
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := svc.Subscribe(subCtx)
+
+	// Both deletes reach SQL and wait there. The first then fails while
+	// the second is still running.
+	reachedFirst, releaseFirst := make(chan struct{}), make(chan struct{})
+	reachedSecond, releaseSecond := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	hook.beforeDelete = func() error {
+		if calls.Add(1) == 1 {
+			close(reachedFirst)
+			<-releaseFirst
+			return errors.New("delete failed")
+		}
+		close(reachedSecond)
+		<-releaseSecond
+		return nil
+	}
+	failed := make(chan error, 1)
+	go func() { failed <- svc.Delete(context.Background(), msg.ID) }()
+	receive(t, reachedFirst)
+	succeeded := make(chan error, 1)
+	go func() { succeeded <- svc.Delete(context.Background(), msg.ID) }()
+	receive(t, reachedSecond)
+	close(releaseFirst)
+	require.Error(t, receive(t, failed))
+
+	msg.AppendContent("late")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	close(releaseSecond)
+	require.NoError(t, receive(t, succeeded))
+
+	require.Equal(t, pubsub.DeletedEvent, receive(t, sub).Type)
+	select {
+	case event := <-sub:
+		require.Failf(t, "unexpected event after delete", "Event type: %s", event.Type)
+	case <-time.After(25 * time.Millisecond):
+	}
 }

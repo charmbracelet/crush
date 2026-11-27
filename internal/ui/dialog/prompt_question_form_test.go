@@ -100,3 +100,15 @@ func TestInlineQuestionEscLabels(t *testing.T) {
 	p.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	require.Equal(t, "back", helpFor(p.ShortHelp(), "esc"), "plan feedback editor")
 }
+
+// TestNewlineHintMatchesAcrossEditors verifies free-text answers and
+// plan feedback advertise the same newline key.
+func TestNewlineHintMatchesAcrossEditors(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	ft := NewFreeText(&s, question.Question{ID: "q", Type: question.TypeFreeText, Text: "Why?"})
+	p := newTestPlanHandoff()
+	p.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	require.Equal(t, "newline", helpFor(ft.ShortHelp(), "ctrl+j"))
+	require.Equal(t, "newline", helpFor(p.ShortHelp(), "ctrl+j"))
+}

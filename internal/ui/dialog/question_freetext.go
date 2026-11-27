@@ -51,11 +51,13 @@ func NewFreeText(sty *styles.Styles, req question.Question) *FreeText {
 	ta.SetHeight(freeTextMinEditorHeight)
 
 	return &FreeText{
-		Styles:     sty,
-		Request:    req,
-		editor:     ta,
-		keyEnter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit")),
-		keyNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
+		Styles:   sty,
+		Request:  req,
+		editor:   ta,
+		keyEnter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit")),
+		// Hint ctrl+j like the main editor and plan feedback: it works
+		// in every terminal, where shift+enter needs extended key reports.
+		keyNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("ctrl+j", "newline")),
 		keyClose:   CloseKey,
 	}
 }

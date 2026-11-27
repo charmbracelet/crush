@@ -124,8 +124,7 @@ type uiState uint8
 
 // Possible uiState values.
 const (
-	uiOnboarding uiState = iota
-	uiInitialize
+	uiInitialize uiState = iota
 	uiLanding
 	uiChat
 )
@@ -373,6 +372,10 @@ type UI struct {
 	onboarding struct {
 		yesInitializeSelected bool
 	}
+
+	// firstRun tracks the first-run experience: whether a provider is set
+	// up yet and the message held until one is.
+	firstRun firstRunState
 
 	// lspStates / lspDiagnostics memoize the workspace LSP state and
 	// per-server severity counts (each probe behind them is a synchronous
@@ -663,16 +666,18 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// set onboarding state defaults
 	ui.onboarding.yesInitializeSelected = true
 
+	// First run: a user without a provider starts in the regular editor,
+	// and the first send asks for one.
 	desiredState := uiLanding
-	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
-		desiredState = uiOnboarding
+	ui.firstRun.noProvider = !com.Config().IsConfigured()
+	if ui.firstRun.noProvider {
+		ui.firstRun.startedAt = time.Now()
+		ui.firstRun.onboarding.ID, ui.firstRun.onboarding.Launch = event.ResumeOnboarding(onboardingAttemptPath())
 	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
 		desiredState = uiInitialize
 	}
 
-	// set initial state
-	ui.setState(desiredState, desiredFocus)
+	ui.setState(desiredState, uiFocusEditor)
 
 	opts := com.Config().Options
 
@@ -697,10 +702,11 @@ func (m *UI) SetProgram(program *tea.Program) {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
-	if m.state == uiOnboarding {
-		if cmd := m.openModelsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	if event.IsFirstLaunch() {
+		event.FirstLaunch(setupSource(m.com.Config()))
+	}
+	if m.firstRun.noProvider {
+		event.OnboardingStarted(m.onboardingEvent())
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
@@ -757,7 +763,7 @@ func (m *UI) Init() tea.Cmd {
 // loadInitialSession loads the initial session if one was specified on startup.
 func (m *UI) loadInitialSession() tea.Cmd {
 	switch {
-	case m.state != uiLanding:
+	case m.state != uiLanding || m.isOnboarding():
 		// Only load if we're in landing state (i.e., fully configured)
 		return nil
 	case m.initialSessionID != "":
@@ -926,6 +932,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	m.trackTurnOutcome(msg)
+	m.trackFirstTurnFinished(msg)
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -1664,6 +1671,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nerdFonts = bool(msg)
 	case gitBranchPollMsg:
 		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
+	case providerKeyResultMsg:
+		if cmd := m.handleProviderKeyResult(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2342,26 +2353,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	isOnboarding := m.state == uiOnboarding
-
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
-		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
-			break
-		}
-
 		if m.dialog.ContainsDialog(dialog.FilePickerID) {
 			defer fimage.ResetCache()
 		}
 
+		m.trackSignInClosed()
 		m.dialog.CloseFrontDialog()
-
-		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
 
 		if m.focus == uiFocusEditor {
 			cmds = append(cmds, m.textarea.Focus())
@@ -2369,16 +2369,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionCloseOAuth:
 		// Same as ActionClose, but with a cleanup command that cancels
 		// the in-flight authorization before the dialog goes away.
+		m.trackSignInClosed()
 		m.dialog.CloseFrontDialog()
 
 		if msg.Cmd != nil {
 			cmds = append(cmds, msg.Cmd)
-		}
-
-		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
 		}
 
 		if m.focus == uiFocusEditor {
@@ -3056,7 +3051,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		providerID   = msg.Model.Provider
 		isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
 		isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
-		isOnboarding = m.state == uiOnboarding
+		isOnboarding = m.isOnboarding()
 	)
 
 	// For Hyper, if the stored OAuth token is expired, try a silent
@@ -3117,6 +3112,10 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	if providerID == string(catwalk.InferenceProviderOpenAI) ||
 		providerID == string(catwalk.InferenceProviderXAI) {
 		if !cfg.IsModelAvailable(providerID, msg.Model.Model) {
+			if isOnboarding {
+				m.firstRun.onboarding.Provider = providerID
+				event.OnboardingSignInEnded(m.onboardingEvent(), "sign in", signInModelUnavailable)
+			}
 			m.dialog.CloseDialog(dialog.ModelsID)
 			cmds = append(cmds, util.ReportError(fmt.Errorf(
 				"%s isn't offered by your %s account; choose another model",
@@ -3149,7 +3148,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	}
 
 	note := m.nextMessageNote()
-	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
+	modelUpdate := m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
 			return util.ReportError(err)()
 		}
@@ -3164,7 +3163,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		modelMsg := fmt.Sprintf("%s model changed to %s%s", modelType, modelName, note)
 
 		return util.NewInfoMsg(modelMsg)
-	}))
+	})
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
 	m.dialog.CloseDialog(dialog.OAuthID)
@@ -3172,9 +3171,25 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	if isOnboarding {
 		m.setState(uiLanding, uiFocusEditor)
+		if cmd := m.closeProviderCard(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.com.Config().SetupAgents()
 		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
+			m.firstRun.onboarding.Provider = msg.Model.Provider
+			m.firstRun.onboarding.Model = msg.Model.Model
+			event.OnboardingFailed(m.onboardingEvent())
 			cmds = append(cmds, util.ReportError(err))
+			// Nothing can send the prompt, so give it back to the editor.
+			m.restoreHeldMessage()
+		} else {
+			m.trackOnboardingCompleted(msg)
+			m.firstRun.noProvider = false
+			// A prompt held for a model goes out right after the model
+			// update lands.
+			if send := m.releaseHeldMessage(); send != nil {
+				modelUpdate = tea.Sequence(modelUpdate, send)
+			}
 		}
 		// The agent just came up: re-fetch the memoized ready/model state
 		// so the landing view shows the selected model without waiting for
@@ -3187,6 +3202,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
 
+	cmds = append(cmds, modelUpdate)
 	return tea.Batch(cmds...)
 }
 
@@ -3195,7 +3211,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		dlg dialog.Dialog
 		cmd tea.Cmd
 
-		isOnboarding = m.state == uiOnboarding
+		isOnboarding = m.isOnboarding()
 	)
 
 	switch provider.ID {
@@ -3252,7 +3268,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 // handleSelectModel applies it only when the signed-in catalog still
 // offers it and errors otherwise.
 func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
-	isOnboarding := m.state == uiOnboarding
+	isOnboarding := m.isOnboarding()
 
 	var (
 		dlg dialog.Dialog
@@ -3425,8 +3441,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	switch m.state {
-	case uiOnboarding:
-		return tea.Batch(cmds...)
 	case uiInitialize:
 		cmds = append(cmds, m.updateInitializeView(msg)...)
 		return tea.Batch(cmds...)
@@ -3527,6 +3541,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				m.randomizePlaceholders()
 				m.historyReset()
+
+				if m.isOnboarding() {
+					// No model yet: keep the prompt and ask for a provider.
+					return tea.Batch(m.holdMessage(value, attachments), m.loadPromptHistory())
+				}
 
 				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
@@ -3853,12 +3872,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	screen.Clear(scr)
 
 	switch m.state {
-	case uiOnboarding:
-		m.drawHeader(scr, layout.header)
-
-		// NOTE: Onboarding flow will be rendered as dialogs below, but
-		// positioned at the bottom left of the screen.
-
 	case uiInitialize:
 		m.drawHeader(scr, layout.header)
 
@@ -3867,6 +3880,13 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	case uiLanding:
 		m.drawHeader(scr, layout.header)
+		if m.firstRunDialogFront() {
+			// One prompt at a time: while a first-run step is open it is the
+			// only thing on screen, so neither the landing page nor the
+			// card it came from shows behind or beside it.
+			m.inlineCursor = nil
+			break
+		}
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
@@ -3920,15 +3940,15 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 	}
 
-	isOnboarding := m.state == uiOnboarding
-
 	// Add status and help layer
-	m.status.SetHideHelp(isOnboarding)
+	m.status.SetHideHelp(false)
 	m.status.SetMode(m.mode, m.permModeCached())
-	m.status.Draw(scr, layout.status)
+	if !m.firstRunDialogFront() {
+		m.status.Draw(scr, layout.status)
+	}
 
 	// Draw completions popup if open
-	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
+	if m.completionsOpen && m.completions.HasItems() {
 		w, h := m.completions.Size()
 		x := m.completionsPositionStart.X
 		y := m.completionsPositionStart.Y - h
@@ -4649,7 +4669,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	appRect.Min.X += 1
 	appRect.Max.X -= 1
 
-	if slices.Contains([]uiState{uiOnboarding, uiInitialize, uiLanding}, m.state) {
+	if slices.Contains([]uiState{uiInitialize, uiLanding}, m.state) {
 		// extra padding on left and right for these states
 		appRect.Min.X += 1
 		appRect.Max.X -= 1
@@ -4662,7 +4682,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// Handle different app states
 	switch m.state {
-	case uiOnboarding, uiInitialize:
+	case uiInitialize:
 		// Layout
 		//
 		// header
@@ -5614,6 +5634,7 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	// A queued prompt belongs in the queue pill and keeps the running
 	// turn's spinner and clock. A fresh turn gets its own, from now.
 	sessionID := m.currentSessionID()
+	m.trackFirstPromptSent(sessionID)
 	queued := m.turnInFlight(sessionID)
 	// Loading an idle session freezes ghost spinners; sending unfreezes.
 	m.animClock.frozen = false
@@ -5955,7 +5976,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return nil
 	}
 
-	isOnboarding := m.state == uiOnboarding
+	isOnboarding := m.isOnboarding()
 	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
 	if err != nil {
 		return util.ReportError(err)

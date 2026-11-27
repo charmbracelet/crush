@@ -142,6 +142,10 @@ crush --continue
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
 
+		// Setting up the workspace registers the project, so look for
+		// earlier launches first.
+		event.SetFirstLaunch(!projects.Seen())
+
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
 			return err

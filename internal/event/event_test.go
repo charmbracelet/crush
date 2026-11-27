@@ -157,3 +157,46 @@ type testError string
 func (e testError) Error() string {
 	return string(e)
 }
+
+func TestSetFirstLaunch(t *testing.T) {
+	original := baseProps[firstLaunchAttrName]
+	t.Cleanup(func() { baseProps = baseProps.Set(firstLaunchAttrName, original) })
+
+	SetFirstLaunch(true)
+	if !IsFirstLaunch() {
+		t.Fatal("IsFirstLaunch() = false after SetFirstLaunch(true)")
+	}
+	SetFirstLaunch(false)
+	if IsFirstLaunch() {
+		t.Fatal("IsFirstLaunch() = true after SetFirstLaunch(false)")
+	}
+}
+
+func TestOnboardingProps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("leaves out what is not known yet", func(t *testing.T) {
+		t.Parallel()
+		got := Onboarding{ID: "a1", Via: "card"}.props("method", "sign in")
+		want := []any{"onboarding id", "a1", "via", "card", "method", "sign in"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("props() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("carries everything known", func(t *testing.T) {
+		t.Parallel()
+		o := Onboarding{ID: "a1", Launch: 2, Provider: "anthropic", Via: "card key", Model: "claude", Auth: "api key"}
+		want := []any{
+			"onboarding id", "a1",
+			"launch", 2,
+			"provider", "anthropic",
+			"via", "card key",
+			"model", "claude",
+			"auth", "api key",
+		}
+		if got := o.props(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("props() = %#v, want %#v", got, want)
+		}
+	})
+}

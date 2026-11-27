@@ -29,8 +29,17 @@ func (m *UI) landingView() string {
 	width := m.layout.main.Dx()
 	cwd := common.PrettyPathInline(t, m.com.Workspace.WorkingDir(), m.gitBranchLabel(), width)
 
-	parts := []string{
-		cwd,
+	parts := []string{cwd}
+
+	if m.isOnboarding() {
+		// Nothing is set up yet, so LSP, MCP and skills status would only
+		// be noise next to the first-run prompts. The instruction (or the
+		// held message) sits at the bottom, right above the editor.
+		if welcome := m.welcomeView(width); welcome != "" {
+			parts = append(parts, "", welcome)
+		}
+		top := lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return anchorBottom(width, m.layout.main.Dy()-1, top, m.firstRunPromptView(width))
 	}
 
 	parts = append(parts, "", m.modelInfo(width))

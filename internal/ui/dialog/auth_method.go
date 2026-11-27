@@ -105,6 +105,9 @@ func (m *AuthMethod) ID() string {
 }
 
 // HandleMsg implements Dialog.
+// ProviderID returns the ID of the provider being set up.
+func (m *AuthMethod) ProviderID() string { return string(m.provider.ID) }
+
 func (m *AuthMethod) HandleMsg(msg tea.Msg) Action {
 	if click, ok := msg.(tea.MouseClickMsg); ok {
 		return m.handleMouseClick(click)

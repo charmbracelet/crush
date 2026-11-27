@@ -102,6 +102,12 @@ func (m *APIKeyInput) ID() string {
 }
 
 // HandleMsg implements [Dialog].
+// ProviderID returns the ID of the provider the key is for.
+func (m *APIKeyInput) ProviderID() string { return string(m.provider.ID) }
+
+// Failed reports whether the last key entered was rejected.
+func (m *APIKeyInput) Failed() bool { return m.state == APIKeyInputStateError }
+
 func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case ActionChangeAPIKeyState:

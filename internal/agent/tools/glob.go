@@ -67,7 +67,7 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 			searchCtx, cancel := context.WithTimeout(ctx, cfg.GetTimeout())
 			defer cancel()
 
-			files, truncated, err := globFiles(searchCtx, params.Pattern, searchPath, 100)
+			files, truncated, err := globFiles(searchCtx, params.Pattern, searchPath, workingDir, cfg, 100)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error finding files: %v", err)), nil
 			}
@@ -94,7 +94,7 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 	)
 }
 
-func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
+func globFiles(ctx context.Context, pattern, searchPath, workingDir string, cfg config.ToolGlob, limit int) ([]string, bool, error) {
 	// Scope the walk to the pattern's literal directory prefix. A pattern
 	// like "internal/agent/*.go" only needs to walk "internal/agent", so we
 	// start there instead of enumerating the entire tree and filtering.
@@ -108,6 +108,16 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 		walkPattern = rest
 	}
 
+	// Use locate if enabled and searching outside the working directory
+	// (i.e., filesystem-wide search) for better performance.
+	if cfg.GetUseLocate() && isOutsideWorkingDir(searchPath, workingDir) {
+		matches, err := runLocate(ctx, walkPattern, limit)
+		if err == nil {
+			return matches, len(matches) >= limit && limit > 0, nil
+		}
+		slog.Warn("Locate execution failed, falling back to ripgrep", "error", err)
+	}
+
 	cmdRg := getRgCmd(ctx, walkPattern)
 	if cmdRg != nil {
 		cmdRg.Dir = walkRoot
@@ -119,6 +129,28 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 	}
 
 	return fsext.GlobGitignoreAwareCtx(ctx, walkPattern, walkRoot, limit)
+}
+
+// isOutsideWorkingDir returns true if the search path is outside the working directory.
+// This includes absolute paths that are not under the working directory, or root paths.
+func isOutsideWorkingDir(searchPath, workingDir string) bool {
+	// Normalize paths
+	searchPath = filepath.Clean(searchPath)
+	workingDir = filepath.Clean(workingDir)
+
+	// If searchPath is root or a top-level system directory, consider it outside
+	if searchPath == "/" || searchPath == "\\" {
+		return true
+	}
+
+	// Check if searchPath is under workingDir
+	rel, err := filepath.Rel(workingDir, searchPath)
+	if err != nil {
+		return true
+	}
+
+	// If relative path starts with "..", it's outside the working directory
+	return strings.HasPrefix(rel, "..")
 }
 
 func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
@@ -192,4 +224,66 @@ func normalizeFilePaths(paths []string) {
 	for i, p := range paths {
 		paths[i] = filepath.ToSlash(p)
 	}
+}
+
+// runLocate uses the locate command to find files matching the pattern.
+// This is much faster for filesystem-wide searches as it uses a pre-built database.
+func runLocate(ctx context.Context, pattern string, limit int) ([]string, error) {
+	// Check if locate is available
+	path, err := exec.LookPath("locate")
+	if err != nil {
+		return nil, fmt.Errorf("locate command not found: %w", err)
+	}
+
+	// Convert glob pattern to locate pattern
+	// locate uses a different pattern syntax - we use -b for basename match
+	// and -i for case-insensitive matching
+	args := []string{"-b", "-i", "-l", fmt.Sprintf("%d", limit*2), pattern}
+	cmd := exec.CommandContext(ctx, path, args...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("locate: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("locate: %w", err)
+	}
+
+	var matches []string
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		path := scanner.Text()
+		if path != "" {
+			matches = append(matches, path)
+		}
+		if len(matches) >= limit*2 {
+			break
+		}
+	}
+
+	_ = stdout.Close()
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return matches, nil // No matches found
+		}
+		return nil, fmt.Errorf("locate: %w\n%s", waitErr, stderr.String())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("locate: %w", err)
+	}
+
+	// Sort by path length (shorter paths first, similar to ripgrep behavior)
+	sort.SliceStable(matches, func(i, j int) bool {
+		return len(matches[i]) < len(matches[j])
+	})
+
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches, nil
 }

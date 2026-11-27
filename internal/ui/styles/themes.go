@@ -830,6 +830,10 @@ func tigraBlancaOpts() quickStyleOpts {
 // tigraBlancaOverrides applies Tigra Blanca tweaks that don't fit the
 // token model of [quickStyleOpts].
 func tigraBlancaOverrides(s Styles) Styles {
+	if chroma := s.Markdown.CodeBlock.Chroma; chroma != nil {
+		chroma.Comment.Color = hex(tone.Oyster)
+	}
+
 	s.Editor.PromptNormalIconFocused = s.Editor.PromptNormalIconFocused.
 		Foreground(tone.Turtle)
 

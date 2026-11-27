@@ -92,6 +92,8 @@ type SessionAgentCall struct {
 	// session Run returns ErrSessionIdle instead of starting one.
 	QueueOnly bool
 	Prompt    string
+	// originalPrompt is retained across auto-compaction continuations.
+	originalPrompt *string
 	// Report is a subagent report this call delivers. It is written to
 	// the transcript only when delivered, so it lands where the model
 	// reads it. Prompt is still what the model reads for it.
@@ -1397,7 +1399,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, summarizeErr
 		case len(currentAssistant.ToolCalls()) > 0:
 			existing, _ := a.messageQueue.Get(call.SessionID)
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			if call.originalPrompt == nil {
+				call.originalPrompt = new(call.Prompt)
+			}
+			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", *call.originalPrompt)
 			// The rewritten prompt is a new message, not the report.
 			call.Report = nil
 			a.messageQueue.Set(call.SessionID, append(existing, call))

@@ -182,38 +182,47 @@ func shortHelpLine(h *help.Model, bindings []key.Binding, width int) string {
 	sep := h.Styles.ShortSeparator.Inline(true).Render(h.ShortSeparator)
 	ellipsis := h.Styles.Ellipsis.Inline(true).Render(cmp.Or(h.Ellipsis, "…"))
 
-	var b strings.Builder
+	var segs []string
 	total := 0
 	for _, kb := range bindings {
 		if !kb.Enabled() {
 			continue
 		}
 		seg := ""
-		if total > 0 {
+		if len(segs) > 0 {
 			seg = sep
 		}
 		seg += h.Styles.ShortKey.Inline(true).Render(kb.Help().Key) + " " +
 			h.Styles.ShortDesc.Inline(true).Render(kb.Help().Desc)
 		w := lipgloss.Width(seg)
 		if total+w > width {
-			// The next item doesn't fit; add an ellipsis if there's room.
-			// The separator belongs to this dropped item, so what we've
-			// written already ends on a real hint, not a dangling dot. A
-			// leading space joins the ellipsis to prior hints, but only
-			// when there are prior hints.
-			tail := ellipsis
-			if total > 0 {
-				tail = " " + ellipsis
-			}
-			if total+lipgloss.Width(tail) <= width {
-				b.WriteString(tail)
+			// The next item doesn't fit, so end with an ellipsis to show
+			// hints were dropped, dropping earlier hints too if needed to
+			// make room for it. The separator belongs to each dropped
+			// item, so what's left ends on a real hint, not a dangling
+			// dot. A leading space joins the ellipsis to prior hints, but
+			// only when there are prior hints.
+			for {
+				tail := ellipsis
+				if len(segs) > 0 {
+					tail = " " + ellipsis
+				}
+				if total+lipgloss.Width(tail) <= width {
+					segs = append(segs, tail)
+					break
+				}
+				if len(segs) == 0 {
+					break
+				}
+				total -= lipgloss.Width(segs[len(segs)-1])
+				segs = segs[:len(segs)-1]
 			}
 			break
 		}
 		total += w
-		b.WriteString(seg)
+		segs = append(segs, seg)
 	}
-	return b.String()
+	return strings.Join(segs, "")
 }
 
 // InputCursor adjusts the cursor position for an input field within a dialog.

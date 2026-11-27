@@ -141,21 +141,42 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.input.Prompt = "> "
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
 
-	// What OpenSSH is asking for comes before the input.
-	description := m.descriptionView(contentWidth)
-	lines := []string{m.headerView(), "", description}
+	// What OpenSSH is asking for comes before the input. The header, input
+	// (or confirm hint) and help always get their rows; the description is
+	// trimmed to whatever is left.
+	header := m.headerView()
+	var body []string
 	if m.confirm {
-		lines = append(lines, "", m.hintView())
+		body = []string{"", lipgloss.NewStyle().Width(contentWidth).Render(m.hintView())}
 	} else {
-		lines = append(lines, t.Dialog.InputPrompt.Render(m.input.View()))
+		body = []string{t.Dialog.InputPrompt.Render(m.input.View())}
 	}
-	lines = append(lines, renderDialogHelp(t, &m.help, m, contentWidth))
+	help := renderDialogHelp(t, &m.help, m, contentWidth)
+	budget := area.Dy() - t.Dialog.View.GetVerticalFrameSize() -
+		lipgloss.Height(header) - 1 - lipgloss.Height(strings.Join(body, "\n")) - lipgloss.Height(help)
+	description := clampDialogLines(m.descriptionView(contentWidth), budget)
+	// The blank row under the header goes too when even that doesn't fit.
+	gap := 1
+	if budget < 0 {
+		gap = 0
+	}
+	lines := []string{header}
+	if gap > 0 {
+		lines = append(lines, "")
+	}
+	if description != "" {
+		lines = append(lines, description)
+	}
+	lines = append(append(lines, body...), help)
 
 	view := t.Dialog.View.Width(m.width).Render(strings.Join(lines, "\n"))
 	cur := InputCursor(t, m.input.Cursor())
 	if cur != nil {
 		// InputCursor assumes the input sits right under the title.
-		cur.Y += 1 + lipgloss.Height(description)
+		cur.Y += gap
+		if description != "" {
+			cur.Y += lipgloss.Height(description)
+		}
 	}
 	DrawCenterCursor(scr, area, view, cur)
 	return cur

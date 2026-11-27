@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // dialogInputTextWidth returns the text-area width for a dialog input so
@@ -117,6 +118,25 @@ func applyInfoColumnVisibility(items []list.Item, rowWidth, maxPercent int) {
 			ic.SetHideInfo(hide)
 		}
 	}
+}
+
+// clampDialogLines keeps at most n lines of the rendered block s, so a
+// free-wrapping description cannot push the rest of a dialog off-screen.
+// When lines are dropped, the last kept line ends in an ellipsis right
+// after its text. n <= 0 returns "".
+func clampDialogLines(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	lines = lines[:n]
+	last := lines[n-1]
+	text := ansi.StringWidth(strings.TrimRight(ansi.Strip(last), " "))
+	lines[n-1] = ansi.Truncate(last, min(text, ansi.StringWidth(last)-1), "") + "…"
+	return strings.Join(lines, "\n")
 }
 
 // renderDialogHelp renders keybind hints as a single padded footer line at

@@ -116,21 +116,36 @@ func (m *Pinentry) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
 
 	// What is being unlocked comes before the input, the way a terminal
-	// pinentry lays out its description.
-	description := m.descriptionView(contentWidth)
-	content := strings.Join([]string{
-		m.headerView(),
-		"",
-		description,
-		t.Dialog.InputPrompt.Render(m.input.View()),
-		renderDialogHelp(t, &m.help, m, contentWidth),
-	}, "\n")
+	// pinentry lays out its description. The header, input and help always
+	// get their rows; the description is trimmed to whatever is left.
+	header := m.headerView()
+	input := t.Dialog.InputPrompt.Render(m.input.View())
+	help := renderDialogHelp(t, &m.help, m, contentWidth)
+	budget := area.Dy() - t.Dialog.View.GetVerticalFrameSize() -
+		lipgloss.Height(header) - 1 - lipgloss.Height(input) - lipgloss.Height(help)
+	description := clampDialogLines(m.descriptionView(contentWidth), budget)
+	// The blank row under the header goes too when even that doesn't fit.
+	gap := 1
+	if budget < 0 {
+		gap = 0
+	}
+	lines := []string{header}
+	if gap > 0 {
+		lines = append(lines, "")
+	}
+	if description != "" {
+		lines = append(lines, description)
+	}
+	lines = append(lines, input, help)
 
-	view := t.Dialog.View.Width(m.width).Render(content)
+	view := t.Dialog.View.Width(m.width).Render(strings.Join(lines, "\n"))
 	cur := InputCursor(t, m.input.Cursor())
 	if cur != nil {
 		// InputCursor assumes the input sits right under the title.
-		cur.Y += 1 + lipgloss.Height(description)
+		cur.Y += gap
+		if description != "" {
+			cur.Y += lipgloss.Height(description)
+		}
 	}
 	DrawCenterCursor(scr, area, view, cur)
 	return cur

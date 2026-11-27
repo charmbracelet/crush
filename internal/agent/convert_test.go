@@ -8,6 +8,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestConvertToToolResult_NilResult(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range []struct {
+		name             string
+		providerExecuted bool
+	}{
+		{name: "client"},
+		{name: "provider", providerExecuted: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := fantasy.ToolResultContent{
+				ToolCallID:       "ws_123",
+				ToolName:         "web_search",
+				ClientMetadata:   "metadata",
+				ProviderExecuted: testCase.providerExecuted,
+			}
+
+			tr := (&sessionAgent{}).convertToToolResult(result)
+			require.Equal(t, result.ToolCallID, tr.ToolCallID)
+			require.Equal(t, result.ToolName, tr.Name)
+			require.Equal(t, result.ClientMetadata, tr.Metadata)
+			require.Empty(t, tr.Content)
+			require.False(t, tr.IsError)
+		})
+	}
+}
+
 func TestConvertToToolResult_InvalidBase64(t *testing.T) {
 	t.Parallel()
 

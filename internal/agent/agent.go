@@ -2464,6 +2464,10 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 		Metadata:   result.ClientMetadata,
 	}
 
+	if result.Result == nil {
+		return baseResult
+	}
+
 	switch result.Result.GetType() {
 	case fantasy.ToolResultContentTypeText:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](result.Result); ok {

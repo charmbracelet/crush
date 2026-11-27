@@ -4,6 +4,7 @@ import (
 	"context"
 	"image"
 	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -1110,4 +1112,83 @@ func TestStatusModeBadge(t *testing.T) {
 		s.SetMode(tc.mode, tc.perm)
 		require.Contains(t, ansi.Strip(s.modeBadge()), tc.badge, tc.name)
 	}
+}
+
+func TestInlinePasteNormalizesCRLF(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	f := dialog.NewQuestionForm(u.com.Styles, question.Request{Questions: []question.Question{{
+		ID: "answer", Type: question.TypeFreeText, Text: "Answer",
+	}}})
+	u.activeInline = f
+	u.focus = uiFocusEditor
+	u.layout.editor = image.Rect(3, 15, 73, 30)
+	u.Update(tea.PasteMsg{Content: "first line\r\nsecond line"})
+	scr := uv.NewScreenBuffer(80, 35)
+	f.Draw(scr, u.layout.editor)
+	lines := strings.Split(strings.ReplaceAll(ansi.Strip(scr.Render()), "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "first line") {
+			require.Less(t, i+1, len(lines))
+			require.Contains(t, lines[i+1], "second line", "a CRLF paste is one line break")
+			return
+		}
+	}
+	t.Fatal("the paste reached the inline form")
+}
+
+func TestModalPastePrecedesInlineEditor(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	f := dialog.NewQuestionForm(u.com.Styles, question.Request{Questions: []question.Question{{
+		ID: "answer", Type: question.TypeFreeText, Text: "Answer",
+	}}})
+	u.activeInline = f
+	u.focus = uiFocusEditor
+	u.layout.editor = image.Rect(3, 15, 73, 30)
+	u.dialog.OpenDialog(dialog.NewPermissions(u.com, permission.PermissionRequest{ToolName: "custom"}))
+	draw := func() string {
+		scr := uv.NewScreenBuffer(80, 35)
+		f.Draw(scr, u.layout.editor)
+		return ansi.Strip(scr.Render())
+	}
+	paste := tea.PasteMsg{Content: "pasted answer"}
+	u.Update(paste)
+	require.NotContains(t, draw(), "pasted answer", "the covered inline editor takes no paste")
+	u.dialog.CloseFrontDialog()
+	u.Update(paste)
+	require.Contains(t, draw(), "pasted answer", "closing the modal restores inline paste")
+}
+
+func TestModalWheelPrecedesInlineEditor(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	offset := u.chat.Offset()
+	f := dialog.NewQuestionForm(u.com.Styles, question.Request{Questions: []question.Question{{
+		ID: "answer", Type: question.TypeFreeText, Text: "Answer",
+		Description: strings.Repeat("Question context.  \n", 40),
+	}}})
+	u.activeInline = f
+	u.layout.editor = image.Rect(3, 15, 73, 30)
+	p := dialog.NewPermissions(u.com, permission.PermissionRequest{
+		ToolName: "custom", Description: strings.Repeat("Permission context.\n", 100),
+	})
+	u.dialog.OpenDialog(p)
+	draw := func(d interface {
+		Draw(uv.Screen, uv.Rectangle) *tea.Cursor
+	},
+	) string {
+		scr := uv.NewScreenBuffer(80, 35)
+		d.Draw(scr, u.layout.editor)
+		return scr.Render()
+	}
+	inlineBefore, modalBefore := draw(f), draw(p)
+	wheel := common.CoalescedWheelMsg{Mouse: tea.Mouse{X: 10, Y: 20}, DeltaY: 6}
+	u.Update(wheel)
+	require.NotEqual(t, modalBefore, draw(p), "the front dialog receives wheel input")
+	require.Equal(t, inlineBefore, draw(f), "the covered inline editor stays still")
+	u.dialog.CloseFrontDialog()
+	u.Update(wheel)
+	require.NotEqual(t, inlineBefore, draw(f), "closing the modal restores inline wheel input")
+	require.Equal(t, offset, u.chat.Offset(), "neither editor scrolls the conversation")
 }

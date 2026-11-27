@@ -94,7 +94,7 @@ type ThemeItem struct {
 	overridden bool
 	t          *styles.Styles
 	m          fuzzy.Match
-	cache      map[int]string
+	cache      rowCache
 	focused    bool
 	hideInfo   bool
 
@@ -204,17 +204,9 @@ func (th *Theme) RefreshStyles() {
 	// so re-apply them to pick up the previewed theme's colors.
 	th.input.SetStyles(th.com.Styles.TextInput)
 	th.help.Styles = th.com.Styles.DialogHelpStyles()
-	for _, item := range th.list.FilteredItems() {
-		switch it := item.(type) {
-		case *ThemeItem:
-			it.cache = nil
-			it.Bump()
-		case *ThemeSectionHeader:
-			// Section headers are cached by the list, so bump them to
-			// force a re-render with the new styles.
-			it.Bump()
-		}
-	}
+	// Every row, not just the filtered ones: a row hidden by the filter
+	// keeps its cached colors until it is refreshed too.
+	refreshItems(th.list.Items())
 }
 
 // isSelectableThemeItem reports whether the item at the given index is a
@@ -804,5 +796,5 @@ func (r *ThemeItem) Render(width int) string {
 		}
 	}
 
-	return renderItem(s, r.label, info, r.focused, width, r.cache, &r.m)
+	return renderItem(s, r.label, info, r.focused, width, &r.cache, &r.m)
 }

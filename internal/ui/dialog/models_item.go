@@ -71,7 +71,7 @@ type ModelItem struct {
 	model     catwalk.Model
 	modelType ModelType
 
-	cache        map[int]string
+	cache        rowCache
 	t            *styles.Styles
 	m            fuzzy.Match
 	focused      bool
@@ -103,7 +103,7 @@ func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, 
 		model:        model,
 		modelType:    typ,
 		t:            t,
-		cache:        make(map[int]string),
+		cache:        make(rowCache),
 		showProvider: showProvider,
 	}
 }
@@ -130,7 +130,7 @@ func (m *ModelItem) Render(width int) string {
 		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
+	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, &m.cache, &m.m)
 }
 
 // SetFocused implements ListItem.

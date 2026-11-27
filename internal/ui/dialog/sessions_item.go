@@ -48,7 +48,7 @@ type SessionItem struct {
 	t                *styles.Styles
 	sessionsMode     sessionsMode
 	m                fuzzy.Match
-	cache            map[int]string
+	cache            rowCache
 	updateTitleInput textinput.Model
 	focused          bool
 	hideInfo         bool
@@ -145,7 +145,7 @@ func (s *SessionItem) Render(width int) string {
 		}
 	}
 
-	return renderItem(styles, s.Title, info, s.focused, width, s.cache, &s.m)
+	return renderItem(styles, s.Title, info, s.focused, width, &s.cache, &s.m)
 }
 
 type ListItemStyles struct {
@@ -155,13 +155,29 @@ type ListItemStyles struct {
 	InfoTextFocused lipgloss.Style
 }
 
-func renderItem(t ListItemStyles, title string, info string, focused bool, width int, cache map[int]string, m *fuzzy.Match) string {
-	if cache == nil {
-		cache = make(map[int]string)
-	}
+// rowCache holds a list row's rendered lines, keyed by everything that
+// changes the line besides its styles, focus and match: those reset the
+// cache to nil when they change.
+type rowCache map[rowCacheKey]string
 
-	cached, ok := cache[width]
-	if ok {
+// rowCacheKey is the input a row was rendered from. The info text is
+// part of it because some of it changes on its own, like a session's
+// "1 minute ago".
+type rowCacheKey struct {
+	width int
+	title string
+	info  string
+}
+
+// renderItem renders a list row, reusing and filling the cache at cache.
+// It takes the item's cache field by pointer so the first render can
+// create it; a cache passed by value would be filled and thrown away.
+func renderItem(t ListItemStyles, title string, info string, focused bool, width int, cache *rowCache, m *fuzzy.Match) string {
+	if *cache == nil {
+		*cache = make(rowCache)
+	}
+	key := rowCacheKey{width: width, title: title, info: info}
+	if cached, ok := (*cache)[key]; ok {
 		return cached
 	}
 
@@ -228,7 +244,7 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 	}
 
 	content = style.Render(content + gap + infoText)
-	cache[width] = content
+	(*cache)[key] = content
 	return content
 }
 

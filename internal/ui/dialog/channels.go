@@ -25,7 +25,7 @@ type ChannelItem struct {
 	info    mcp.ClientInfo
 	t       *styles.Styles
 	m       fuzzy.Match
-	cache   map[int]string
+	cache   rowCache
 	focused bool
 }
 
@@ -86,7 +86,7 @@ func (c *ChannelItem) Render(width int) string {
 		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
 	}
 
-	return renderItem(itemStyles, c.info.Name, c.infoText(), c.focused, width, c.cache, &c.m)
+	return renderItem(itemStyles, c.info.Name, c.infoText(), c.focused, width, &c.cache, &c.m)
 }
 
 // infoText is the status shown beside the server name: its connection state,

@@ -60,7 +60,7 @@ type NotificationItem struct {
 	isCurrent bool
 	t         *styles.Styles
 	m         fuzzy.Match
-	cache     map[int]string
+	cache     rowCache
 	focused   bool
 }
 
@@ -344,5 +344,5 @@ func (n *NotificationItem) Render(width int) string {
 		InfoTextBlurred: n.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: n.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(st, n.style.Title, info, n.focused, width, n.cache, &n.m)
+	return renderItem(st, n.style.Title, info, n.focused, width, &n.cache, &n.m)
 }

@@ -48,7 +48,7 @@ type ReasoningItem struct {
 	isCurrent bool
 	t         *styles.Styles
 	m         fuzzy.Match
-	cache     map[int]string
+	cache     rowCache
 	focused   bool
 }
 
@@ -322,5 +322,5 @@ func (r *ReasoningItem) Render(width int) string {
 		InfoTextBlurred: r.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: r.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(styles, r.title, info, r.focused, width, r.cache, &r.m)
+	return renderItem(styles, r.title, info, r.focused, width, &r.cache, &r.m)
 }

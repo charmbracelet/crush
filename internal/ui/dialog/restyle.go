@@ -229,3 +229,19 @@ func (n *NotificationItem) RefreshStyles() {
 		n.Bump()
 	}
 }
+
+// RefreshStyles implements [StyleRefresher].
+func (i *ThemeItem) RefreshStyles() {
+	i.cache = nil
+	if i.Versioned != nil {
+		i.Bump()
+	}
+}
+
+// RefreshStyles implements [StyleRefresher]. Headers are cached by the
+// list, so bump them to force a re-render with the new styles.
+func (h *ThemeSectionHeader) RefreshStyles() {
+	if h.Versioned != nil {
+		h.Bump()
+	}
+}

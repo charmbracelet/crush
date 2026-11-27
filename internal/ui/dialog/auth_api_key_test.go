@@ -111,3 +111,13 @@ func TestAPIKeyInputHelpMatchesState(t *testing.T) {
 		}
 	}
 }
+
+// TestAPIKeyInputPlaceholderNotRedundant verifies the placeholder does
+// not repeat the title.
+func TestAPIKeyInputPlaceholderNotRedundant(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join(drawFits(t, newTestAPIKeyInput(), 100, 30), "\n")
+	require.Contains(t, out, "> Paste your key...")
+	require.NotContains(t, out, "Enter your API key")
+}

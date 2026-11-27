@@ -76,7 +76,7 @@ func NewAPIKeyInput(
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = "Enter your API key..."
+	m.input.Placeholder = "Paste your key..."
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 

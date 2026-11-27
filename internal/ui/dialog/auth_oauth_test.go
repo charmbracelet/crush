@@ -116,3 +116,37 @@ func TestOAuthErrorShowsReason(t *testing.T) {
 		require.Contains(t, out, "already in use")
 	}
 }
+
+// TestOAuthURLWrapsAsOneToken verifies the URL is broken at fixed widths
+// rather than at hyphens: every line but the last fills the content
+// width, and the lines rejoin into the exact URL.
+func TestOAuthURLWrapsAsOneToken(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range []int{100, 40} {
+		m := newTestOAuth(false)
+		m.HandleMsg(ActionInitiateOAuth{VerificationURL: testOAuthURL})
+		lines := drawFits(t, m, w, 30)
+		var parts []string
+		var widths []int
+		in := false
+		for _, l := range lines {
+			text := strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│"))
+			if strings.HasPrefix(text, "https://") {
+				in = true
+			}
+			if !in {
+				continue
+			}
+			if text == "" {
+				break
+			}
+			parts = append(parts, text)
+			widths = append(widths, len(text))
+		}
+		require.Equal(t, testOAuthURL, strings.Join(parts, ""), "width %d", w)
+		for i := 0; i < len(widths)-1; i++ {
+			require.Equal(t, widths[0], widths[i], "line %d broke early at width %d", i, w)
+		}
+	}
+}

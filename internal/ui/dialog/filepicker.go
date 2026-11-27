@@ -272,7 +272,9 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.AddPart(imgPreview)
 	}
 
-	files := strings.TrimSpace(f.fp.View())
+	// Trim only trailing blank rows: leading spaces are the list's own
+	// left padding (e.g. before "Empty directory").
+	files := strings.TrimRight(f.fp.View(), " \n")
 	rc.AddPart(files)
 
 	view := rc.Render()

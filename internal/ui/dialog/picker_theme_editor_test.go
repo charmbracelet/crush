@@ -54,3 +54,12 @@ func TestFilePickerFitsArea(t *testing.T) {
 		require.NotContains(t, strings.Join(lines, "\n"), "█")
 	}
 }
+
+// TestFilePickerEmptyDirectoryPadded verifies the empty directory notice is
+// indented from the border instead of touching it.
+func TestFilePickerEmptyDirectoryPadded(t *testing.T) {
+	t.Parallel()
+	fp, _ := NewFilePicker(newPickerTestCommon())
+	lines := drawFits(t, fp, 100, 30)
+	require.Contains(t, strings.Join(lines, "\n"), "│  Empty directory")
+}

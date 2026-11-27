@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -98,5 +99,20 @@ func TestOAuthHelpKeepsEscWhenNarrow(t *testing.T) {
 			out := strings.Join(drawFits(t, m, 40, 30), "\n")
 			require.Contains(t, out, "esc exit", "codeEntry=%v userCode=%q", codeEntry, userCode)
 		}
+	}
+}
+
+// TestOAuthErrorShowsReason verifies the failure reason is shown in the
+// dialog, wrapped inside it, rather than only in the status bar.
+func TestOAuthErrorShowsReason(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range []int{100, 40} {
+		m := newTestOAuth(false)
+		m.HandleMsg(ActionOAuthErrored{Error: errors.New("failed to start browser auth: listen tcp 127.0.0.1:56121: bind: address already in use")})
+		out := strings.Join(drawFits(t, m, w, 30), "\n")
+		require.Contains(t, out, "Authentication failed.")
+		require.Contains(t, out, "failed to start browser")
+		require.Contains(t, out, "already in use")
 	}
 }

@@ -82,6 +82,8 @@ type OAuth struct {
 	// codeInput is the paste field for providers whose browser flow
 	// can finish with a code entered back in the terminal.
 	codeInput textinput.Model
+	// errMsg is the reason the sign-in failed, shown in the error state.
+	errMsg string
 	// codeInputRow is the paste field's row within the inner content,
 	// recorded on render so the cursor lands on it.
 	codeInputRow int
@@ -263,6 +265,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 
 	case ActionOAuthErrored:
 		m.State = OAuthStateError
+		m.errMsg = errText(msg.Error)
 		cmd := tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(msg.Error))
 		return ActionCmd{cmd}
 
@@ -289,6 +292,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		// Save failed; surface the error and move to the error state so
 		// the user can dismiss and retry the flow.
 		m.State = OAuthStateError
+		m.errMsg = errText(msg.err)
 		return ActionCmd{util.ReportError(msg.err)}
 	}
 	return nil
@@ -492,10 +496,18 @@ func (m *OAuth) innerDialogContent() string {
 		return lipgloss.JoinVertical(lipgloss.Left, "", status)
 
 	case OAuthStateError:
-		return errorStyle.
+		header := errorStyle.
 			Width(innerWidth).
-			Padding(1).
+			Padding(0, 1).
 			Render("Authentication failed.")
+		if m.errMsg == "" {
+			return lipgloss.JoinVertical(lipgloss.Left, "", header, "")
+		}
+		detail := statusTextStyle.
+			Width(innerWidth).
+			Padding(0, 1).
+			Render(m.errMsg)
+		return lipgloss.JoinVertical(lipgloss.Left, "", header, "", detail, "")
 
 	default:
 		return ""
@@ -637,4 +649,13 @@ func (m *OAuth) confirmAndSelectModel() Action {
 		Model:     m.model,
 		ModelType: m.modelType,
 	}
+}
+
+// errText flattens an error into one line of text for display, or ""
+// when there is no error.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(err.Error()), " ")
 }

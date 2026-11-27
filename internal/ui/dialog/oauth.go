@@ -82,6 +82,9 @@ type OAuth struct {
 	// codeInput is the paste field for providers whose browser flow
 	// can finish with a code entered back in the terminal.
 	codeInput textinput.Model
+	// codeInputRow is the paste field's row within the inner content,
+	// recorded on render so the cursor lands on it.
+	codeInputRow int
 }
 
 var _ Dialog = (*OAuth)(nil)
@@ -316,27 +319,37 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		if cur != nil {
 			cur = adjustOnboardingInputCursor(t, cur)
 			DrawOnboardingCursor(scr, area, view, cur)
-		} else {
-			DrawOnboarding(scr, area, view)
+			return cur
 		}
+		DrawOnboarding(scr, area, view)
 	} else {
 		view := dialogStyle.Render(m.dialogContent())
-		if cur := m.cursor(); cur != nil {
-			DrawCenterCursor(scr, area, view, cur)
-		} else {
-			DrawCenter(scr, area, view)
-		}
+		cur := m.cursor()
+		DrawCenterCursor(scr, area, view, cur)
+		return cur
 	}
 	return nil
 }
 
 // cursor reports the paste field's cursor when it is focused, so the
-// terminal caret sits in the input.
+// terminal caret sits in the input. It must run after dialogContent,
+// which records where the field lands.
 func (m *OAuth) cursor() *tea.Cursor {
-	if m.codeEntryActive() && m.codeInput.Focused() {
-		return InputCursor(m.com.Styles, m.codeInput.Cursor())
+	if !m.codeEntryActive() || !m.codeInput.Focused() {
+		return nil
 	}
-	return nil
+	cur := m.codeInput.Cursor()
+	if cur == nil {
+		return nil
+	}
+	t := m.com.Styles
+	frame := t.Dialog.View
+	input := t.Dialog.InputPrompt
+	cur.X += frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft() +
+		input.GetMarginLeft() + input.GetBorderLeftSize() + input.GetPaddingLeft()
+	cur.Y += frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop() +
+		lipgloss.Height(m.headerContent()) + m.codeInputRow
+	return cur
 }
 
 func (m *OAuth) dialogContent() string {
@@ -450,19 +463,17 @@ func (m *OAuth) innerDialogContent() string {
 		if m.codeEntryActive() {
 			// The manual fallback: the authorization page shows a code
 			// to paste when the redirect cannot come back on its own.
-			m.codeInput.SetWidth(max(0, innerWidth-4))
+			inputStyle := t.Dialog.InputPrompt
+			m.codeInput.SetWidth(dialogInputTextWidth(t, m.codeInput, innerWidth))
 			elements = append(elements,
 				statusTextStyle.
 					Width(innerWidth).
 					Padding(0, 1).
 					Render("Declined or browser didn't connect? Enter the code from the page:"),
-				"",
-				lipgloss.NewStyle().
-					Width(innerWidth).
-					Padding(0, 1).
-					Render(m.codeInput.View()),
-				"",
 			)
+			m.codeInputRow = lipgloss.Height(strings.Join(elements, "\n")) +
+				inputStyle.GetMarginTop() + inputStyle.GetBorderTopSize() + inputStyle.GetPaddingTop()
+			elements = append(elements, inputStyle.Render(m.codeInput.View()))
 		}
 
 		return lipgloss.JoinVertical(lipgloss.Left, elements...)

@@ -164,8 +164,8 @@ func (c *ConfirmComponent) Height(width int) int {
 		}
 		h++ // blank
 	}
-	h += len(c.QuestionLabels) // one bullet per question
-	h++                        // blank
+	h += len(c.summaryLines(w)) // wrapped answer bullets
+	h++                         // blank
 	if c.unansweredCount() > 0 {
 		h++ // warning line
 		h++ // blank after warning
@@ -217,12 +217,14 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		lines = append(lines, line{}) // blank
 	}
 
-	// Answer summary bullets.
-	bulletStyle := c.Styles.Editor.QuestionUnselected
-	for i, label := range c.QuestionLabels {
-		summary := c.answerSummary(i)
-		bullet := bulletStyle.Render("• " + label + ": " + summary)
-		lines = append(lines, line{text: bullet})
+	// Answer summary bullets. Measure overflow at full width first,
+	// matching Height(), then rewrap narrower for the scrollbar.
+	summaryWidth := area.Dx()
+	if viewport > 0 && c.Height(area.Dx()) > viewport {
+		summaryWidth--
+	}
+	for _, l := range c.summaryLines(summaryWidth) {
+		lines = append(lines, line{text: l})
 	}
 	lines = append(lines, line{}) // blank
 
@@ -335,6 +337,27 @@ func (c *ConfirmComponent) HandleMouseClick(x, y int) (bool, bool) {
 // when tabbing away from a question so the summary stays current.
 func (c *ConfirmComponent) UpdateAnswers(answers []*question.Answer) {
 	c.Answers = answers
+}
+
+// summaryLines renders one bullet per question, wrapped at width
+// with a hanging indent so every answer can be read before the user
+// confirms it.
+func (c *ConfirmComponent) summaryLines(width int) []string {
+	const bullet = "• "
+	indent := strings.Repeat(" ", ansi.StringWidth(bullet))
+	style := c.Styles.Editor.QuestionUnselected
+	var out []string
+	for i, label := range c.QuestionLabels {
+		text := label + ": " + c.answerSummary(i)
+		for j, ln := range wrapLines(text, width-len(indent)) {
+			lead := bullet
+			if j > 0 {
+				lead = indent
+			}
+			out = append(out, style.Render(lead+ln))
+		}
+	}
+	return out
 }
 
 // answerSummary returns a human-readable summary of an answer.

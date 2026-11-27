@@ -204,11 +204,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (r *Reasoning) ShortHelp() []key.Binding {
-	return []key.Binding{
-		r.keyMap.UpDown,
-		r.keyMap.Select,
-		r.keyMap.Close,
-	}
+	return dialogHelp(r.keyMap.Select, r.keyMap.Close, r.keyMap.UpDown)
 }
 
 // FullHelp implements [help.KeyMap].

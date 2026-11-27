@@ -22,6 +22,20 @@ const (
 	inputContentHeight = 1
 )
 
+// dialogHelp orders a dialog's short help the same way everywhere: the
+// main action, then esc, then everything else. A narrow help line drops
+// entries from the end, so the way forward and the way out survive the
+// longest. Pass a zero binding when there is no main action.
+func dialogHelp(action, esc key.Binding, rest ...key.Binding) []key.Binding {
+	h := make([]key.Binding, 0, len(rest)+2)
+	for _, b := range append([]key.Binding{action, esc}, rest...) {
+		if b.Enabled() {
+			h = append(h, b)
+		}
+	}
+	return h
+}
+
 // upDownKey is the help entry for moving through a list. Lists match
 // their own up and down keys; this only describes them, the same way in
 // every dialog.

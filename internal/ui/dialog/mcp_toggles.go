@@ -377,5 +377,5 @@ func (m *MCPToggles) ShortHelp() []key.Binding {
 		// Nothing to move between or toggle: only closing does anything.
 		return []key.Binding{m.keyMap.Close}
 	}
-	return []key.Binding{m.keyMap.UpDown, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
+	return dialogHelp(m.keyMap.Toggle, m.keyMap.Close, m.keyMap.UpDown, m.keyMap.Scope)
 }

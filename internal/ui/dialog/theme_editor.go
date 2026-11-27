@@ -195,7 +195,7 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (ed *ThemeEditor) ShortHelp() []key.Binding {
-	return []key.Binding{ed.keyMap.Previous, ed.keyMap.Next, ed.keyMap.Save, ed.keyMap.Close}
+	return dialogHelp(ed.keyMap.Save, ed.keyMap.Close, ed.keyMap.Previous, ed.keyMap.Next)
 }
 
 func (ed *ThemeEditor) FullHelp() [][]key.Binding {

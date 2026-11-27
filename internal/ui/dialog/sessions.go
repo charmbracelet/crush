@@ -490,15 +490,7 @@ func (s *Session) ShortHelp() []key.Binding {
 			s.keyMap.CancelRename,
 		}
 	default:
-		// Enter and esc come first so they survive when the help line
-		// is truncated on narrow screens.
-		return []key.Binding{
-			s.keyMap.Select,
-			s.keyMap.Close,
-			s.keyMap.UpDown,
-			s.keyMap.Rename,
-			s.keyMap.Delete,
-		}
+		return dialogHelp(s.keyMap.Select, s.keyMap.Close, s.keyMap.UpDown, s.keyMap.Rename, s.keyMap.Delete)
 	}
 }
 

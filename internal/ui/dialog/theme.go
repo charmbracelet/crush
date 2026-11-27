@@ -547,13 +547,7 @@ func (th *Theme) ShortHelp() []key.Binding {
 			th.keyMap.CancelRename,
 		}
 	}
-	// Enter and esc come first so they survive when the help line is
-	// truncated on narrow screens.
-	bindings := []key.Binding{
-		th.keyMap.Select,
-		th.keyMap.Close,
-		th.keyMap.UpDown,
-	}
+	bindings := dialogHelp(th.keyMap.Select, th.keyMap.Close, th.keyMap.UpDown)
 	if th.mode == themesModeNormal {
 		if th.canEditSelected() {
 			bindings = append(bindings, th.keyMap.EditTheme)

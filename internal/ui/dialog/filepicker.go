@@ -134,11 +134,7 @@ func (f *FilePicker) WorkingDir() string {
 
 // ShortHelp returns the short help key bindings for the [FilePicker] dialog.
 func (f *FilePicker) ShortHelp() []key.Binding {
-	return []key.Binding{
-		f.km.Navigate,
-		f.km.Select,
-		f.km.Close,
-	}
+	return dialogHelp(f.km.Select, f.km.Close, f.km.Navigate)
 }
 
 // FullHelp returns the full help key bindings for the [FilePicker] dialog.

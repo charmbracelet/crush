@@ -317,17 +317,13 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (c *Commands) ShortHelp() []key.Binding {
-	bindings := []key.Binding{
-		c.keyMap.UpDown,
-		c.keyMap.Select,
-		c.keyMap.Close,
-	}
 	// Tab only switches lists when there are user commands or MCP
-	// prompts; it comes last so enter and esc survive truncation.
+	// prompts.
+	tab := key.Binding{}
 	if c.hasCommandTypes() {
-		bindings = append(bindings, c.keyMap.Tab)
+		tab = c.keyMap.Tab
 	}
-	return bindings
+	return dialogHelp(c.keyMap.Select, c.keyMap.Close, c.keyMap.UpDown, tab)
 }
 
 // hasCommandTypes reports whether there is more than one list of commands

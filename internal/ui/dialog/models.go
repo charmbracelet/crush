@@ -464,21 +464,13 @@ func (m *Models) updateListArea(
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
 	if m.isOnboarding {
-		return []key.Binding{
-			m.keyMap.UpDown,
-			m.keyMap.Select,
-		}
+		return dialogHelp(m.keyMap.Select, key.Binding{}, m.keyMap.UpDown)
 	}
-	h := []key.Binding{
-		m.keyMap.UpDown,
-		m.keyMap.Tab,
-		m.keyMap.Select,
-	}
+	edit := key.Binding{}
 	if m.isSelectedConfigured() {
-		h = append(h, m.keyMap.Edit)
+		edit = m.keyMap.Edit
 	}
-	h = append(h, m.keyMap.Close)
-	return h
+	return dialogHelp(m.keyMap.Select, m.keyMap.Close, m.keyMap.UpDown, m.keyMap.Tab, edit)
 }
 
 // FullHelp returns the full help view.

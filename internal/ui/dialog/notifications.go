@@ -240,11 +240,7 @@ func (n *Notifications) selectedDescription() string {
 
 // ShortHelp implements [help.KeyMap].
 func (n *Notifications) ShortHelp() []key.Binding {
-	return []key.Binding{
-		n.keyMap.UpDown,
-		n.keyMap.Select,
-		n.keyMap.Close,
-	}
+	return dialogHelp(n.keyMap.Select, n.keyMap.Close, n.keyMap.UpDown)
 }
 
 // FullHelp implements [help.KeyMap].

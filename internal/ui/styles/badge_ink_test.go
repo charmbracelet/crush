@@ -226,9 +226,9 @@ func TestLegibleBadges_BuiltinsKeepTheirLook(t *testing.T) {
 			require.Equal(t, rgbHex(c[0]), rgbHex(got[style][0]), "%s: %s", name, style)
 		}
 	}
-	// The default theme's plan banner keeps fgBase although it is below
-	// 3:1 there.
-	require.Equal(t, rgbHex(charmtoneOpts().fgBase), rgbHex(CharmtonePantera().Status.ModeBannerPlan.GetForeground()))
+	// The default theme's plan banner keeps the ink badgeInk resolves
+	// from its planMoreSubtle fill (the pale Sash), not fgBase.
+	require.Equal(t, rgbHex(badgeInk(charmtoneOpts().planMoreSubtle, charmtoneOpts().fgBase, charmtoneOpts().onPrimary)), rgbHex(CharmtonePantera().Status.ModeBannerPlan.GetForeground()))
 }
 
 func TestBadgeInk(t *testing.T) {

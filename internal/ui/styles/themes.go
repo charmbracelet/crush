@@ -792,7 +792,7 @@ func tigraBlancaOpts() quickStyleOpts {
 		successMostSubtle: tone.Zinc,
 		yolo:              tone.Yam,
 		plan:              tone.Charple,
-		planMoreSubtle:    tone.Mauve,
+		planMoreSubtle:    tone.Hazy,
 
 		diffInsertFg:       tone.Gator,
 		diffInsertCodeBg:   tone.Bok,
@@ -826,6 +826,23 @@ func tigraBlancaOpts() quickStyleOpts {
 	}
 }
 
+// tigraBlancaOverrides applies Tigra Blanca tweaks that don't fit the
+// token model of [quickStyleOpts].
+func tigraBlancaOverrides(s Styles) Styles {
+	s.Editor.PromptNormalIconFocused = s.Editor.PromptNormalIconFocused.
+		Foreground(tone.Turtle)
+
+	s.Status.ModeBadgePlan = s.Status.ModeBadgePlan.
+		Foreground(tone.Salt)
+	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
+	s.Status.ModeBannerPlan = s.Status.ModeBannerPlan.
+		Foreground(tone.Salt)
+	s.Editor.PromptPlanIconFocused = s.Editor.PromptPlanIconFocused.
+		Foreground(tone.Salt)
+
+	return s
+}
+
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
 	"charmtone-panther":      charmtoneOpts,
@@ -842,11 +859,12 @@ var builtinThemes = map[string]func() quickStyleOpts{
 // theme-specific style tweaks on top of the styles produced by
 // [quickStyle]. Themes without overrides are absent from the map.
 var builtinThemeOverrides = map[string]func(Styles) Styles{
-	"charmtone-panther": charmtoneOverrides,
-	"gruvbox-dark":      gruvboxDarkOverrides,
-	"keanu":             keanuOverrides,
-	"rose-pine-dawn":    rosePineDawnOverrides,
-	"kitt":              kittOverrides,
+	"charmtone-panther":      charmtoneOverrides,
+	"gruvbox-dark":           gruvboxDarkOverrides,
+	"keanu":                  keanuOverrides,
+	"rose-pine-dawn":         rosePineDawnOverrides,
+	"kitt":                   kittOverrides,
+	"charmtone-tigra-blanca": tigraBlancaOverrides,
 }
 
 // deprecatedThemeNames maps legacy built-in theme names to their current

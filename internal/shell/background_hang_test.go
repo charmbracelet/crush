@@ -3,6 +3,7 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -71,7 +72,8 @@ func TestKill_SetsidDescendantHoldsPipe(t *testing.T) {
 
 // A backgrounded child that outlives its `sh -c` parent holds the output pipe
 // open. Without a WaitDelay the job never completes on its own; with one it
-// finishes about WaitDelay (killTimeout + 1s) after the parent exits.
+// finishes about WaitDelay (killTimeout + 1s) after the parent exits, and
+// the rest of the script still runs with a clean status.
 func TestJobCompletesWhenBackgroundedChildHoldsPipe(t *testing.T) {
 	reapSleep(t, "8")
 	manager := newBackgroundShellManager()
@@ -84,6 +86,51 @@ func TestJobCompletesWhenBackgroundedChildHoldsPipe(t *testing.T) {
 	t.Cleanup(cancel)
 	require.True(t, bgShell.WaitContext(ctx), "job never completed: cmd.Wait was held open by the backgrounded child")
 	require.Less(t, time.Since(start), 6*time.Second)
+
+	stdout, stderr, done, execErr := bgShell.GetOutput()
+	require.True(t, done)
+	require.NoError(t, execErr, "stderr=%q", stderr)
+	require.Equal(t, 0, ExitCode(execErr))
+	require.Equal(t, "hi\n", stdout)
+}
+
+// The shebang dispatch path has the same WaitDelay and must behave the same.
+func TestRun_ShebangScriptContinuesWhenBackgroundedChildHoldsPipe(t *testing.T) {
+	t.Parallel()
+	reapSleep(t, "11")
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "bg.sh")
+	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nsleep 11 &\n"), 0o755))
+
+	var stdout, stderr bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: "./bg.sh; echo hi",
+		Cwd:     dir,
+		Env:     os.Environ(),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	require.NoError(t, err, "stderr=%q", stderr.String())
+	require.Equal(t, "hi\n", stdout.String())
+}
+
+// Wait only reports ErrWaitDelay after a clean exit, so a failing command
+// keeps its own status even while a backgrounded child holds the pipe.
+func TestRun_NonZeroExitKeptWhenBackgroundedChildHoldsPipe(t *testing.T) {
+	t.Parallel()
+	reapSleep(t, "7")
+
+	var stdout, stderr bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: "sh -c 'sleep 7 & exit 3'; echo rc=$?",
+		Cwd:     t.TempDir(),
+		Env:     os.Environ(),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	require.NoError(t, err, "stderr=%q", stderr.String())
+	require.Equal(t, "rc=3\n", stdout.String())
 }
 
 // The shebang dispatch path must kill the interpreter's whole process group,

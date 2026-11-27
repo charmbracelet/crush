@@ -4,6 +4,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -143,6 +144,10 @@ func exitStatusFromError(ctx context.Context, stderr io.Writer, err error) error
 		fmt.Fprintf(stderr, "%v\n", err)
 		return interp.ExitStatus(127)
 	default:
+		if errors.Is(err, exec.ErrWaitDelay) {
+			// Wait returns ErrWaitDelay only after a clean exit.
+			return ctx.Err()
+		}
 		return err
 	}
 }

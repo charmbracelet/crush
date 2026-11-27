@@ -143,7 +143,9 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 				return ActionCmd{common.CopyToClipboard(u, "URL copied to clipboard")}
 			}
 		case key.Matches(msg, m.keyMap.Skip):
-			if m.state == MCPAuthStatePrompt {
+			switch {
+			case m.state == MCPAuthStatePrompt,
+				m.state == MCPAuthStateError && m.hasNext():
 				return m.advance()
 			}
 		case key.Matches(msg, m.keyMap.Close):
@@ -211,6 +213,11 @@ func (m *MCPAuth) authURL() string {
 		return ""
 	}
 	return m.authURLFn(m.currentServer().Name)
+}
+
+// hasNext reports whether more servers are queued after the current one.
+func (m *MCPAuth) hasNext() bool {
+	return m.current+1 < len(m.pending)
 }
 
 func (m *MCPAuth) currentServer() mcptools.PendingAuthServer {
@@ -313,14 +320,15 @@ func (m *MCPAuth) innerContent() string {
 			Render("Authentication successful!")
 
 	case MCPAuthStateError:
-		errMsg := "Authentication failed."
-		if m.err != nil {
-			errMsg = m.err.Error()
-		}
-		return errorStyle.
+		header := errorStyle.
 			Width(innerWidth).
-			Padding(1).
-			Render(errMsg)
+			Padding(0, 1).
+			Render("Authentication failed.")
+		if m.err == nil {
+			return lipgloss.JoinVertical(lipgloss.Left, "", header, "")
+		}
+		flattened := strings.Join(strings.Fields(m.err.Error()), " ")
+		return lipgloss.JoinVertical(lipgloss.Left, "", header, "", block(statusStyle.Render(flattened)), "")
 
 	default:
 		return ""
@@ -356,6 +364,11 @@ func (m *MCPAuth) ShortHelp() []key.Binding {
 			m.keyMap.Close,
 		}
 	case MCPAuthStateError:
+		if m.hasNext() {
+			// Move on to the remaining servers instead of abandoning
+			// the whole queue.
+			return []key.Binding{m.keyMap.Skip, m.keyMap.Close}
+		}
 		return []key.Binding{m.keyMap.Close}
 	default:
 		return []key.Binding{m.keyMap.Close}

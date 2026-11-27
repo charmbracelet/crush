@@ -198,17 +198,7 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (m *APIKeyInput) headerView() string {
-	var (
-		t           = m.com.Styles
-		titleStyle  = t.Dialog.Title
-		textStyle   = t.Dialog.PrimaryText
-		dialogStyle = t.Dialog.View.Width(m.width)
-	)
-	if m.isOnboarding {
-		return textStyle.Render(m.dialogTitle())
-	}
-	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Dialog.TitleGradFromColor, m.com.Styles.Dialog.TitleGradToColor)
+	return authTitle(m.com.Styles, m.width, m.dialogTitle(), m.isOnboarding)
 }
 
 func (m *APIKeyInput) dialogTitle() string {

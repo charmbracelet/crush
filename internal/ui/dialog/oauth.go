@@ -371,18 +371,8 @@ func (m *OAuth) dialogContent() string {
 }
 
 func (m *OAuth) headerContent() string {
-	var (
-		t            = m.com.Styles
-		titleStyle   = t.Dialog.Title
-		textStyle    = t.Dialog.PrimaryText
-		dialogStyle  = t.Dialog.View.Width(m.width)
-		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
-	)
-	if m.isOnboarding {
-		return textStyle.Render(dialogTitle)
-	}
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	title := fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
+	return authTitle(m.com.Styles, m.width, title, m.isOnboarding)
 }
 
 func (m *OAuth) innerDialogContent() string {

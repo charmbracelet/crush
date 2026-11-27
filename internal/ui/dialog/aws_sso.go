@@ -174,14 +174,7 @@ func (m *AWSSSO) dialogContent() string {
 }
 
 func (m *AWSSSO) headerContent() string {
-	var (
-		t            = m.com.Styles
-		titleStyle   = t.Dialog.Title
-		dialogStyle  = t.Dialog.View.Width(m.width)
-		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = "AWS SSO Authentication"
-	)
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	return authTitle(m.com.Styles, m.width, "AWS SSO Authentication", false)
 }
 
 func (m *AWSSSO) innerDialogContent() string {

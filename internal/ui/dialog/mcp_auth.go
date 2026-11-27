@@ -253,16 +253,11 @@ func (m *MCPAuth) dialogContent() string {
 }
 
 func (m *MCPAuth) headerContent() string {
-	t := m.com.Styles
-	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(m.width)
-	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-
 	title := fmt.Sprintf("Authenticate with %s", m.currentServer().Name)
 	if len(m.pending) > 1 {
 		title += fmt.Sprintf(" (%d/%d)", m.current+1, len(m.pending))
 	}
-	return common.DialogTitle(t, titleStyle.Render(title), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	return authTitle(m.com.Styles, m.width, title, false)
 }
 
 func (m *MCPAuth) innerContent() string {

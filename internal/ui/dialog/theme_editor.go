@@ -139,7 +139,13 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listHeight := max(1, height-heightOffset)
 	ed.keepSelectedVisible(listHeight)
 
-	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
+	// Reserve the scrollbar column only when the slots overflow, so the
+	// scrollbar sits against the border like in the other pickers.
+	scrollbarWidth := 0
+	if len(ed.slots) > listHeight {
+		scrollbarWidth = 1
+	}
+	listWidth := max(0, innerWidth-scrollbarWidth)
 	// Compute label prefix width: 22-char name + space + swatch + space
 	labelPrefix := fmt.Sprintf("%-22s %s ", "", styles.ColorSwatchIcon)
 	inputPrefixWidth := lipgloss.Width(labelPrefix)

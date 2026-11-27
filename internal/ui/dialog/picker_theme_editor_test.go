@@ -93,3 +93,11 @@ func TestThemeNewNoReservedErrorSpace(t *testing.T) {
 	require.Contains(t, got[len(got)-2], "enter create")
 	require.Empty(t, got[len(got)-3])
 }
+
+// TestThemeEditorScrollbarAgainstBorder verifies the theme editor's
+// scrollbar sits against the right border like other pickers.
+func TestThemeEditorScrollbarAgainstBorder(t *testing.T) {
+	t.Parallel()
+	lines := drawFits(t, NewThemeEditor(newPickerTestCommon(), "charmtone-panther"), 100, 30)
+	require.Contains(t, strings.Join(lines, "\n"), "┃│")
+}

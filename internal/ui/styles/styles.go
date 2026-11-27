@@ -540,6 +540,9 @@ type Styles struct {
 		SSHMessage lipgloss.Style
 		// SSHKey styles the labeled account/key row shown under it.
 		SSHKey lipgloss.Style
+		// SSHKeyValue sets the value in that row (account, key path or
+		// host key fingerprint) apart from its label.
+		SSHKeyValue lipgloss.Style
 
 		List lipgloss.Style
 

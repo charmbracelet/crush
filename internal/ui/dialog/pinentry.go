@@ -168,8 +168,11 @@ func (m *Pinentry) headerView() string {
 func (m *Pinentry) descriptionView(width int) string {
 	t := m.com.Styles
 	lines := []string{t.Dialog.PromptMessage.Width(width).Render(m.req.Prompt)}
-	for _, line := range m.req.Key.Lines() {
-		lines = append(lines, t.Dialog.PromptKey.Width(width).Render(line))
+	if keyLines := m.req.Key.Lines(); len(keyLines) > 0 {
+		lines = append(lines, "")
+		for _, line := range keyLines {
+			lines = append(lines, t.Dialog.PromptKey.Width(width).Render(line))
+		}
 	}
 	return strings.Join(lines, "\n")
 }

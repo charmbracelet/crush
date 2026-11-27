@@ -206,7 +206,8 @@ func (m *SSH) descriptionView(width int) string {
 	lines := []string{t.Dialog.SSHMessage.Width(width).Render(m.messageView())}
 	if m.req.KeyInfo != "" {
 		label := sshaskpass.KeyInfoLabel(m.req.Prompt, m.req.Kind)
-		lines = append(lines, t.Dialog.SSHKey.Width(width).Render(label+": "+m.req.KeyInfo))
+		row := label + ": " + t.Dialog.SSHKeyValue.Render(m.req.KeyInfo)
+		lines = append(lines, "", t.Dialog.SSHKey.Width(width).Render(row))
 	}
 	return strings.Join(lines, "\n")
 }

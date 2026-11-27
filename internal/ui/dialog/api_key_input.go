@@ -272,19 +272,28 @@ func (m *APIKeyInput) Cursor() *tea.Cursor {
 
 // FullHelp returns the full help view.
 func (m *APIKeyInput) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{
-			m.keyMap.Submit,
-			m.keyMap.Close,
-		},
-	}
+	return [][]key.Binding{m.ShortHelp()}
 }
 
-// ShortHelp returns the full help view.
+// ShortHelp returns the short help view for the current state.
 func (m *APIKeyInput) ShortHelp() []key.Binding {
-	return []key.Binding{
-		m.keyMap.Submit,
-		m.keyMap.Close,
+	switch m.state {
+	case APIKeyInputStateVerifying:
+		// Keys are ignored until verification finishes.
+		return nil
+	case APIKeyInputStateVerified:
+		// Both enter and esc save the key and continue.
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter", "ctrl+y", "esc", "alt+esc"),
+				key.WithHelp("enter", "save & continue"),
+			),
+		}
+	default:
+		return []key.Binding{
+			m.keyMap.Submit,
+			m.keyMap.Close,
+		}
 	}
 }
 

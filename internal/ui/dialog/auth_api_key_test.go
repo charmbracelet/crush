@@ -87,3 +87,27 @@ func TestAPIKeyInputConfigPathWraps(t *testing.T) {
 		}
 	}
 }
+
+// TestAPIKeyInputHelpMatchesState verifies the help bar only offers keys
+// that do something in the current state.
+func TestAPIKeyInputHelpMatchesState(t *testing.T) {
+	t.Parallel()
+
+	cases := map[APIKeyInputState]struct{ want, notWant []string }{
+		APIKeyInputStateInitial:   {want: []string{"enter submit", "esc exit"}},
+		APIKeyInputStateError:     {want: []string{"enter submit", "esc exit"}},
+		APIKeyInputStateVerifying: {notWant: []string{"enter submit", "esc exit"}},
+		APIKeyInputStateVerified:  {want: []string{"enter save & continue"}, notWant: []string{"esc exit"}},
+	}
+	for st, c := range cases {
+		m := newTestAPIKeyInput()
+		m.state = st
+		out := strings.Join(drawFits(t, m, 100, 30), "\n")
+		for _, w := range c.want {
+			require.Contains(t, out, w, "state %d", st)
+		}
+		for _, w := range c.notWant {
+			require.NotContains(t, out, w, "state %d", st)
+		}
+	}
+}

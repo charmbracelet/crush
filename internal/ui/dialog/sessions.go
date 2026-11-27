@@ -98,7 +98,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 
 	s.keyMap.Select = key.NewBinding(
 		key.WithKeys("enter", "tab", "ctrl+y"),
-		key.WithHelp("enter", "choose"),
+		key.WithHelp("enter", "open"),
 	)
 	s.keyMap.Next = key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
@@ -110,7 +110,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	)
 	s.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
-		key.WithHelp("↑↓", "choose"),
+		key.WithHelp("↑/↓", "choose"),
 	)
 	s.keyMap.Delete = key.NewBinding(
 		key.WithKeys("ctrl+x"),
@@ -492,12 +492,14 @@ func (s *Session) ShortHelp() []key.Binding {
 			s.keyMap.CancelRename,
 		}
 	default:
+		// Enter and esc come first so they survive when the help line
+		// is truncated on narrow screens.
 		return []key.Binding{
+			s.keyMap.Select,
+			s.keyMap.Close,
 			s.keyMap.UpDown,
 			s.keyMap.Rename,
 			s.keyMap.Delete,
-			s.keyMap.Select,
-			s.keyMap.Close,
 		}
 	}
 }

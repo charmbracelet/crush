@@ -125,7 +125,7 @@ func NewTheme(com *common.Common) *Theme {
 
 	th.keyMap.Select = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "choose"),
+		key.WithHelp("enter", "confirm"),
 	)
 	th.keyMap.Next = key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
@@ -559,7 +559,11 @@ func (th *Theme) ShortHelp() []key.Binding {
 			th.keyMap.CancelRename,
 		}
 	}
+	// Enter and esc come first so they survive when the help line is
+	// truncated on narrow screens.
 	bindings := []key.Binding{
+		th.keyMap.Select,
+		th.keyMap.Close,
 		th.keyMap.UpDown,
 	}
 	if th.mode == themesModeNormal {
@@ -576,7 +580,6 @@ func (th *Theme) ShortHelp() []key.Binding {
 			bindings = append(bindings, th.keyMap.Delete)
 		}
 	}
-	bindings = append(bindings, th.keyMap.Select, th.keyMap.Close)
 	return bindings
 }
 

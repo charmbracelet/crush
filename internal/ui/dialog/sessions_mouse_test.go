@@ -308,6 +308,6 @@ func TestSessionFitsShortTerminal(t *testing.T) {
 	for _, h := range []int{7, 8, 9} {
 		dialog := newSessionMouseDialog(t, testSessions(5), "")
 		lines := drawFits(t, dialog, 40, h)
-		require.Contains(t, strings.Join(lines, "\n"), "choose", "help visible at 40x%d", h)
+		require.Contains(t, strings.Join(lines, "\n"), "esc exit", "help visible at 40x%d", h)
 	}
 }

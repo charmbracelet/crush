@@ -130,6 +130,13 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 			want: proto.PermissionAllowForSession,
 		},
 		{
+			name: "GrantAlways -> PermissionAlwaysAllow",
+			call: func(w *ClientWorkspace, p permission.PermissionRequest) {
+				w.PermissionGrantAlways(p)
+			},
+			want: proto.PermissionAlwaysAllow,
+		},
+		{
 			name: "Deny -> PermissionDeny",
 			call: func(w *ClientWorkspace, p permission.PermissionRequest) {
 				w.PermissionDeny(p)

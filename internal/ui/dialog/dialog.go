@@ -28,6 +28,13 @@ var CloseKey = key.NewBinding(
 	key.WithHelp("esc", "exit"),
 )
 
+// cancelKey is [CloseKey] for dialogs where closing declines a request
+// rather than just dismissing a view.
+var cancelKey = key.NewBinding(
+	key.WithKeys("esc", "alt+esc"),
+	key.WithHelp("esc", "cancel"),
+)
+
 // Action represents an action taken in a dialog after handling a message.
 type Action any
 

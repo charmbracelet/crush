@@ -71,7 +71,7 @@ func NewSSH(com *common.Common, req sshaskpass.PromptRequest) *SSH {
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", cmp.Or(submitLabel(req.Kind), "submit")),
 	)
-	m.keyMap.Close = CloseKey
+	m.keyMap.Close = cancelKey
 
 	return &m
 }

@@ -60,7 +60,7 @@ func NewPinentry(com *common.Common, req pinentry.PromptRequest) *Pinentry {
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "submit"),
 	)
-	m.keyMap.Close = CloseKey
+	m.keyMap.Close = cancelKey
 
 	return &m
 }

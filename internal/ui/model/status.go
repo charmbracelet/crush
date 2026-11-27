@@ -36,6 +36,8 @@ type Status struct {
 	// hints.
 	inputMode uiInputMode
 	permMode  permission.PermissionMode
+	// editorMode is the prompt's vim or Helix mode, empty in emacs mode.
+	editorMode string
 }
 
 // NewStatus creates a new status bar and help model.
@@ -76,22 +78,36 @@ func (s *Status) SetMode(mode uiInputMode, permMode permission.PermissionMode) {
 	s.permMode = permMode
 }
 
-// modeBadge renders the badge for the current mode, or an empty string in
-// the default coding mode.
+// SetEditorMode sets the prompt's vim or Helix mode shown first in the
+// badge, such as NORMAL or INSERT; empty shows none.
+func (s *Status) SetEditorMode(mode string) {
+	s.editorMode = mode
+}
+
+// modeBadge renders the badges for the current modes: the prompt's vim or
+// Helix mode, then the plan or permission mode, or an empty string in the
+// default coding mode in emacs mode.
 func (s *Status) modeBadge() string {
 	t := s.com.Styles
+	var badges []string
+	switch s.editorMode {
+	case "":
+	case "INSERT":
+		badges = append(badges, t.Status.EditorModeInsert.Render(s.editorMode))
+	default:
+		badges = append(badges, t.Status.EditorModeNormal.Render(s.editorMode))
+	}
 	// Mirror the editor prompt precedence: planning wins over YOLO, which
 	// can be carried into plan mode.
-	if s.inputMode == uiInputModePlan {
-		return t.Status.ModeBadgePlan.String()
+	switch {
+	case s.inputMode == uiInputModePlan:
+		badges = append(badges, t.Status.ModeBadgePlan.String())
+	case s.permMode == permission.PermissionModeSysadmin:
+		badges = append(badges, t.Status.ModeBadgeSysadmin.String())
+	case s.permMode == permission.PermissionModeYolo:
+		badges = append(badges, t.Status.ModeBadgeYolo.String())
 	}
-	switch s.permMode {
-	case permission.PermissionModeSysadmin:
-		return t.Status.ModeBadgeSysadmin.String()
-	case permission.PermissionModeYolo:
-		return t.Status.ModeBadgeYolo.String()
-	}
-	return ""
+	return strings.Join(badges, " ")
 }
 
 // SetWidth sets the width of the status bar and help view.

@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	joyeditor "charm.land/superjoy/editor"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // PromptInfo describes a prompt line, as the prompt functions receive it.
@@ -78,6 +80,9 @@ func newPromptEditor() promptEditor {
 	m.SetSemanticHighlighting(false)
 	m.SetInlayHints(false)
 	m.SetBreadcrumbs(false)
+	// The prompt is a few rows tall, too small for the which-key popup of
+	// vim's and Helix's pending keys: the UI draws it over the screen.
+	m.SetKeyHintsHidden(true)
 	m.SetCursorShape(tea.CursorBlock)
 	m.SetCursorBlink(true)
 	m.SetHeight(TextareaMinHeight)
@@ -154,8 +159,8 @@ func (p *promptEditor) SetMode(mode string) {
 }
 
 // Inserting reports whether typed keys insert text: always in emacs mode,
-// and in vim's or Helix's insert mode. Enter sends and @ mentions only
-// while inserting; the modal modes keep their other keys to themselves.
+// and in vim's or Helix's insert mode. @ mentions open only while
+// inserting; the modal modes keep their other keys to themselves.
 func (p *promptEditor) Inserting() bool {
 	switch {
 	case p.IsVimMode():
@@ -167,6 +172,42 @@ func (p *promptEditor) Inserting() bool {
 	default:
 		return true
 	}
+}
+
+// Modal reports whether vim or Helix mode is on.
+func (p *promptEditor) Modal() bool {
+	p.ensure()
+	return p.IsVimMode() || p.HelixEnabled()
+}
+
+// ModeName is the vim or Helix mode to show, such as NORMAL or INSERT,
+// and empty in emacs mode, which has none.
+func (p *promptEditor) ModeName() string {
+	p.ensure()
+	switch {
+	case p.IsVimMode():
+		return p.GetVimModeString()
+	case p.HelixEnabled():
+		return p.HelixModeString()
+	default:
+		return ""
+	}
+}
+
+// Resting reports whether Enter and Esc are the UI's: Enter sends the
+// message and Esc cancels a running request. They always are in emacs
+// mode. In vim and Helix modes they are only in normal mode with no keys
+// pending and no prompt or menu open; otherwise they are the editor's, so
+// Enter breaks the line in insert mode and finishes a : command or an f,
+// and Esc leaves insert or visual mode.
+func (p *promptEditor) Resting() bool {
+	if !p.Modal() {
+		return true
+	}
+	if p.EditMode() != "normal" || p.VimBusy() || p.OverlayOpen() {
+		return false
+	}
+	return !p.IsVimMode() || p.VimState().Count == 0
 }
 
 // Update processes msg and keeps the height fitted to the content.
@@ -374,4 +415,48 @@ func hexColor(c color.Color) string {
 	}
 	r, g, b, _ := c.RGBA()
 	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+}
+
+// promptActive reports whether the prompt is on screen and takes the keys.
+func (m *UI) promptActive() bool {
+	return (m.state == uiChat || m.state == uiLanding) && m.focus == uiFocusEditor &&
+		m.activeInline == nil && (m.dialog == nil || !m.dialog.HasDialogs())
+}
+
+// promptOwnsEscape reports whether Esc belongs to the prompt rather than
+// cancelling: in vim and Helix modes until the prompt is back in normal
+// mode, so that Esc leaves insert mode and never cancels by surprise.
+func (m *UI) promptOwnsEscape() bool {
+	return m.promptActive() && !m.prompt.Resting()
+}
+
+// drawPromptKeyHints draws the which-key popup of the keys vim or Helix
+// waits for after a key such as d, g or space, at the screen's far right
+// just above the help: the prompt is too short to show it itself.
+func (m *UI) drawPromptKeyHints(scr uv.Screen, status image.Rectangle) {
+	if !m.promptActive() {
+		joyeditor.ResetKeyHintsScroll()
+		return
+	}
+	title, hints := m.prompt.ModalHints(nil)
+	if len(hints) == 0 {
+		joyeditor.ResetKeyHintsScroll() // a popup opened again starts at the top
+		return
+	}
+	box := joyeditor.KeyHintsBox(title, hints, m.height)
+	w, h := lipgloss.Width(box), lipgloss.Height(box)
+	area := scr.Bounds()
+	x := max(area.Min.X, area.Max.X-w)
+	y := max(area.Min.Y, status.Min.Y-h)
+	uv.NewStyledString(box).Draw(scr, image.Rect(x, y, x+w, y+h))
+}
+
+// scrollPromptKeyHints scrolls the prompt's which-key popup when it
+// overflows and msg is one of its scroll keys, and reports whether it did.
+func (m *UI) scrollPromptKeyHints(msg tea.KeyPressMsg) bool {
+	if !m.promptActive() {
+		return false
+	}
+	title, hints := m.prompt.ModalHints(nil)
+	return len(hints) > 0 && joyeditor.ScrollKeyHints(msg, title, hints, m.height)
 }

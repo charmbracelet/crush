@@ -150,10 +150,10 @@ func (d *MultiChoice) respond() question.Answer {
 // ShortHelp returns key bindings for the status bar.
 func (d *MultiChoice) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		return []key.Binding{questionBackKey, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
+		return []key.Binding{backKey, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
 	}
 	if d.isFillIn() && d.fillIn.Focused() {
-		return []key.Binding{d.navUp, d.keyDone, questionBackKey}
+		return []key.Binding{d.navUp, d.keyDone, backKey}
 	}
 	return []key.Binding{d.keyUp, d.keyDown, d.keyToggle, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyDone, cancelKey}
 }

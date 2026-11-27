@@ -95,10 +95,7 @@ func NewAuthMethod(
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "accept"),
 	)
-	m.keyMap.Close = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
-		key.WithHelp("esc", "back"),
-	)
+	m.keyMap.Close = backKey
 
 	return m
 }

@@ -102,10 +102,7 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithHelp("d", "deny"),
 		),
 		// Esc refuses the request, so say so rather than "exit".
-		Close: key.NewBinding(
-			key.WithKeys("esc", "alt+esc"),
-			key.WithHelp("esc", "deny"),
-		),
+		Close: escKey("deny"),
 		ToggleDiffMode: key.NewBinding(
 			key.WithKeys("t"),
 			key.WithHelp("t", "toggle diff view"),

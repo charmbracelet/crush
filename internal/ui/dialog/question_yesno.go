@@ -97,7 +97,7 @@ func (d *YesNo) GetRequest() question.Question { return d.Request }
 // ShortHelp returns key bindings for the status bar help display.
 func (d *YesNo) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		return []key.Binding{questionBackKey, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
+		return []key.Binding{backKey, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
 	}
 	return []key.Binding{d.keyLeftRight, d.keyEnter, d.keyYes, d.keyNo, d.keyNote, cancelKey}
 }

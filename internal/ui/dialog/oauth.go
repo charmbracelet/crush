@@ -489,10 +489,7 @@ func (m *OAuth) ShortHelp() []key.Binding {
 					key.WithKeys("enter", "ctrl+y"),
 					key.WithHelp("enter", "submit code"),
 				),
-				key.NewBinding(
-					key.WithKeys("esc", "alt+esc"),
-					key.WithHelp("esc", "back"),
-				),
+				backKey,
 			}
 		}
 		submit := m.keyMap.Submit

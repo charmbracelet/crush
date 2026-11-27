@@ -169,10 +169,7 @@ func NewTheme(com *common.Common) *Theme {
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "confirm"),
 	)
-	th.keyMap.CancelRename = key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "cancel"),
-	)
+	th.keyMap.CancelRename = cancelKey
 	th.keyMap.Close = CloseKey
 
 	th.setThemeItems()

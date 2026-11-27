@@ -22,17 +22,25 @@ const (
 	inputContentHeight = 1
 )
 
-// CloseKey is the default key binding to close dialogs.
-var CloseKey = key.NewBinding(
-	key.WithKeys("esc", "alt+esc"),
-	key.WithHelp("esc", "exit"),
-)
+// escKey binds esc, and alt+esc which some terminals send for it, with a
+// help label saying what esc does at that point. Every dialog builds its
+// esc binding here so the keys cannot drift apart between dialogs.
+func escKey(label string) key.Binding {
+	return key.NewBinding(
+		key.WithKeys("esc", "alt+esc"),
+		key.WithHelp("esc", label),
+	)
+}
 
-// cancelKey is [CloseKey] for dialogs where closing declines a request
-// rather than just dismissing a view.
-var cancelKey = key.NewBinding(
-	key.WithKeys("esc", "alt+esc"),
-	key.WithHelp("esc", "cancel"),
+var (
+	// CloseKey closes a dialog when nothing is lost by leaving.
+	CloseKey = escKey("exit")
+	// cancelKey is esc where leaving abandons something in progress,
+	// such as a sign-in, a rename or unsaved edits.
+	cancelKey = escKey("cancel")
+	// backKey is esc where it returns to the previous step rather than
+	// leaving the dialog.
+	backKey = escKey("back")
 )
 
 // Action represents an action taken in a dialog after handling a message.

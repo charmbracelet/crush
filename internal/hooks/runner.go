@@ -88,6 +88,9 @@ func (r *Runner) Run(ctx context.Context, ev Event) AggregateResult {
 	if r == nil {
 		return AggregateResult{}
 	}
+	if ev.Name == EventPreModelUse && (ev.Provider == "" || ev.Model == "") {
+		return AggregateResult{Decision: DecisionDeny, Reason: "provider and model IDs are required"}
+	}
 	hooks := r.matchingHooks(ev)
 	if len(hooks) == 0 {
 		return AggregateResult{}

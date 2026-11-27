@@ -190,7 +190,9 @@ event name is a config error.
 
 **Matcher** is a regex tested against the tool name (e.g. `^bash$`,
 `^(edit|write)$`, `^mcp_`) or, for `PreModelUse`, against `provider/model`.
-Omit it to match every target. Other events reject matchers.
+Omit it to match every target. `PermissionRequest` and `PermissionResult`
+match the tool name just like the other tool events. Events with a dash in the
+table’s Matcher column reject matchers.
 
 **Scope**: tool and turn events fire only for the **top-level agent**.
 `PreModelUse` also fires for subagents. A `TurnEnd` notification therefore
@@ -226,8 +228,8 @@ hook add PreModelUse --matcher '^local/qwen:' --timeout 60 \
   --command './hooks/model-ready.sh --min-free-mib 8192 "$CRUSH_PROVIDER" "$CRUSH_MODEL"'
 ```
 
-Exit zero when the model is ready. A nonzero exit, timeout, or explicit block
-prevents the request. Write a short failure reason to stderr so Crush can
+Exit zero when the model is ready. Plain-text stdout has no effect on the
+request. A nonzero exit, timeout, or explicit block prevents the request. Write a short failure reason to stderr so Crush can
 show it. If the hook starts a server or establishes a tunnel, start with a
 fast health check and skip setup when the endpoint is already ready. Make
 setup safe to repeat, including for concurrent requests. Increase the default

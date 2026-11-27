@@ -66,3 +66,21 @@ func TestPreModelUseAbandonedHookBlocksRequest(t *testing.T) {
 	require.Contains(t, result.Reason, "unresponsive")
 	require.Contains(t, result.Reason, "deadline")
 }
+
+func TestPreModelUseRejectsIncompleteModelIdentity(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	r := NewRunner(Static(map[string][]HookConfig{
+		EventPreModelUse: {{Matcher: ".*", Command: "exit 0"}},
+	}), dir, dir)
+	for _, ev := range []Event{
+		{Name: EventPreModelUse, Provider: "local"},
+		{Name: EventPreModelUse, Model: "test"},
+	} {
+		result := r.Run(t.Context(), ev)
+		require.True(t, result.Blocked())
+		require.Zero(t, result.HookCount)
+		require.Contains(t, result.Reason, "provider and model IDs")
+	}
+}

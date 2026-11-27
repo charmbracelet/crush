@@ -52,7 +52,8 @@ func TestPreModelUseGatesProviderRequests(t *testing.T) {
 		"PreModelUse": {{
 			Matcher: "^local/qwen:",
 			Command: `printf '%s\n' '8192 MiB' "$CRUSH_PROVIDER" "$CRUSH_MODEL" >> args
-if [ ! -f ready ]; then echo 'memory gate failed' >&2; exit 1; fi`,
+if [ ! -f ready ]; then echo 'memory gate failed' >&2; exit 1; fi
+echo 'model ready'`,
 		}},
 	}), dir, dir)
 
@@ -132,6 +133,8 @@ func TestPreModelUseCancellationDuringCheck(t *testing.T) {
 			cancel()
 			return nil
 		}, dir, dir),
+		provider: "local",
+		model:    "test",
 	}
 	_, err := model.Stream(ctx, fantasy.Call{})
 	require.ErrorIs(t, err, context.Canceled)

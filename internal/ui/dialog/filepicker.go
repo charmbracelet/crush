@@ -1,13 +1,11 @@
 package dialog
 
 import (
-	"fmt"
 	"image"
 	_ "image/jpeg" // register JPEG format
 	_ "image/png"  // register PNG format
 	"os"
 	"strings"
-	"sync"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -18,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	fimage "github.com/charmbracelet/crush/internal/ui/image"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // FilePickerID is the identifier for the FilePicker dialog.
@@ -217,20 +216,39 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 const (
 	filePickerMinWidth  = 70
 	filePickerMinHeight = 10
+	// filePickerMinPreviewHeight is the shortest image preview worth
+	// showing; below it the preview is hidden to leave room for files.
+	filePickerMinPreviewHeight = 5
 )
 
 // Draw renders the [FilePicker] dialog as a string.
 func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := f.com.Styles
 	width := max(0, min(filePickerMinWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(10, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
-	// Scale down image preview on small screens. Hide it entirely
-	// when the dialog is too short to show both preview and files.
+	// The dialog is the title, a gap, an optional image preview and gap,
+	// the file list, a gap, and the help line, inside the border. Give
+	// the file list its rows first so it is never pushed off-screen.
+	const gap = 1
+	const helpContentHeight = 1
+	avail := max(0, area.Dy()-t.Dialog.View.GetVerticalFrameSize()-
+		t.Dialog.Title.GetVerticalFrameSize()-titleContentHeight-gap-
+		gap-t.Dialog.HelpView.GetVerticalFrameSize()-helpContentHeight)
+	height := min(filePickerMinHeight, avail)
+
+	// Show the image preview in whatever height is left, capped to its
+	// normal size. Hide it entirely when there is nothing to preview or
+	// the dialog is too short for a useful preview.
 	imgPrevHeight := 0
-	if height > 5 {
-		imgPrevHeight = filePickerMinHeight*2 - t.Dialog.ImagePreview.GetVerticalFrameSize()
+	if f.fp.HighlightedPath() != "" {
+		imgPrevHeight = min(
+			filePickerMinHeight*2-t.Dialog.ImagePreview.GetVerticalFrameSize(),
+			avail-height-gap-t.Dialog.ImagePreview.GetVerticalFrameSize(),
+		)
+		if imgPrevHeight < filePickerMinPreviewHeight {
+			imgPrevHeight = 0
+		}
 	}
 	imgPrevWidth := innerWidth - t.Dialog.ImagePreview.GetHorizontalFrameSize()
 	f.imgPrevWidth = imgPrevWidth
@@ -245,7 +263,7 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	f.fp.Styles = styles
 
 	rc := NewRenderContext(t, width)
-	rc.Gap = 1
+	rc.Gap = gap
 	rc.Title = "Add Image"
 	rc.Help = renderDialogHelp(t, &f.help, f, innerWidth)
 
@@ -263,37 +281,14 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return nil
 }
 
-var (
-	imagePreviewCache = map[string]string{}
-	imagePreviewMutex sync.RWMutex
-)
-
 // imagePreview returns the image preview section of the [FilePicker] dialog.
 func (f *FilePicker) imagePreview(imgPrevWidth, imgPrevHeight int) string {
 	if !f.previewingImage {
-		key := fmt.Sprintf("%dx%d", imgPrevWidth, imgPrevHeight)
-		imagePreviewMutex.RLock()
-		cached, ok := imagePreviewCache[key]
-		imagePreviewMutex.RUnlock()
-		if ok {
-			return cached
-		}
-
-		var sb strings.Builder
-		for y := range imgPrevHeight {
-			for range imgPrevWidth {
-				sb.WriteRune('█')
-			}
-			if y < imgPrevHeight-1 {
-				sb.WriteRune('\n')
-			}
-		}
-
-		imagePreviewMutex.Lock()
-		imagePreviewCache[key] = sb.String()
-		imagePreviewMutex.Unlock()
-
-		return sb.String()
+		// Until an image is ready, show a quiet hint centered in the
+		// preview area instead of a solid block.
+		hint := f.com.Styles.Dialog.ImagePreview.UnsetPadding().Render(
+			ansi.Truncate("No preview", imgPrevWidth, "…"))
+		return lipgloss.Place(imgPrevWidth, imgPrevHeight, lipgloss.Center, lipgloss.Center, hint)
 	}
 
 	if id := f.fp.HighlightedPath(); id != "" {

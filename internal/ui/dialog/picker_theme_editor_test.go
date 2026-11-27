@@ -1,12 +1,14 @@
 package dialog
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/stretchr/testify/require"
 )
 
 // pickerTestWorkspace is a minimal workspace for rendering picker dialogs.
@@ -38,5 +40,17 @@ func TestThemeNewFitsArea(t *testing.T) {
 	t.Parallel()
 	for _, sz := range [][2]int{{100, 30}, {40, 30}, {100, 12}} {
 		drawFits(t, NewThemeNew(newPickerTestCommon(), ""), sz[0], sz[1])
+	}
+}
+
+// TestFilePickerFitsArea verifies the file picker keeps its file list, help
+// and border on screen at short sizes instead of being filled by the image
+// preview, and never draws a solid placeholder block.
+func TestFilePickerFitsArea(t *testing.T) {
+	t.Parallel()
+	for _, sz := range [][2]int{{100, 30}, {40, 30}, {100, 12}} {
+		fp, _ := NewFilePicker(newPickerTestCommon())
+		lines := drawFits(t, fp, sz[0], sz[1])
+		require.NotContains(t, strings.Join(lines, "\n"), "█")
 	}
 }

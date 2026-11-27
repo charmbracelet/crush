@@ -298,3 +298,57 @@ func TestPermissions_TypicalContentFitsWithoutScrolling(t *testing.T) {
 	require.Contains(t, text, "}")
 	require.False(t, p.canScroll(), "content should fit without scrolling:\n%s", text)
 }
+
+// TestPermissions_NarrowSimpleContentShrinks verifies that on a narrow
+// screen a short command keeps the dialog to its content height instead
+// of filling the screen with empty rows, and that the title lines up
+// with the body.
+func TestPermissions_NarrowSimpleContentShrinks(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s, Workspace: permissionsTestWorkspace{}}
+	p := NewPermissions(com, permission.PermissionRequest{
+		ID: "p", ToolName: tools.BashToolName, Path: "/tmp",
+		Params: tools.BashPermissionsParams{Command: "go test ./...", Description: "Run tests"},
+	})
+	lines := drawFits(t, p, 60, 30)
+	var rows []string
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			rows = append(rows, l)
+		}
+	}
+	require.Less(t, len(rows), 20, "dialog padded to fill the screen:\n%s", strings.Join(lines, "\n"))
+
+	col := func(sub string) int {
+		for _, l := range lines {
+			if i := strings.Index(l, sub); i >= 0 {
+				return ansi.StringWidth(l[:i])
+			}
+		}
+		return -1
+	}
+	require.Equal(t, col("Tool"), col("Permission Required"), "title not aligned with body")
+}
+
+// TestPermissions_ShortContentFitsShortWindow verifies one- and two-line
+// requests never outgrow a short window: the content viewport's minimum
+// height must give way to the room the chrome leaves.
+func TestPermissions_ShortContentFitsShortWindow(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s, Workspace: permissionsTestWorkspace{}}
+
+	for _, cmd := range []string{"ls", "ls\npwd"} {
+		for _, w := range []int{60, 100} {
+			for h := 5; h <= 20; h++ {
+				p := NewPermissions(com, permission.PermissionRequest{
+					ID:       "perm-test",
+					ToolName: tools.BashToolName,
+					Params:   tools.BashPermissionsParams{Command: cmd},
+				})
+				drawFits(t, p, w, h)
+			}
+		}
+	}
+}

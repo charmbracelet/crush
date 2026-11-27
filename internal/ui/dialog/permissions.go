@@ -423,14 +423,16 @@ func (p *Permissions) dialogSize(area uv.Rectangle) (width, maxHeight int, force
 // viewport given the height taken by the fixed chrome (fixedHeight) and
 // the content's natural height. Simple prompts shrink to fit their
 // content; diff and fullscreen views always take all remaining height.
-func (p *Permissions) contentViewportHeight(forceFullscreen bool, maxHeight, fixedHeight, contentHeight int) int {
-	if p.hasDiffView() || forceFullscreen {
-		return max(maxHeight-fixedHeight, 1)
+func (p *Permissions) contentViewportHeight(maxHeight, fixedHeight, contentHeight int) int {
+	// Never more than the room the chrome leaves, so the buttons and the
+	// bottom border stay on screen in a short window.
+	room := max(maxHeight-fixedHeight, 1)
+	if p.hasDiffView() {
+		return room
 	}
-	if fixedHeight+contentHeight < maxHeight {
-		return max(contentHeight, 3)
-	}
-	return max(maxHeight-fixedHeight, 3)
+	// A small window makes the dialog as large as the window, but simple
+	// content still shrinks to fit rather than padding out empty rows.
+	return min(max(contentHeight, 3), room)
 }
 
 func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
@@ -469,7 +471,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if helpView != "" {
 		fixedHeight += lipgloss.Height(helpView)
 	}
-	availableHeight := p.contentViewportHeight(forceFullscreen, maxHeight, fixedHeight, contentHeight)
+	availableHeight := p.contentViewportHeight(maxHeight, fixedHeight, contentHeight)
 
 	// Determine if scrollbar is needed.
 	needsScrollbar := p.hasDiffView() || contentHeight > availableHeight
@@ -567,8 +569,11 @@ func (p *Permissions) fitChrome(innerHeight, minContent, contentWidth int, heade
 func (p *Permissions) renderHeader(contentWidth int) string {
 	t := p.com.Styles
 
-	title := common.DialogTitle(t, "Permission Required", contentWidth-t.Dialog.Title.GetHorizontalFrameSize(), t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
-	title = t.Dialog.Title.Render(title)
+	// The dialog frame already pads the content, so drop the title's
+	// own horizontal padding to line it up with the body and help.
+	titleStyle := t.Dialog.Title.PaddingLeft(0).PaddingRight(0)
+	title := common.DialogTitle(t, "Permission Required", contentWidth-titleStyle.GetHorizontalFrameSize(), t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	title = titleStyle.Render(title)
 
 	lines := []string{title}
 

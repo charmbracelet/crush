@@ -192,7 +192,8 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		r.list.ScrollToSelected()
 	}
 
-	listView := t.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
+	listBody := renderDialogListBody(t, r.list.Render(), visibleCount == 0, emptyNoMatches, innerWidth)
+	listView := t.Dialog.List.Height(r.list.Height()).Render(listBody)
 	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, r.list.Offset())
 	rc.AddPart(listView)
 	rc.Help = renderDialogHelp(t, &r.help, r, innerWidth)

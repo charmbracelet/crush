@@ -323,7 +323,8 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
 	inputView := t.Dialog.InputPrompt.Render(c.input.View())
 	rc.AddPart(inputView)
-	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
+	listBody := renderDialogListBody(t, c.list.Render(), len(c.list.FilteredItems()) == 0, emptyNoMatches, innerWidth)
+	listView := t.Dialog.List.Height(c.list.Height()).Render(listBody)
 	rc.AddPart(listView)
 	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
 

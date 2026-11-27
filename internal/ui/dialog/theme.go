@@ -509,7 +509,8 @@ func (th *Theme) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		th.list.ScrollToSelected()
 	}
 
-	listView := t.Dialog.List.Height(th.list.Height()).Render(th.list.Render())
+	listBody := renderDialogListBody(t, th.list.Render(), !th.hasSelectableTheme(), emptyNoMatches, innerWidth)
+	listView := t.Dialog.List.Height(th.list.Height()).Render(listBody)
 	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, th.list.Offset())
 	rc.AddPart(listView)
 	rc.Help = renderDialogHelp(t, &th.help, th, innerWidth)

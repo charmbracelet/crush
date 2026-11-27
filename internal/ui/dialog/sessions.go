@@ -327,7 +327,12 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// still renders a line plus its margin, pushing the dialog past the area.
 	var bodyView string
 	if listHeight > 0 {
-		bodyView = t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
+		msg := emptyNoMatches
+		if len(s.sessions) == 0 {
+			msg = "No sessions yet."
+		}
+		listBody := renderDialogListBody(t, s.list.Render(), len(s.list.FilteredItems()) == 0, msg, listWidth)
+		bodyView = t.Dialog.List.Height(s.list.Height()).Render(listBody)
 		bodyView = joinScrollbar(t, bodyView, listHeight, listTotalHeight, listHeight, s.list.Offset())
 		rc.AddPart(bodyView)
 	}

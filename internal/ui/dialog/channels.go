@@ -290,7 +290,12 @@ func (d *Channels) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// With no room for list rows, skip the body: an empty list still
 	// renders a line plus its margin, pushing the dialog past the area.
 	if listHeight > 0 {
-		listView := t.Dialog.List.Height(d.list.Height()).Render(d.list.Render())
+		msg := emptyNoMatches
+		if len(d.list.Items()) == 0 {
+			msg = "No channels."
+		}
+		listBody := renderDialogListBody(t, d.list.Render(), len(d.list.FilteredItems()) == 0, msg, innerWidth)
+		listView := t.Dialog.List.Height(d.list.Height()).Render(listBody)
 		rc.AddPart(joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, d.list.Offset()))
 	}
 	rc.Help = renderDialogHelp(t, &d.help, d, innerWidth)

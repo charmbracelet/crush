@@ -366,7 +366,12 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
 
-	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
+	msg := emptyNoMatches
+	if m.list.Len() == 0 {
+		msg = "No models available."
+	}
+	listBody := renderDialogListBody(t, m.list.Render(), m.list.List.Len() == 0, msg, innerWidth)
+	listView := t.Dialog.List.Height(m.list.Height()).Render(listBody)
 	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, m.list.Offset())
 	rc.AddPart(listView)
 

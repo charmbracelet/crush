@@ -70,6 +70,29 @@ func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (li
 	return listHeight, listTotalHeight, listWidth
 }
 
+// Empty-state messages for picker lists.
+const (
+	emptyNoMatches = "No matches."
+)
+
+// dialogEmptyState renders msg as a single padded, subtle line for a
+// picker list with nothing to show, truncated with an ellipsis so it never
+// wraps past the border. width is the list width.
+func dialogEmptyState(t *styles.Styles, msg string, width int) string {
+	st := t.Dialog.SecondaryText
+	textWidth := max(0, width-st.GetHorizontalFrameSize())
+	return st.Render(ansi.Truncate(msg, textWidth, "…"))
+}
+
+// renderDialogListBody returns body, or a padded empty-state line with
+// msg when isEmpty, so an empty list does not leave a blank area.
+func renderDialogListBody(t *styles.Styles, body string, isEmpty bool, msg string, width int) string {
+	if isEmpty {
+		return dialogEmptyState(t, msg, width)
+	}
+	return body
+}
+
 // joinScrollbar appends a vertical scrollbar to the right of view when the
 // content overflows its viewport, and returns view unchanged otherwise.
 // contentSize is the total content height, viewportSize the visible height,

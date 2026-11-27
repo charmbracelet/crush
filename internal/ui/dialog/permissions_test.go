@@ -263,3 +263,18 @@ func TestPermissions_SmallWindowShowsContent(t *testing.T) {
 		}
 	}
 }
+
+// TestPermissions_EscapeHelpSaysDeny verifies the help bar labels esc by
+// what it does: it refuses the request rather than just closing a view.
+func TestPermissions_EscapeHelpSaysDeny(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPermissions(t)
+	for _, b := range p.ShortHelp() {
+		if b.Help().Key == "esc" {
+			require.Equal(t, "deny", b.Help().Desc)
+			return
+		}
+	}
+	t.Fatal("esc missing from help")
+}

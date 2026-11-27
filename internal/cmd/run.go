@@ -285,11 +285,11 @@ func runNonInteractive(
 		}
 	}
 
-	// Automatically approve all permission requests for this
-	// non-interactive session, as local mode does: nothing here answers a
-	// prompt, so the run would wait on the first one forever. A server
-	// that predates the endpoint answers 404; carry on regardless, since
-	// runs that need no permission still work there.
+	// Automatically approve ordinary requests for this non-interactive
+	// session, as local mode does. Dangerous commands are refused unless
+	// the workspace is in sysadmin mode.
+	// A server that predates the endpoint answers 404; carry on regardless,
+	// since runs that need no permission still work there.
 	if err := c.AutoApproveSession(ctx, ws.ID, sess.ID); err != nil {
 		if !errors.Is(err, client.ErrNotFound) {
 			return err

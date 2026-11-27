@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -56,6 +57,9 @@ func (m PermissionMode) SkipsPrompts() bool {
 func (m PermissionMode) RefusesDangerous() bool {
 	return m == PermissionModeYolo
 }
+
+// ErrDangerousAutoApproval means a dangerous command needs explicit approval.
+var ErrDangerousAutoApproval = errors.New("cannot auto-approve a dangerous command")
 
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
@@ -145,6 +149,8 @@ type Service interface {
 	// the same scope instead of every earlier request. A nil scope
 	// restores the default of one scope for the whole service.
 	SetSessionScope(scope SessionScope)
+	// AutoApproveSession answers without prompting and refuses dangerous
+	// commands unless the workspace is in sysadmin mode.
 	AutoApproveSession(sessionID string)
 	// InheritAutoApproval approves the child session automatically when its
 	// parent session already is. A child of any other session keeps
@@ -300,6 +306,10 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	mode := s.mode
 	s.modeMu.RUnlock()
 
+	if opts.Danger != "" && mode != PermissionModeSysadmin && s.autoApproves(opts.SessionID) {
+		return false, ErrDangerousAutoApproval
+	}
+
 	if mode.SkipsPrompts() {
 		return true, nil
 	}
@@ -332,11 +342,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		ToolCallID: opts.ToolCallID,
 	})
 
-	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
-	s.autoApproveSessionsMu.RUnlock()
-
-	if autoApprove {
+	if opts.Danger == "" && s.autoApproves(opts.SessionID) {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			SessionID:  opts.SessionID,
 			ToolCallID: opts.ToolCallID,
@@ -502,6 +508,12 @@ func (s *permissionService) InheritAutoApproval(parentSessionID, childSessionID 
 	if s.autoApproveSessions[parentSessionID] {
 		s.autoApproveSessions[childSessionID] = true
 	}
+}
+
+func (s *permissionService) autoApproves(sessionID string) bool {
+	s.autoApproveSessionsMu.RLock()
+	defer s.autoApproveSessionsMu.RUnlock()
+	return s.autoApproveSessions[sessionID]
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {

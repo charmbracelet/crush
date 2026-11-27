@@ -90,12 +90,26 @@ type Resolver interface {
 	ResolveValue(val string) (string, error)
 }
 
+// modelCapabilities holds optional nested metadata some OpenAI-compatible
+// providers embed in /models entries (e.g. 9Router exposes contextWindow
+// here rather than at the top level).
+type modelCapabilities struct {
+	ContextWindow int64 `json:"contextWindow"`
+}
+
+// modelsResponse is the OpenAI-compatible /models listing. The context
+// fields are optional: standard OpenAI-style responses omit them, while
+// providers like llama-swap and 9Router populate them.
 type modelsResponse struct {
 	Data []struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
+		ID                  string            `json:"id"`
+		Object              string            `json:"object"`
+		Created             int64             `json:"created"`
+		OwnedBy             string            `json:"owned_by"`
+		ContextLength       *int64            `json:"context_length"`
+		ContextWindow       *int64            `json:"context_window"`
+		MaxCompletionTokens *int64            `json:"max_completion_tokens"`
+		Capabilities        modelCapabilities `json:"capabilities"`
 	} `json:"data"`
 }
 

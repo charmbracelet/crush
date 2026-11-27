@@ -659,6 +659,10 @@ type Styles struct {
 		ModeBadgePlan     lipgloss.Style
 		ModeBadgeYolo     lipgloss.Style
 		ModeBadgeSysadmin lipgloss.Style
+		// The prompt's vim or Helix mode: insert mode, and the others
+		// (normal, visual, select...).
+		EditorModeInsert lipgloss.Style
+		EditorModeNormal lipgloss.Style
 
 		// Full-width banners shown when switching modes.
 		ModeBannerPlan          lipgloss.Style

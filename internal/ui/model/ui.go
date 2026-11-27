@@ -731,6 +731,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.setEditorPrompt(permMode)
 	ui.randomizePlaceholders()
 	ui.prompt.SetPlaceholder(ui.readyPlaceholder)
+	// Not browsing the history until it loads: Esc must reach the prompt,
+	// where it leaves vim's and Helix's insert mode.
+	ui.promptHistory.index = -1
 	ui.status = status
 
 	// Initialize compact mode from config
@@ -3792,6 +3795,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleDialogMsg(msg)
 	}
 
+	// The prompt's which-key popup scrolls on its keys, and the keys the
+	// prompt waits for stay pending.
+	if m.scrollPromptKeyHints(msg) {
+		return tea.Batch(cmds...)
+	}
+
 	// Tab always toggles focus between editor and chat, even when
 	// an inline editor is active. This lets users collapse the
 	// question form to view chat.
@@ -3829,8 +3838,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Handle cancel key when agent is busy.
-	if key.Matches(msg, m.keyMap.Chat.Cancel) {
+	// Handle cancel key when agent is busy. In vim and Helix modes Esc is
+	// the prompt's until it is back in normal mode: it leaves insert mode
+	// first, and only then cancels.
+	if key.Matches(msg, m.keyMap.Chat.Cancel) && !m.promptOwnsEscape() {
 		if m.isAgentBusy() {
 			if cmd := m.cancelAgent(); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -3894,7 +3905,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Editor.PasteText):
 				cmds = append(cmds, m.pasteTextFromClipboard)
 
-			case key.Matches(msg, m.keyMap.Editor.SendMessage) && m.prompt.Inserting():
+			case key.Matches(msg, m.keyMap.Editor.SendMessage) && m.prompt.Resting():
 				if m.modeSwitching {
 					cmds = append(cmds, util.ReportInfo("Switching input mode, one moment..."))
 					break
@@ -4358,7 +4369,13 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Add status and help layer
 	m.status.SetHideHelp(isOnboarding)
 	m.status.SetMode(m.mode, m.permModeCached())
+	editorMode := ""
+	if (m.state == uiChat || m.state == uiLanding) && m.activeInline == nil {
+		editorMode = m.prompt.ModeName()
+	}
+	m.status.SetEditorMode(editorMode)
 	m.status.Draw(scr, layout.status)
+	m.drawPromptKeyHints(scr, layout.status)
 
 	// Draw completions popup if open
 	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
@@ -4555,7 +4572,9 @@ func (m *UI) ShortHelp() []key.Binding {
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
-			if m.isCanceling {
+			if m.promptOwnsEscape() {
+				cancelBinding.SetHelp("esc", "normal mode")
+			} else if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
 			} else if m.promptQueue.ServerQueued() {
 				cancelBinding.SetHelp("esc", "clear queue")
@@ -4685,7 +4704,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
-			if m.isCanceling {
+			if m.promptOwnsEscape() {
+				cancelBinding.SetHelp("esc", "normal mode")
+			} else if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
 			} else if m.promptQueue.ServerQueued() {
 				cancelBinding.SetHelp("esc", "clear queue")

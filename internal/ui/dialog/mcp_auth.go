@@ -249,13 +249,14 @@ func (m *MCPAuth) headerContent() string {
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 
 	title := fmt.Sprintf("Authenticate with %s", m.currentServer().Name)
+	if len(m.pending) > 1 {
+		title += fmt.Sprintf(" (%d/%d)", m.current+1, len(m.pending))
+	}
 	return common.DialogTitle(t, titleStyle.Render(title), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 
 func (m *MCPAuth) innerContent() string {
 	t := m.com.Styles
-	instructionStyle := t.Dialog.OAuth.Instructions
-	enterStyle := t.Dialog.OAuth.Enter
 	successStyle := t.Dialog.OAuth.Success
 	linkStyle := t.Dialog.OAuth.Link
 	errorStyle := t.Dialog.OAuth.ErrorText
@@ -269,11 +270,6 @@ func (m *MCPAuth) innerContent() string {
 
 	block := func(s string) string {
 		return lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).Render(s)
-	}
-
-	progress := ""
-	if len(m.pending) > 1 {
-		progress = fmt.Sprintf(" (%d/%d)", m.current+1, len(m.pending))
 	}
 
 	// urlText renders the URL as a green hyperlink, matching the Hyper
@@ -291,14 +287,8 @@ func (m *MCPAuth) innerContent() string {
 
 	switch m.state {
 	case MCPAuthStatePrompt:
-		instructions := instructionStyle.Render("Press ") +
-			enterStyle.Render("enter") +
-			instructionStyle.Render(" to open your browser.") +
-			statusStyle.Render(progress)
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
-			"",
-			block(instructions),
 			"",
 			urlText(server.URL),
 			"",

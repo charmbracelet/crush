@@ -174,13 +174,11 @@ func (m *AWSSSO) headerContent() string {
 
 func (m *AWSSSO) innerDialogContent() string {
 	var (
-		t                = m.com.Styles
-		instructionStyle = t.Dialog.OAuth.Instructions
-		enterKeyStyle    = t.Dialog.OAuth.Enter
-		successStyle     = t.Dialog.OAuth.Success
-		linkStyle        = t.Dialog.OAuth.Link
-		errorStyle       = t.Dialog.OAuth.ErrorText
-		statusTextStyle  = t.Dialog.OAuth.StatusText
+		t               = m.com.Styles
+		successStyle    = t.Dialog.OAuth.Success
+		linkStyle       = t.Dialog.OAuth.Link
+		errorStyle      = t.Dialog.OAuth.ErrorText
+		statusTextStyle = t.Dialog.OAuth.StatusText
 	)
 
 	// innerWidth is the dialog's content area (total minus the View
@@ -191,18 +189,7 @@ func (m *AWSSSO) innerDialogContent() string {
 	switch m.state {
 	case awsSSOStateWaiting:
 		if m.url != "" {
-			// URL found; show it and wait for auth to complete. Render each
-			// text segment with its own style: wrapping the whole string in
-			// one style would drop the text color after enterKeyStyle's
-			// reset code.
-			instructionText := instructionStyle.Render("Press ") +
-				enterKeyStyle.Render("enter") +
-				instructionStyle.Render(" to open the authorization page.")
-			instructions := lipgloss.NewStyle().
-				Width(innerWidth).
-				Padding(0, 1).
-				Render(instructionText)
-
+			// URL found; show it and wait for auth to complete.
 			displayURL := ansi.Truncate(m.url, max(0, innerWidth-2), "…") // -2 for padding
 			link := linkStyle.Hyperlink(m.url, "id=aws-sso-verify").Render(displayURL)
 			urlBox := lipgloss.NewStyle().
@@ -221,8 +208,6 @@ func (m *AWSSSO) innerDialogContent() string {
 
 			return lipgloss.JoinVertical(
 				lipgloss.Left,
-				"",
-				instructions,
 				"",
 				urlBox,
 				"",

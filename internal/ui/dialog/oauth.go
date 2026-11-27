@@ -386,13 +386,11 @@ func (m *OAuth) headerContent() string {
 
 func (m *OAuth) innerDialogContent() string {
 	var (
-		t                = m.com.Styles
-		instructionStyle = t.Dialog.OAuth.Instructions
-		enterKeyStyle    = t.Dialog.OAuth.Enter
-		successStyle     = t.Dialog.OAuth.Success
-		linkStyle        = t.Dialog.OAuth.Link
-		errorStyle       = t.Dialog.OAuth.ErrorText
-		statusTextStyle  = t.Dialog.OAuth.StatusText
+		t               = m.com.Styles
+		successStyle    = t.Dialog.OAuth.Success
+		linkStyle       = t.Dialog.OAuth.Link
+		errorStyle      = t.Dialog.OAuth.ErrorText
+		statusTextStyle = t.Dialog.OAuth.StatusText
 	)
 
 	// innerWidth is the dialog's content area: total width minus the
@@ -412,23 +410,7 @@ func (m *OAuth) innerDialogContent() string {
 		return lipgloss.JoinVertical(lipgloss.Left, "", status, "")
 
 	case OAuthStateDisplay:
-		// Render each text segment with its own style. Wrapping the
-		// whole concatenation in a single style would lose the text
-		// color after enterKeyStyle's reset code.
-		instructionText := instructionStyle.Render("Press ") +
-			enterKeyStyle.Render("enter") +
-			instructionStyle.Render(" to open the browser and authenticate.")
-		if m.userCode != "" {
-			instructionText = instructionStyle.Render("Press ") +
-				enterKeyStyle.Render("enter") +
-				instructionStyle.Render(" to copy the code below and open the browser.")
-		}
-		instructions := lipgloss.NewStyle().
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(instructionText)
-
-		elements := []string{"", instructions, ""}
+		elements := []string{""}
 		if m.userCode != "" {
 			codeBox := lipgloss.NewStyle().
 				Width(innerWidth).

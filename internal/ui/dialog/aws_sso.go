@@ -243,8 +243,8 @@ func (m *AWSSSO) innerDialogContent() string {
 	case awsSSOStateSuccess:
 		return successStyle.
 			Width(innerWidth).
-			Align(lipgloss.Center).
-			Render("✓ Authentication successful!")
+			Padding(1).
+			Render("Authentication successful!")
 
 	case awsSSOStateError:
 		header := errorStyle.

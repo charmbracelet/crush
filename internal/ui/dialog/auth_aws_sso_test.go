@@ -43,3 +43,24 @@ func TestAWSSSOShowsWholeURL(t *testing.T) {
 	_, ok := action.(ActionCmd)
 	require.True(t, ok)
 }
+
+// TestAWSSSOSuccessMatchesOAuth verifies the success screen uses the
+// same left-aligned, padded layout as the OAuth and MCP dialogs.
+func TestAWSSSOSuccessMatchesOAuth(t *testing.T) {
+	t.Parallel()
+
+	m := newTestAWSSSO()
+	m.Finish("")
+	lines := drawFits(t, m, 100, 30)
+	row := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Authentication successful!") {
+			row = i
+		}
+	}
+	require.NotEqual(t, -1, row)
+	require.NotContains(t, lines[row], "✓")
+	require.Contains(t, lines[row], "│ Authentication successful!")
+	require.Equal(t, "│", strings.Trim(strings.TrimSpace(lines[row-1]), " │")+"│", "blank line above")
+	require.Equal(t, "│", strings.Trim(strings.TrimSpace(lines[row+1]), " │")+"│", "blank line below")
+}

@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -125,4 +128,156 @@ func TestReadOnlyParent(t *testing.T) {
 	assert.True(t, readOnlyParent(config.AgentPlan))
 	assert.False(t, readOnlyParent(config.AgentCoder))
 	assert.False(t, readOnlyParent(""))
+}
+
+// TestDispatchToolsNarrowTheSubagent pins the per-dispatch tool restriction:
+// a subagent asked for a narrow toolset must not be able to run anything
+// else. Without this, a delegated agent that is talked into a destructive
+// command has the full toolset to do it with.
+func TestDispatchToolsNarrowTheSubagent(t *testing.T) {
+	t.Parallel()
+
+	// The parent may do anything; the subagent asks for read-only tools.
+	parentCfg := config.Agent{
+		AllowedTools: []string{"view", "grep", "glob", "bash", "write", "edit"},
+	}
+
+	restricted, err := narrowAgentTools(parentCfg, []string{"view", "grep"})
+	require.NoError(t, err)
+
+	c := &coordinator{interactive: false}
+	assert.Equal(t, []string{"view", "grep"}, c.effectiveToolNames(restricted, true))
+
+	t.Run("omitting the list keeps the parent toolset", func(t *testing.T) {
+		t.Parallel()
+		same, err := narrowAgentTools(parentCfg, nil)
+		require.NoError(t, err)
+		assert.Equal(t, parentCfg.AllowedTools, same.AllowedTools)
+	})
+
+	t.Run("naming a tool the parent lacks is refused", func(t *testing.T) {
+		t.Parallel()
+		_, err := narrowAgentTools(parentCfg, []string{"view", "teleport"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "teleport")
+	})
+
+	t.Run("an empty list means no tools at all", func(t *testing.T) {
+		t.Parallel()
+		none, err := narrowAgentTools(parentCfg, []string{})
+		require.NoError(t, err)
+		assert.Empty(t, none.AllowedTools)
+	})
+}
+
+// TestNarrowedTaskAgentKeepsAccessSemantics pins the two invariants a
+// restricted dispatch depends on: the base config comes from the right access
+// level, and narrowing only ever removes tools.
+func TestNarrowedTaskAgentKeepsAccessSemantics(t *testing.T) {
+	t.Parallel()
+
+	readBase := config.Agent{AllowedTools: []string{"view", "grep"}}
+	writeBase := config.Agent{AllowedTools: []string{"view", "grep", "bash", "write"}}
+
+	t.Run("a write subagent keeps its wider base before narrowing", func(t *testing.T) {
+		t.Parallel()
+		kept, err := narrowAgentTools(writeBase, []string{"view", "grep", "bash"})
+		require.NoError(t, err)
+		assert.Contains(t, kept.AllowedTools, "bash",
+			"a write subagent must not lose write-level tools it asked to keep")
+	})
+
+	t.Run("a read subagent cannot ask for a write-only tool", func(t *testing.T) {
+		t.Parallel()
+		_, err := narrowAgentTools(readBase, []string{"bash"})
+		require.Error(t, err, "read base has no bash, so asking for it must be refused")
+	})
+
+	t.Run("narrowing never adds a tool", func(t *testing.T) {
+		t.Parallel()
+		for _, base := range []config.Agent{readBase, writeBase} {
+			out, err := narrowAgentTools(base, []string{"view"})
+			require.NoError(t, err)
+			assert.LessOrEqual(t, len(out.AllowedTools), len(base.AllowedTools))
+		}
+	})
+}
+
+// testNarrowingCoordinator wires the least a task subagent needs to build:
+// config, sessions, messages, permissions, history and a file tracker. In
+// particular it has no lspManager or shellOwner, which is the point - a
+// restricted subagent must not require them.
+func testNarrowingCoordinator(t *testing.T) *coordinator {
+	t.Helper()
+
+	env := testEnv(t)
+
+	crushJSON := `{
+  "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
+  "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
+    "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
+    "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128}]}},
+  "models": {"large": {"provider": "mock", "model": "mock-model"},
+             "small": {"provider": "mock", "model": "mock-model"}}
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "crush.json"), []byte(crushJSON), 0o644))
+
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.SetupAgents()
+
+	return &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+		history:     env.history,
+		filetracker: *env.filetracker,
+	}
+}
+
+func narrowedAgentToolNames(t *testing.T, agent SessionAgent) []string {
+	t.Helper()
+
+	sa, ok := agent.(*sessionAgent)
+	require.True(t, ok, "narrowTaskAgent returns the session agent implementation")
+
+	names := make([]string, 0, sa.tools.Len())
+	for _, tool := range sa.tools.Copy() {
+		names = append(names, tool.Info().Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TestNarrowTaskAgentBuildsOnlyRequestedTools is the integration counterpart
+// of TestDispatchToolsNarrowTheSubagent: narrowing has to survive all the way
+// into the agent that will run, not just into a config struct.
+func TestNarrowTaskAgentBuildsOnlyRequestedTools(t *testing.T) {
+	t.Parallel()
+
+	c := testNarrowingCoordinator(t)
+
+	agent, err := c.narrowTaskAgent(t.Context(), accessRead, []string{"view", "grep"})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"grep", "view"}, narrowedAgentToolNames(t, agent))
+}
+
+// TestNarrowTaskAgentKeepsTheAccessCeiling pins that the access level is what
+// decides whether a tool exists at all: the read task agent may run bash but
+// must not write, and the write variant is allowed what the coder has.
+func TestNarrowTaskAgentKeepsTheAccessCeiling(t *testing.T) {
+	t.Parallel()
+
+	c := testNarrowingCoordinator(t)
+
+	_, err := c.narrowTaskAgent(t.Context(), accessRead, []string{"write"})
+	require.Error(t, err, "a read subagent must not be narrowed onto a write-only tool")
+	assert.Contains(t, err.Error(), `"write"`)
+
+	agent, err := c.narrowTaskAgent(t.Context(), accessWrite, []string{"write"})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"write"}, narrowedAgentToolNames(t, agent))
 }

@@ -42,9 +42,10 @@ const (
 const stopForShutdown = "Crush is shutting down"
 
 type AgentDispatchParams struct {
-	Prompt string `json:"prompt" description:"The task for the subagent to perform"`
-	Label  string `json:"label" description:"A short label for this subagent's scope; the result returns the name to address it by"`
-	Access string `json:"access,omitempty" description:"\"read\" (default) for a subagent that can only inspect the codebase, or \"write\" for one that can also edit files"`
+	Prompt string   `json:"prompt" description:"The task for the subagent to perform"`
+	Label  string   `json:"label" description:"A short label for this subagent's scope; the result returns the name to address it by"`
+	Access string   `json:"access,omitempty" description:"\"read\" (default) for a subagent that can only inspect the codebase, or \"write\" for one that can also edit files"`
+	Tools  []string `json:"tools,omitempty" description:"Restrict the subagent to these tools. Omit to inherit the caller's toolset. An empty list leaves the subagent with no tools. Only narrows: naming a tool the caller does not have is an error"`
 
 	// Model override. When none of these is given the subagent runs on the
 	// session's subagent model with its configured settings.
@@ -400,6 +401,19 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			if refusal != "" {
 				return fantasy.NewTextErrorResponse(refusal), nil
 			}
+
+			// A restricted toolset means a subagent of its own: the shared
+			// variants are built once per turn and cannot carry a per-call
+			// narrowing. Building here also keeps every other dispatch on
+			// the cached variant, so the common path costs nothing.
+			if params.Tools != nil {
+				narrowed, err := c.narrowTaskAgent(ctx, accessOrRead(params.Access), params.Tools)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+				agent = narrowed
+			}
+
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")

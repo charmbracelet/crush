@@ -126,8 +126,14 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(themeEditorDialogMaxWidth, area.Dx()))
 	height := max(0, min(themeEditorDialogMaxHeight, area.Dy()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	// The rendered dialog is the title, a gap, the slot list, a gap, the
+	// help line, and the border, so the list gets whatever height is left
+	// for the whole dialog to fit the area.
+	const gap = 1
+	const helpContentHeight = 1
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
+		gap + gap +
+		t.Dialog.HelpView.GetVerticalFrameSize() + helpContentHeight +
 		t.Dialog.View.GetVerticalFrameSize()
 	listHeight := max(1, height-heightOffset)
 	ed.keepSelectedVisible(listHeight)
@@ -142,7 +148,7 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = fmt.Sprintf("Edit Theme: %s", ed.name)
-	rc.Gap = 1
+	rc.Gap = gap
 	listView := t.Dialog.List.MarginBottom(0).Height(listHeight).Render(ed.renderSlots(listWidth, listHeight))
 	scrollbar := common.Scrollbar(t, listHeight, len(ed.slots), listHeight, ed.scroll)
 	if scrollbar != "" {

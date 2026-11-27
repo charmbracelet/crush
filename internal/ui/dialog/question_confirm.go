@@ -152,21 +152,10 @@ func (c *ConfirmComponent) Height(width int) int {
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}
-	iconPrompt := questionIconPrompt(c.Styles, c.focused)
-	h := sectionHeight(c.Title, w-lipgloss.Width(iconPrompt)) // title
-	h++                                                       // blank
+	h := lipgloss.Height(questionHeader(c.Styles, c.focused, c.Title, w)) // title
+	h++                                                                   // blank
 	if c.Description != "" {
-		r := common.MarkdownRenderer(c.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(c.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(c.Description, w)
-		}
+		h += lipgloss.Height(questionDescription(c.Styles, c.Description, w))
 		h++ // blank
 	}
 	h += len(c.summaryLines(w)) // wrapped answer bullets
@@ -192,32 +181,16 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	var lines []line
 
-	iconPrompt := questionIconPrompt(c.Styles, c.focused)
-	iconWidth := lipgloss.Width(iconPrompt)
-
-	// Title.
-	titleWrapped := ansi.Wrap(c.Title, area.Dx()-iconWidth, "")
-	for _, l := range strings.Split(titleWrapped, "\n") {
-		lines = append(lines, line{text: iconPrompt + c.Styles.Editor.QuestionUnselected.Render(l)})
+	// Title, wrapped with a hanging indent under the icon.
+	for _, l := range strings.Split(questionHeader(c.Styles, c.focused, c.Title, area.Dx()), "\n") {
+		lines = append(lines, line{text: l})
 	}
 	lines = append(lines, line{}) // blank
 
 	// Description.
 	if c.Description != "" {
-		r := common.MarkdownRenderer(c.Styles, area.Dx())
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		desc, err := r.Render(c.Description)
-		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			for _, l := range strings.Split(desc, "\n") {
-				lines = append(lines, line{text: l})
-			}
-		} else {
-			for _, l := range strings.Split(c.Description, "\n") {
-				lines = append(lines, line{text: l})
-			}
+		for _, l := range strings.Split(questionDescription(c.Styles, c.Description, area.Dx()), "\n") {
+			lines = append(lines, line{text: l})
 		}
 		lines = append(lines, line{}) // blank
 	}

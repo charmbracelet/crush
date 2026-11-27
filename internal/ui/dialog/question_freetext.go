@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // FreeText is an open-ended text input component for questions
@@ -120,21 +119,10 @@ func (d *FreeText) Height(width int) int {
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
-	h++                                                              // blank
+	h := lipgloss.Height(questionHeader(d.Styles, d.focused, d.Request.Text, w)) // question
+	h++                                                                          // blank
 	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(d.Request.Description, w)
-		}
+		h += lipgloss.Height(questionDescription(d.Styles, d.Request.Description, w))
 		h++ // blank
 	}
 	h += freeTextMinEditorHeight // textarea (minimum; grows to fill at draw time)
@@ -160,9 +148,6 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		bar = barActive
 	}
 	prefixWidth := lipgloss.Width(bar)
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	iconWidth := lipgloss.Width(iconPrompt)
-
 	// ftLine is a single buffer row. cursorX >= 0 marks the row
 	// carrying the textarea cursor and its column (incl. prefix).
 	type ftLine struct {
@@ -177,24 +162,14 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		var lines []ftLine
 		cursorRow := -1
 
-		header := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
-			ansi.Wrap(d.Request.Text, contentWidth-iconWidth, ""),
-		)
+		header := questionHeader(d.Styles, d.focused, d.Request.Text, contentWidth)
 		for _, l := range strings.Split(header, "\n") {
 			lines = append(lines, ftLine{text: l, cursorX: -1})
 		}
 		lines = append(lines, ftLine{cursorX: -1}) // blank
 
 		if d.Request.Description != "" {
-			r := common.MarkdownRenderer(d.Styles, contentWidth)
-			mu := common.LockMarkdownRenderer(r)
-			mu.Lock()
-			desc, err := r.Render(d.Request.Description)
-			mu.Unlock()
-			if err != nil {
-				desc = d.Request.Description
-			}
-			desc = strings.TrimSuffix(desc, "\n")
+			desc := questionDescription(d.Styles, d.Request.Description, contentWidth)
 			for _, l := range strings.Split(desc, "\n") {
 				lines = append(lines, ftLine{text: l, cursorX: -1})
 			}

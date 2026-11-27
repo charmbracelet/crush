@@ -3,7 +3,6 @@ package dialog
 import (
 	"image"
 	"maps"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -12,7 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // YesNo is an inline yes/no confirmation component. For open-ended
@@ -126,21 +124,10 @@ func (d *YesNo) Height(width int) int {
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
-	h++                                                              // blank
+	h := lipgloss.Height(questionHeader(d.Styles, d.focused, d.Request.Text, w)) // question
+	h++                                                                          // blank
 	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(d.Request.Description, w)
-		}
+		h += lipgloss.Height(questionDescription(d.Styles, d.Request.Description, w))
 		h++ // blank
 	}
 	h++ // buttons
@@ -163,26 +150,14 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	y := area.Min.Y
 
 	// Draw question header.
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	qText := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
-		ansi.Wrap(d.Request.Text, area.Dx()-lipgloss.Width(iconPrompt), ""),
-	)
+	qText := questionHeader(d.Styles, d.focused, d.Request.Text, area.Dx())
 	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), qText)
 	y++ // blank
 
 	// Draw optional description.
 	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, area.Dx())
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		desc, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
-		} else {
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), d.Request.Description)
-		}
+		desc := questionDescription(d.Styles, d.Request.Description, area.Dx())
+		y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
 		y++ // blank
 	}
 

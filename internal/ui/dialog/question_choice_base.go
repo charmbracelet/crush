@@ -264,6 +264,40 @@ func wrapIndent(text string, width int, indent string) string {
 	return strings.Join(lines, "\n")
 }
 
+// questionGutter is the indent of everything under a question's
+// header (descriptions, choices, editors), matching the choice bar.
+const questionGutter = "  "
+
+// questionHeader renders the question icon and text, wrapping the
+// text with a hanging indent so continuation lines sit under the
+// first word rather than back at the left edge.
+func questionHeader(sty *styles.Styles, focused bool, text string, width int) string {
+	icon := questionIconPrompt(sty, focused)
+	iconWidth := lipgloss.Width(icon)
+	return icon + sty.Editor.QuestionUnselected.Render(
+		wrapIndent(text, max(1, width-iconWidth), strings.Repeat(" ", iconWidth)))
+}
+
+// questionDescription renders a question's markdown description at
+// width, indented to the gutter so it lines up with the choices and
+// editors below it.
+func questionDescription(sty *styles.Styles, desc string, width int) string {
+	inner := max(1, width-len(questionGutter))
+	r := common.MarkdownRenderer(sty, inner)
+	mu := common.LockMarkdownRenderer(r)
+	mu.Lock()
+	out, err := r.Render(desc)
+	mu.Unlock()
+	if err != nil {
+		out = ansi.Wrap(desc, inner, "")
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = questionGutter + l
+	}
+	return strings.Join(lines, "\n")
+}
+
 // drawStyledText blits an ANSI-styled string into area and returns
 // the number of visual lines it occupies.
 func drawStyledText(scr uv.Screen, area uv.Rectangle, text string) int {
@@ -296,15 +330,12 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 	}
 
 	// Question header + blank separator.
-	icon := c.iconPrompt()
-	iconWidth := lipgloss.Width(icon)
-	qIndent := strings.Repeat(" ", iconWidth)
-	push(icon + c.Styles.Editor.QuestionUnselected.Render(wrapIndent(c.Request.Text, innerWidth-iconWidth, qIndent)))
+	push(questionHeader(c.Styles, c.focused, c.Request.Text, innerWidth))
 	push("")
 
 	// Optional markdown description + blank separator.
 	if c.Request.Description != "" {
-		push(c.renderDescription(innerWidth))
+		push(questionDescription(c.Styles, c.Request.Description, innerWidth))
 		push("")
 	}
 
@@ -372,19 +403,6 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 	push("")
 
 	return lines
-}
-
-// renderDescription renders the markdown description at width.
-func (c *choiceList) renderDescription(width int) string {
-	r := common.MarkdownRenderer(c.Styles, width)
-	mu := common.LockMarkdownRenderer(r)
-	mu.Lock()
-	out, err := r.Render(c.Request.Description)
-	mu.Unlock()
-	if err != nil {
-		return c.Request.Description
-	}
-	return strings.TrimSuffix(out, "\n")
 }
 
 // choiceItemRenderer renders a choice's label content as a string.

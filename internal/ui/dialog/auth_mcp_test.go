@@ -57,6 +57,6 @@ func TestMCPAuthHelpKeepsEscWhenNarrow(t *testing.T) {
 		m := newTestMCPAuth("linear", "notion")
 		m.state = st
 		out := strings.Join(drawFits(t, m, 40, 30), "\n")
-		require.Contains(t, out, "esc exit", "state %d", st)
+		require.Contains(t, out, "esc cancel", "state %d", st)
 	}
 }

@@ -85,7 +85,10 @@ func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authUR
 		key.WithKeys("s"),
 		key.WithHelp("s", "skip"),
 	)
-	m.keyMap.Close = CloseKey
+	// Esc abandons a sign-in in progress; once a server has signed in
+	// or failed there is nothing left to cancel, so those states show
+	// plain exit.
+	m.keyMap.Close = cancelKey
 
 	return m, m.spinner.Tick
 }
@@ -363,15 +366,15 @@ func (m *MCPAuth) ShortHelp() []key.Binding {
 				key.WithKeys("enter", "ctrl+y"),
 				key.WithHelp("enter", label),
 			),
-			m.keyMap.Close,
+			CloseKey,
 		}
 	case MCPAuthStateError:
 		if m.hasNext() {
 			// Move on to the remaining servers instead of abandoning
 			// the whole queue.
-			return []key.Binding{m.keyMap.Skip, m.keyMap.Close}
+			return []key.Binding{m.keyMap.Skip, CloseKey}
 		}
-		return []key.Binding{m.keyMap.Close}
+		return []key.Binding{CloseKey}
 	default:
 		return []key.Binding{m.keyMap.Close}
 	}

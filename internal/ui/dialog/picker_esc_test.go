@@ -7,6 +7,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// escLabel returns the help label bound to esc, or "" when none is.
+func escLabel(bindings []key.Binding) string {
+	for _, b := range bindings {
+		if b.Help().Key == "esc" {
+			return b.Help().Desc
+		}
+	}
+	return ""
+}
+
 // TestPickerEscLabels verifies esc is labeled "exit" when it just closes a
 // picker and "cancel" when it discards edits.
 func TestPickerEscLabels(t *testing.T) {
@@ -16,14 +26,6 @@ func TestPickerEscLabels(t *testing.T) {
 	require.NoError(t, err)
 	fp, _ := NewFilePicker(com)
 
-	escLabel := func(bindings []key.Binding) string {
-		for _, b := range bindings {
-			if b.Help().Key == "esc" {
-				return b.Help().Desc
-			}
-		}
-		return ""
-	}
 	require.Equal(t, "exit", escLabel(commandsDialog.ShortHelp()))
 	require.Equal(t, "exit", escLabel(newTestChannels(t, nil).ShortHelp()))
 	require.Equal(t, "exit", escLabel(fp.ShortHelp()))

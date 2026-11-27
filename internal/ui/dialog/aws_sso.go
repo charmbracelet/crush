@@ -83,7 +83,9 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 		key.WithKeys("c", "u"),
 		key.WithHelp("c", "copy url"),
 	)
-	m.keyMap.Close = CloseKey
+	// Esc abandons a sign-in in progress; once it has failed there is
+	// nothing left to cancel, so the error state shows plain exit.
+	m.keyMap.Close = cancelKey
 
 	return m, m.spinner.Tick
 }
@@ -278,7 +280,7 @@ func (m *AWSSSO) FullHelp() [][]key.Binding {
 func (m *AWSSSO) ShortHelp() []key.Binding {
 	switch m.state {
 	case awsSSOStateError:
-		return []key.Binding{m.keyMap.Close}
+		return []key.Binding{CloseKey}
 	case awsSSOStateSuccess:
 		return []key.Binding{
 			key.NewBinding(

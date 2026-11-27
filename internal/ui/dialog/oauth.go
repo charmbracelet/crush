@@ -137,7 +137,9 @@ func newOAuth(
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "enter code"),
 	)
-	m.keyMap.Close = CloseKey
+	// Esc abandons a sign-in in progress; once it has failed there is
+	// nothing left to cancel, so the error state shows plain exit.
+	m.keyMap.Close = cancelKey
 
 	if m.oAuthProvider.supportsCodeEntry() {
 		m.codeInput = textinput.New()
@@ -514,7 +516,7 @@ func (m *OAuth) FullHelp() [][]key.Binding {
 func (m *OAuth) ShortHelp() []key.Binding {
 	switch m.State {
 	case OAuthStateError:
-		return []key.Binding{m.keyMap.Close}
+		return []key.Binding{CloseKey}
 
 	case OAuthStateSuccess:
 		return []key.Binding{
@@ -530,7 +532,7 @@ func (m *OAuth) ShortHelp() []key.Binding {
 
 	case OAuthStateInitializing:
 		// Only esc does anything yet: it abandons the sign-in.
-		return []key.Binding{cancelKey}
+		return []key.Binding{m.keyMap.Close}
 
 	default:
 		if m.codeEntryActive() && m.codeInput.Focused() {

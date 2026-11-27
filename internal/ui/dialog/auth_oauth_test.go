@@ -97,7 +97,7 @@ func TestOAuthHelpKeepsEscWhenNarrow(t *testing.T) {
 			m := newTestOAuth(codeEntry)
 			m.HandleMsg(ActionInitiateOAuth{UserCode: userCode, VerificationURL: "https://example.com/device"})
 			out := strings.Join(drawFits(t, m, 40, 30), "\n")
-			require.Contains(t, out, "esc exit", "codeEntry=%v userCode=%q", codeEntry, userCode)
+			require.Contains(t, out, "esc cancel", "codeEntry=%v userCode=%q", codeEntry, userCode)
 		}
 	}
 }
@@ -149,4 +149,23 @@ func TestOAuthURLWrapsAsOneToken(t *testing.T) {
 			require.Equal(t, widths[0], widths[i], "line %d broke early at width %d", i, w)
 		}
 	}
+}
+
+// TestAuthEscLabelsFollowOneRule verifies every sign-in dialog labels esc
+// the same way: "cancel" while a sign-in is in progress, "exit" once it
+// has failed and there is nothing left to cancel.
+func TestAuthEscLabelsFollowOneRule(t *testing.T) {
+	t.Parallel()
+
+	m := newTestOAuth(false)
+	require.Equal(t, "cancel", escLabel(m.ShortHelp()), "starting")
+	m.HandleMsg(ActionInitiateOAuth{VerificationURL: "https://example.com/device"})
+	require.Equal(t, "cancel", escLabel(m.ShortHelp()), "waiting")
+	m.State = OAuthStateError
+	require.Equal(t, "exit", escLabel(m.ShortHelp()), "failed")
+
+	mcp := newTestMCPAuth("linear")
+	require.Equal(t, "cancel", escLabel(mcp.ShortHelp()), "mcp prompt")
+	mcp.state = MCPAuthStateError
+	require.Equal(t, "exit", escLabel(mcp.ShortHelp()), "mcp failed")
 }

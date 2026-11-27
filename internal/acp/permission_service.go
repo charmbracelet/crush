@@ -70,9 +70,14 @@ func (s *acpPermissionService) AutoApproveSession(sessionID string) {
 	s.real.AutoApproveSession(sessionID)
 }
 
-// ActiveRequest delegates to the real service.
-func (s *acpPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
-	return s.real.ActiveRequest()
+// ActiveRequests delegates to the real service.
+func (s *acpPermissionService) ActiveRequests() []permission.PermissionRequest {
+	return s.real.ActiveRequests()
+}
+
+// SetSessionScope delegates to the real service.
+func (s *acpPermissionService) SetSessionScope(scope permission.SessionScope) {
+	s.real.SetSessionScope(scope)
 }
 
 // InheritAutoApproval delegates to the real service.

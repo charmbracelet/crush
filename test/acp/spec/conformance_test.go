@@ -62,7 +62,7 @@ func (c *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepte
 
 func (c *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
 func (c *stubCoordinator) SetMainAgent(_ string) error                       { return nil }
-func (c *stubCoordinator) MainAgentName() string                             { return config.AgentCoder }
+func (c *stubCoordinator) MainAgent() string                                 { return config.AgentCoder }
 func (c *stubCoordinator) Cancel(sessionID string)                           {}
 func (c *stubCoordinator) CancelAll()                                        {}
 func (c *stubCoordinator) IsSessionBusy(sessionID string) bool               { return false }
@@ -115,7 +115,7 @@ func (c *stubBlockingCoordinator) RunAccepted(ctx context.Context, accept *agent
 
 func (c *stubBlockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
 func (c *stubBlockingCoordinator) SetMainAgent(_ string) error                       { return nil }
-func (c *stubBlockingCoordinator) MainAgentName() string                             { return config.AgentCoder }
+func (c *stubBlockingCoordinator) MainAgent() string                                 { return config.AgentCoder }
 func (c *stubBlockingCoordinator) Cancel(sessionID string)                           {}
 func (c *stubBlockingCoordinator) CancelAll()                                        {}
 func (c *stubBlockingCoordinator) IsSessionBusy(sessionID string) bool               { return true }
@@ -1229,11 +1229,10 @@ func requireACPCode(t *testing.T, err error, code int) {
 	}
 }
 
-func (s *stubPermSvc) ActiveRequest() (permission.PermissionRequest, bool) {
-	return permission.PermissionRequest{}, false
-}
-func (s *stubPermSvc) InheritAutoApproval(_, _ string)               {}
-func (s *stubPermSvc) SetPermissionMode(_ permission.PermissionMode) {}
+func (s *stubPermSvc) ActiveRequests() []permission.PermissionRequest { return nil }
+func (s *stubPermSvc) SetSessionScope(_ permission.SessionScope)      {}
+func (s *stubPermSvc) InheritAutoApproval(_, _ string)                {}
+func (s *stubPermSvc) SetPermissionMode(_ permission.PermissionMode)  {}
 func (s *stubPermSvc) PermissionMode() permission.PermissionMode {
 	return permission.PermissionModeNormal
 }

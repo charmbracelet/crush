@@ -110,10 +110,6 @@ func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) str
 
 type Coordinator interface {
 	SetMainAgent(agentName string) error
-	// MainAgentName reports the config name of the active main agent. The name
-	// is empty only before the coordinator is fully built, so callers treat ""
-	// as "unknown". It reads under the same lock SetMainAgent takes.
-	MainAgentName() string
 	// MainAgent names the current main agent, as last set by SetMainAgent.
 	MainAgent() string
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
@@ -372,17 +368,10 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	return nil
 }
 
-// MainAgent reports the config name of the active main agent. The name is
-// empty only before the coordinator is fully built, so callers treat "" as
-// "unknown". It reads under the same lock SetMainAgent takes.
+// MainAgent implements Coordinator.
 func (c *coordinator) MainAgent() string {
 	_, name := c.activeAgent()
 	return name
-}
-
-// MainAgentName is the ACP-facing alias retained by older consumers.
-func (c *coordinator) MainAgentName() string {
-	return c.MainAgent()
 }
 
 // Run implements Coordinator.

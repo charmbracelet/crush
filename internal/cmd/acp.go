@@ -29,7 +29,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
-	ws, cleanup, err := setupLocalWorkspace(cmd)
+	ws, cleanup, err := setupLocalWorkspace(cmd, nil)
 	if err != nil {
 		return fmt.Errorf("setup workspace: %w", err)
 	}

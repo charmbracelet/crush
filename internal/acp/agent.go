@@ -1111,7 +1111,7 @@ func (a *crushAgent) currentMode() acp.SessionModeId {
 	}
 	agent := config.AgentCoder
 	if a.app.AgentCoordinator != nil {
-		if name := a.app.AgentCoordinator.MainAgentName(); name != "" {
+		if name := a.app.AgentCoordinator.MainAgent(); name != "" {
 			agent = name
 		}
 	}

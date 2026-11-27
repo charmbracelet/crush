@@ -18,6 +18,7 @@
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **Subagents:** delegate work to isolated agents that report back, keeping your main context clean.
 - **Channel-Ready:** MCP servers can push real-time events into your session via [Claude Channels](https://code.claude.com/docs/en/channels-reference) — CI failures, webhooks, and more, acting on them without you typing a thing
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
 - **Industrial Grade:** built on the Charm ecosystem, powering 25k+ applications, from leading open source projects to business-critical infrastructure
@@ -513,6 +514,12 @@ failures, or chat messages straight into your session. For details, see
 
 Crush has preliminary support for hooks. For details, see
 [the hook guide](./docs/hooks/).
+
+### Subagents
+
+Crush can delegate work to isolated subagents that run in their own context
+windows and report back, keeping your main context clean. For details, see
+[the subagent guide](./docs/subagents/).
 
 ### Sharing a workspace across clients
 

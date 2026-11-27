@@ -43,3 +43,13 @@ func TestArrowHelpNotation(t *testing.T) {
 	require.Contains(t, keys(NewSkillsToggles(com, []SkillToggleItem{{Name: "s"}})), "↑/↓")
 	require.Contains(t, keys(fp), "↑/↓/←/→")
 }
+
+// TestChannelsHelpDoesNotOfferChoosing verifies the channels help does not
+// advertise choosing, since enter does nothing there.
+func TestChannelsHelpDoesNotOfferChoosing(t *testing.T) {
+	t.Parallel()
+	for _, b := range newTestChannels(t, nil).ShortHelp() {
+		require.NotEqual(t, "choose", b.Help().Desc)
+		require.NotEqual(t, "enter", b.Help().Key)
+	}
+}

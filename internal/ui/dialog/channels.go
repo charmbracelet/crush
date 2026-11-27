@@ -154,9 +154,11 @@ func NewChannels(com *common.Common, states map[string]mcp.ClientInfo) *Channels
 	d.input.SetStyles(com.Styles.TextInput)
 	d.input.Focus()
 
+	// Channels have no per-item action, so moving through the list is
+	// browsing, not choosing.
 	d.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
+		key.WithHelp("↑/↓", "browse"),
 	)
 	d.keyMap.Next = key.NewBinding(
 		key.WithKeys("down"),

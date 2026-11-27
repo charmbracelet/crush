@@ -2,11 +2,14 @@ package dialog
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -175,4 +178,40 @@ func TestMCPToggles_FitsSmallTerminal(t *testing.T) {
 	require.Less(t, m.maxRows, maxVisibleToggleRows)
 	require.GreaterOrEqual(t, m.cursor, m.offset, "the cursor row stays visible")
 	require.Less(t, m.cursor, m.offset+m.maxRows, "the cursor row stays visible")
+}
+
+// TestMCPTogglesLongStatusKeepsName verifies a long error status gives
+// way before the server name, so the row still says which server failed.
+func TestMCPTogglesLongStatusKeepsName(t *testing.T) {
+	t.Parallel()
+
+	m := newMCPTogglesForTest([]MCPToggleItem{
+		{Name: "linear", Status: "connected"},
+		{Name: "context7", Status: "error: connection refused by the remote host after three attempts"},
+	})
+	scr := uv.NewScreenBuffer(40, 20)
+	m.Draw(scr, scr.Bounds())
+	out := scr.String()
+	require.Contains(t, out, "context7")
+	require.Contains(t, out, "error: conn")
+}
+
+func TestFitToggleRow(t *testing.T) {
+	t.Parallel()
+
+	name, status := fitToggleRow("linear", "connected", 30)
+	require.Equal(t, "linear", name)
+	require.Equal(t, "connected", status)
+
+	name, status = fitToggleRow("a-very-long-server-name-indeed", "connected", 30)
+	require.Equal(t, "connected", status, "a short status stays whole")
+	require.Equal(t, 30-2-1, ansi.StringWidth(name+status))
+
+	name, status = fitToggleRow("context7", strings.Repeat("x", 80), 30)
+	require.Equal(t, "context7", name, "a short name stays whole")
+	require.Equal(t, 30-2-1, ansi.StringWidth(name+status))
+
+	name, status = fitToggleRow(strings.Repeat("n", 80), strings.Repeat("s", 80), 30)
+	require.Equal(t, 13, ansi.StringWidth(status), "a long status keeps only half the row")
+	require.Equal(t, 30-2-1, ansi.StringWidth(name+status))
 }

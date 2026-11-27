@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // MCPTogglesID is the identifier for the MCP toggles dialog.
@@ -294,8 +293,7 @@ func (m *MCPToggles) innerContent() string {
 		// their own "●" via SetString, so Render() yields just the dot.
 		// It sits left of the name, like the sidebar rows.
 		dot := statusDot(t, status)
-		status = ansi.Truncate(status, max(0, rowWidth-2-1-1), "…")
-		name := truncateToggleName(item.Name, rowWidth, lipgloss.Width(status))
+		name, status := fitToggleRow(item.Name, status, rowWidth)
 		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(name)-lipgloss.Width(status))
 
 		if i == m.cursor {

@@ -27,6 +27,20 @@ func truncateToggleName(name string, rowWidth, statusWidth int) string {
 	return ansi.Truncate(name, max(0, rowWidth-2-1-statusWidth), "…")
 }
 
+// fitToggleRow shares a row's text width between a name and its status
+// after the 2-column mark and a 1-column gap. Both keep their full width
+// when they fit; otherwise the status gives way first, but never below
+// half the row, so a long error cannot push the name out entirely.
+func fitToggleRow(name, status string, rowWidth int) (string, string) {
+	avail := max(0, rowWidth-2-1)
+	nameWidth, statusWidth := ansi.StringWidth(name), ansi.StringWidth(status)
+	if nameWidth+statusWidth <= avail {
+		return name, status
+	}
+	status = ansi.Truncate(status, min(statusWidth, max(avail/2, avail-nameWidth)), "…")
+	return ansi.Truncate(name, avail-ansi.StringWidth(status), "…"), status
+}
+
 // fitToggleRows returns how many rows of a toggles dialog can show in an
 // area of areaHeight, given the dialog's height when it shows visible rows.
 // The dialog never grows past maxVisibleToggleRows, and always keeps one

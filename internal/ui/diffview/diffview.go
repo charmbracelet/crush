@@ -128,7 +128,10 @@ func (dv *DiffView) clearCaches() {
 
 // ContextLines sets the number of context lines for the DiffView.
 func (dv *DiffView) ContextLines(contextLines int) *DiffView {
-	dv.contextLines = contextLines
+	if dv.contextLines != contextLines {
+		dv.contextLines = contextLines
+		dv.isComputed = false
+	}
 	return dv
 }
 
@@ -393,8 +396,11 @@ func (dv *DiffView) detectSplitCodeWidth() {
 
 // resizeCodeWidth resizes the code width to fit within the specified width.
 func (dv *DiffView) resizeCodeWidth() {
-	fullNumWidth := dv.beforeNumDigits + dv.afterNumDigits
-	fullNumWidth += lineNumPadding * 4 // left and right padding for both line numbers
+	var fullNumWidth int
+	if dv.lineNumbers {
+		fullNumWidth = dv.beforeNumDigits + dv.afterNumDigits
+		fullNumWidth += lineNumPadding * 4 // left and right padding for both line numbers
+	}
 
 	switch dv.layout {
 	case layoutUnified:

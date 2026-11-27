@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/diffview"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
+	"github.com/stretchr/testify/require"
 )
 
 //go:embed testdata/TestDefault.before
@@ -336,4 +337,52 @@ func assertHeight(t *testing.T, expected int, output string) {
 	if lines != expected {
 		t.Errorf("expected output height to be == %d, got %d", expected, lines)
 	}
+}
+
+func TestDiffViewNoLineNumbersWithWidth(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		layout func(*diffview.DiffView) *diffview.DiffView
+		width  int
+	}{
+		{name: "Unified_40", layout: UnifiedFunc, width: 40},
+		{name: "Split_40", layout: SplitFunc, width: 40},
+		{name: "Split_41", layout: SplitFunc, width: 41},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dv := tc.layout(diffview.New()).
+				Before("main.go", TestMultipleHunksBefore).
+				After("main.go", TestMultipleHunksAfter).
+				LineNumbers(false).
+				Width(tc.width).
+				ChromaStyle(nil)
+
+			assertLineWidth(t, tc.width, dv.String())
+		})
+	}
+}
+
+func TestDiffViewContextLinesRecomputes(t *testing.T) {
+	t.Parallel()
+
+	dv := diffview.New().
+		Before("main.go", TestMultipleHunksBefore).
+		After("main.go", TestMultipleHunksAfter).
+		ChromaStyle(nil)
+	defaultOut := dv.String()
+
+	reconfigured := dv.ContextLines(0).String()
+	fresh := diffview.New().
+		Before("main.go", TestMultipleHunksBefore).
+		After("main.go", TestMultipleHunksAfter).
+		ContextLines(0).
+		ChromaStyle(nil).
+		String()
+
+	require.Equal(t, fresh, reconfigured)
+	require.Less(t, strings.Count(reconfigured, "\n"), strings.Count(defaultOut, "\n"))
 }

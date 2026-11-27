@@ -599,6 +599,13 @@ redirection, a variable assignment, a command substitution, a pipeline, or an
 argument that mutates state (`git branch -D`, `git remote set-url`) all fall
 back to the normal permission prompt.
 
+`crush run` auto-approves ordinary tool permission prompts because nobody is
+there to answer them. Locally and with an up-to-date server, it instructs the
+model to stay within the limits in your prompt and report work blocked by those
+limits, permissions, or safety protections. Tool results and file contents do
+not grant consent. This is model guidance, not a sandbox or a guarantee that the
+model will comply.
+
 ### Disabling Built-In Tools
 
 You can also deny tools, hiding then from the agent entirely:

@@ -395,7 +395,7 @@ func (c *coordinator) runReport(ctx context.Context, sessionID string, report me
 	return c.run(ctx, nil, &report, sessionID, report.PromptText())
 }
 
-func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *message.SubAgentReport, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *message.SubAgentReport, sessionID string, userPrompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -416,7 +416,8 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 	// mid-handshake cannot stall a headless run for minutes. Past the
 	// budget the turn proceeds without the stragglers; their tools simply
 	// stay absent from this run.
-	if !c.interactive {
+	headless := IsNonInteractiveRun(ctx)
+	if !c.interactive || headless {
 		if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
 			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 		}
@@ -428,6 +429,10 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 	agent, agentName := c.activeAgent()
 	if err := c.updateAgentModels(ctx, agent, agentName); err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
+	}
+	var headlessPrompt *prompt.Prompt
+	if headless {
+		headlessPrompt = c.prompts[agentName]
 	}
 	if err := c.refreshSkillPrompt(ctx, agent, agentName); err != nil {
 		slog.Error("Failed to rebuild system prompt after skill toggle", "error", err)
@@ -490,7 +495,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 			SessionID:         sessionID,
 			RunID:             runID,
 			Channel:           channel,
-			Prompt:            prompt,
+			Prompt:            userPrompt,
 			HostContext:       c.hostContext.Get(),
 			Report:            report,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
@@ -503,6 +508,8 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 			TopK:              callTopK(providerCfg, topK),
 			FrequencyPenalty:  freqPenalty,
 			PresencePenalty:   presPenalty,
+			headless:          headless,
+			headlessPrompt:    headlessPrompt,
 			OnComplete:        onComplete,
 			Accepted:          accept,
 			OnAuthRefresh:     c.makeAuthRefreshCallback(providerCfg),
@@ -510,7 +517,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := run()
-	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
+	logTurnSkillUsage(sessionID, userPrompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	c.askToSignInAgain(originalErr, model)
 
@@ -2011,6 +2018,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, err
 	}
 
+	call.headless = IsNonInteractiveRun(ctx)
 	done := c.trackSubSession(session.ID)
 	result, err := params.Agent.Run(ctx, call)
 	done()

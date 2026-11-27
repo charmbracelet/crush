@@ -551,8 +551,18 @@ func (c *Client) SetMainAgent(ctx context.Context, id, agentID string) error {
 // run is set server-side by the channel injection path, never sent
 // from a client.
 func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, prompt string, attachments ...message.Attachment) error {
+	return c.sendMessage(ctx, id, sessionID, runID, prompt, false, attachments...)
+}
+
+// SendNonInteractiveMessage submits a turn without an interactive user.
+func (c *Client) SendNonInteractiveMessage(ctx context.Context, id, sessionID, runID, prompt string, attachments ...message.Attachment) error {
+	return c.sendMessage(ctx, id, sessionID, runID, prompt, true, attachments...)
+}
+
+func (c *Client) sendMessage(ctx context.Context, id, sessionID, runID, prompt string, nonInteractive bool, attachments ...message.Attachment) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
 		HiddenUserMessage: message.HiddenUserMessage(ctx),
+		NonInteractive:    nonInteractive,
 		SessionID:         sessionID,
 		RunID:             runID,
 		Prompt:            prompt,

@@ -188,6 +188,8 @@ func (a AgentInfo) IsZero() bool {
 // remains correct only when no other turns are in flight for the
 // same session.
 //
+// NonInteractive selects headless model guidance for this turn only.
+//
 // Channel origin is deliberately absent from this wire type: a client
 // must never be able to mark its own turn as channel-originated (that
 // would route the turn's reply back through the channel's messaging
@@ -196,6 +198,7 @@ func (a AgentInfo) IsZero() bool {
 // travels with the run internally rather than on the request.
 type AgentMessage struct {
 	HiddenUserMessage bool         `json:"hidden_user_message,omitempty"`
+	NonInteractive    bool         `json:"non_interactive,omitempty"`
 	SessionID         string       `json:"session_id"`
 	RunID             string       `json:"run_id,omitempty"`
 	Prompt            string       `json:"prompt"`

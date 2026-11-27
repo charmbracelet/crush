@@ -24,6 +24,7 @@ type blockingCoordinator struct {
 	entered  chan struct{}
 	release  chan struct{}
 	runCount atomic.Int32
+	headless atomic.Bool
 
 	setMainAgentErr  error
 	lastMainAgentSet atomic.Value
@@ -43,6 +44,7 @@ func (c *blockingCoordinator) Run(ctx context.Context, sessionID, prompt string,
 
 func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	c.runCount.Add(1)
+	c.headless.Store(agent.IsNonInteractiveRun(ctx))
 	select {
 	case c.entered <- struct{}{}:
 	default:
@@ -183,6 +185,25 @@ func TestSendMessage_SuccessIncrementsRunWG(t *testing.T) {
 	case <-waited:
 	case <-time.After(2 * time.Second):
 		t.Fatal("runWG.Wait did not complete after the run returned")
+	}
+}
+
+func TestSendMessage_ScopesNonInteractiveModeToRequest(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	close(coord.release)
+	ws := insertAgentWorkspace(t, b, coord)
+
+	for _, headless := range []bool{true, false} {
+		err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi", NonInteractive: headless})
+		require.NoError(t, err)
+		select {
+		case <-coord.entered:
+			require.Equal(t, headless, coord.headless.Load())
+		case <-time.After(2 * time.Second):
+			t.Fatal("dispatched goroutine never entered RunAccepted")
+		}
 	}
 }
 

@@ -287,3 +287,27 @@ func TestSendHiddenContinuation(t *testing.T) {
 	require.True(t, msg.HiddenUserMessage)
 	require.Equal(t, "Implement the plan.", msg.Prompt)
 }
+
+func TestSendNonInteractiveMessage(t *testing.T) {
+	t.Parallel()
+
+	requests := make(chan proto.AgentMessage, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg proto.AgentMessage
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		requests <- msg
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendNonInteractiveMessage(t.Context(), "ws1", "sess1", "run1", "headless"))
+	require.NoError(t, c.SendMessage(t.Context(), "ws1", "sess1", "", "interactive"))
+	require.Equal(t, proto.AgentMessage{
+		SessionID: "sess1", RunID: "run1", Prompt: "headless", NonInteractive: true,
+	}, <-requests)
+	require.Equal(t, proto.AgentMessage{SessionID: "sess1", Prompt: "interactive"}, <-requests)
+}

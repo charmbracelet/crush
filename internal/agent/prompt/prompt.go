@@ -50,6 +50,7 @@ type PromptDat struct {
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
 	CanWrite           bool
+	NonInteractive     bool
 	// ToolNames are the tools the agent is actually given, which is not
 	// always its whole configured set: some tools depend on the run mode.
 	ToolNames []string
@@ -132,11 +133,21 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 }
 
 func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
+	return p.build(ctx, provider, model, store, false)
+}
+
+// BuildForNonInteractive renders the prompt for a single headless turn.
+func (p *Prompt) BuildForNonInteractive(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
+	return p.build(ctx, provider, model, store, true)
+}
+
+func (p *Prompt) build(ctx context.Context, provider, model string, store *config.ConfigStore, nonInteractive bool) (string, error) {
 	var sb strings.Builder
 	d, err := p.promptData(ctx, provider, model, store)
 	if err != nil {
 		return "", err
 	}
+	d.NonInteractive = nonInteractive
 	if err := p.template.Execute(&sb, d); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}

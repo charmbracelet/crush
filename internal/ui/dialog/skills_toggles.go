@@ -60,9 +60,12 @@ type SkillToggles struct {
 	cursor int
 	// offset is the first visible row; the window follows the cursor.
 	offset int
-	scope  MCPToggleScope
-	help   help.Model
-	keyMap struct {
+	// maxRows is the visible row cap fitted to the screen in Draw; zero
+	// means maxVisibleToggleRows.
+	maxRows int
+	scope   MCPToggleScope
+	help    help.Model
+	keyMap  struct {
 		Up     key.Binding
 		Down   key.Binding
 		Toggle key.Binding
@@ -135,10 +138,10 @@ func (m *SkillToggles) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Up):
 			m.cursor = max(0, m.cursor-1)
-			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), maxVisibleToggleRows)
+			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), m.visibleRows())
 		case key.Matches(msg, m.keyMap.Down):
 			m.cursor = min(len(m.items)-1, m.cursor+1)
-			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), maxVisibleToggleRows)
+			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), m.visibleRows())
 		case key.Matches(msg, m.keyMap.Scope):
 			if m.scope == MCPToggleScopeLocal {
 				m.scope = MCPToggleScopeGlobal
@@ -179,8 +182,25 @@ func (m *SkillToggles) HandleMsg(msg tea.Msg) Action {
 func (m *SkillToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 	m.width = max(0, min(m.requiredWidth(t), area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	DrawCenter(scr, area, m.dialogContent())
+	// Fit the visible rows to the screen height, keeping the cursor in
+	// the window.
+	m.maxRows = maxVisibleToggleRows
+	content := m.dialogContent()
+	if rows := fitToggleRows(lipgloss.Height(content), min(m.maxRows, len(m.items)), area.Dy()); len(m.items) > 0 && rows < min(m.maxRows, len(m.items)) {
+		m.maxRows = rows
+		m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), rows)
+		content = m.dialogContent()
+	}
+	DrawCenter(scr, area, content)
 	return nil
+}
+
+// visibleRows returns the cap on visible rows.
+func (m *SkillToggles) visibleRows() int {
+	if m.maxRows > 0 {
+		return m.maxRows
+	}
+	return maxVisibleToggleRows
 }
 
 // requiredWidth returns the width needed to fit the widest row (status
@@ -236,7 +256,7 @@ func (m *SkillToggles) innerContent() string {
 
 	// Cap the visible rows so a long skill list cannot make the dialog
 	// grow past the screen; the window follows the cursor.
-	visible := min(maxVisibleToggleRows, len(m.items))
+	visible := min(m.visibleRows(), len(m.items))
 	first := m.visibleOffset(visible)
 	last := min(len(m.items), first+visible)
 
@@ -271,6 +291,7 @@ func (m *SkillToggles) innerContent() string {
 			statusCol = t.Tool.IconError.SetString("error").Render()
 		}
 		statusWidth := lipgloss.Width(statusCol)
+		name := truncateToggleName(item.Name, rowWidth, statusWidth)
 
 		if i == m.cursor {
 			// The full row goes through the selection style in plain
@@ -287,16 +308,16 @@ func (m *SkillToggles) innerContent() string {
 			if item.Error != "" {
 				glyph = styles.ToolError
 			}
-			row := glyph + " " + item.Name +
-				strings.Repeat(" ", max(1, rowWidth-2-lipgloss.Width(item.Name)-statusWidth)) +
+			row := glyph + " " + name +
+				strings.Repeat(" ", max(1, rowWidth-2-lipgloss.Width(name)-statusWidth)) +
 				statusCol
 			rows = append(rows, t.Dialog.SelectedItem.Render(row))
 			continue
 		}
 
 		row := mark + " " +
-			t.Dialog.NormalItem.UnsetPadding().Render(item.Name) +
-			strings.Repeat(" ", max(1, rowWidth-2-lipgloss.Width(item.Name)-statusWidth)) +
+			t.Dialog.NormalItem.UnsetPadding().Render(name) +
+			strings.Repeat(" ", max(1, rowWidth-2-lipgloss.Width(name)-statusWidth)) +
 			statusCol
 		rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 	}

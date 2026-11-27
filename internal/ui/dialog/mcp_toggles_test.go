@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -150,4 +151,28 @@ func TestMCPToggles_NavigationClamps(t *testing.T) {
 	require.Equal(t, "serena", toggled.Name, "cursor must clamp at the bottom")
 
 	require.IsType(t, ActionClose{}, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape}))
+}
+
+// TestMCPToggles_FitsSmallTerminal verifies that long server names are
+// truncated instead of wrapping inside the frame, and that the visible rows
+// shrink to the screen height while keeping the cursor in view. Previously
+// each long row wrapped onto two lines and the 12-row window ran past the
+// bottom of a short terminal.
+func TestMCPToggles_FitsSmallTerminal(t *testing.T) {
+	t.Parallel()
+
+	var items []MCPToggleItem
+	for i := range 20 {
+		items = append(items, MCPToggleItem{Name: fmt.Sprintf("server-with-a-really-long-name-number-%02d", i), Status: "connected"})
+	}
+	m := newMCPTogglesForTest(items)
+	drawFits(t, m, 40, 12)
+
+	for range 15 {
+		m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	drawFits(t, m, 40, 12)
+	require.Less(t, m.maxRows, maxVisibleToggleRows)
+	require.GreaterOrEqual(t, m.cursor, m.offset, "the cursor row stays visible")
+	require.Less(t, m.cursor, m.offset+m.maxRows, "the cursor row stays visible")
 }

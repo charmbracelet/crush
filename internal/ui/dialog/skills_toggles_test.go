@@ -156,3 +156,19 @@ func TestSkillsToggles_ErroredSkill(t *testing.T) {
 	require.True(t, toggled.Disabled)
 	require.True(t, m.Items()[1].Disabled)
 }
+
+// TestSkillsToggles_FitsSmallTerminal verifies that long skill names are
+// truncated instead of wrapping inside the frame, and that the visible rows
+// shrink to the screen height.
+func TestSkillsToggles_FitsSmallTerminal(t *testing.T) {
+	t.Parallel()
+
+	var items []SkillToggleItem
+	for i := range 20 {
+		items = append(items, SkillToggleItem{Name: fmt.Sprintf("skill-with-a-really-long-name-number-%02d", i)})
+	}
+	items[3].Error = "broken"
+	m := newSkillsTogglesForTest(items)
+	drawFits(t, m, 40, 12)
+	drawFits(t, m, 30, 8)
+}

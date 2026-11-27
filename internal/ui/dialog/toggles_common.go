@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // maxVisibleToggleRows bounds the toggles dialogs' viewports.
@@ -18,6 +19,24 @@ const minToggleDialogWidth = 68
 // scrollbarColumnWidth is the columns the scrollbar column adds to the
 // row area: one space before the track glyph.
 const scrollbarColumnWidth = 2
+
+// truncateToggleName truncates a row's name so the 2-column mark, the
+// name, at least one space and a status of statusWidth fit rowWidth on one
+// line; an untruncated long name wraps inside the dialog frame.
+func truncateToggleName(name string, rowWidth, statusWidth int) string {
+	return ansi.Truncate(name, max(0, rowWidth-2-1-statusWidth), "…")
+}
+
+// fitToggleRows returns how many rows of a toggles dialog can show in an
+// area of areaHeight, given the dialog's height when it shows visible rows.
+// The dialog never grows past maxVisibleToggleRows, and always keeps one
+// row so the cursor stays visible.
+func fitToggleRows(dialogHeight, visible, areaHeight int) int {
+	if over := dialogHeight - areaHeight; over > 0 {
+		return max(1, visible-over)
+	}
+	return visible
+}
 
 // toggleVisibleOffset returns the first visible row index for a window of
 // visible rows over count items, scrolling so the cursor always stays in

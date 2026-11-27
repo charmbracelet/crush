@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // MCPTogglesID is the identifier for the MCP toggles dialog.
@@ -76,9 +77,12 @@ type MCPToggles struct {
 	cursor int
 	// offset is the first visible row; the window follows the cursor.
 	offset int
-	scope  MCPToggleScope
-	help   help.Model
-	keyMap struct {
+	// maxRows is the visible row cap fitted to the screen in Draw; zero
+	// means maxVisibleToggleRows.
+	maxRows int
+	scope   MCPToggleScope
+	help    help.Model
+	keyMap  struct {
 		Up     key.Binding
 		Down   key.Binding
 		Toggle key.Binding
@@ -144,10 +148,10 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Up):
 			m.cursor = max(0, m.cursor-1)
-			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), maxVisibleToggleRows)
+			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), m.visibleRows())
 		case key.Matches(msg, m.keyMap.Down):
 			m.cursor = min(len(m.items)-1, m.cursor+1)
-			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), maxVisibleToggleRows)
+			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), m.visibleRows())
 		case key.Matches(msg, m.keyMap.Scope):
 			if m.scope == MCPToggleScopeLocal {
 				m.scope = MCPToggleScopeGlobal
@@ -195,8 +199,25 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 	m.width = max(0, min(m.requiredWidth(t), area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	DrawCenter(scr, area, m.dialogContent())
+	// Fit the visible rows to the screen height, keeping the cursor in
+	// the window.
+	m.maxRows = maxVisibleToggleRows
+	content := m.dialogContent()
+	if rows := fitToggleRows(lipgloss.Height(content), min(m.maxRows, len(m.items)), area.Dy()); len(m.items) > 0 && rows < min(m.maxRows, len(m.items)) {
+		m.maxRows = rows
+		m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), rows)
+		content = m.dialogContent()
+	}
+	DrawCenter(scr, area, content)
 	return nil
+}
+
+// visibleRows returns the cap on visible rows.
+func (m *MCPToggles) visibleRows() int {
+	if m.maxRows > 0 {
+		return m.maxRows
+	}
+	return maxVisibleToggleRows
 }
 
 // requiredWidth returns the width needed to fit the widest row (status
@@ -249,7 +270,7 @@ func (m *MCPToggles) innerContent() string {
 
 	// Cap the visible rows so a long server list cannot make the dialog
 	// grow past the screen; the window follows the cursor.
-	visible := min(maxVisibleToggleRows, len(m.items))
+	visible := min(m.visibleRows(), len(m.items))
 	first := max(0, min(m.offset, len(m.items)-visible))
 	last := min(len(m.items), first+visible)
 
@@ -271,7 +292,9 @@ func (m *MCPToggles) innerContent() string {
 		// their own "●" via SetString, so Render() yields just the dot.
 		// It sits left of the name, like the sidebar rows.
 		dot := statusDot(t, status)
-		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(item.Name)-lipgloss.Width(status))
+		status = ansi.Truncate(status, max(0, rowWidth-2-1-1), "…")
+		name := truncateToggleName(item.Name, rowWidth, lipgloss.Width(status))
+		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(name)-lipgloss.Width(status))
 
 		if i == m.cursor {
 			// The full row goes through the selection style in plain
@@ -279,7 +302,7 @@ func (m *MCPToggles) innerContent() string {
 			// ANSI resets that clear the selection background for the
 			// rest of the line, leaving the status unhighlighted.
 			rows = append(rows, t.Dialog.SelectedItem.Render(
-				"● "+item.Name+strings.Repeat(" ", gap)+status,
+				"● "+name+strings.Repeat(" ", gap)+status,
 			))
 			continue
 		}
@@ -294,7 +317,7 @@ func (m *MCPToggles) innerContent() string {
 			statusStyle = t.Dialog.SecondaryText.UnsetPadding()
 		}
 		row := dot.Render() + " " +
-			t.Dialog.NormalItem.UnsetPadding().Render(item.Name) +
+			t.Dialog.NormalItem.UnsetPadding().Render(name) +
 			strings.Repeat(" ", gap) +
 			statusStyle.Render(status)
 		// A single Padding(0, 1) around the row.

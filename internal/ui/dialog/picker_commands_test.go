@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,4 +38,20 @@ func TestCommandsShowsScrollbar(t *testing.T) {
 	c := newPickerTestCommands(t)
 	text := strings.Join(drawFits(t, c, 100, 12), "\n")
 	require.Contains(t, text, "┃")
+}
+
+// TestCommandsHelpHidesTabWithoutLists verifies tab is only advertised
+// when there are other command lists to switch to, after enter and esc.
+func TestCommandsHelpHidesTabWithoutLists(t *testing.T) {
+	t.Parallel()
+	c := newPickerTestCommands(t)
+	text := strings.Join(drawFits(t, c, 100, 30), "\n")
+	require.NotContains(t, text, "tab")
+	require.Contains(t, text, "esc")
+
+	c, err := NewCommands(newPickerTestCommon(), "", false, false, false, false,
+		[]commands.CustomCommand{{ID: "user:hi", Name: "hi"}}, nil)
+	require.NoError(t, err)
+	help := c.ShortHelp()
+	require.Equal(t, "tab", help[len(help)-1].Help().Key)
 }

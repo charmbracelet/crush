@@ -201,12 +201,12 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if c.hasCommandTypes() {
 				c.selected = c.nextCommandType()
 				c.setCommandItems(c.selected)
 			}
 		case key.Matches(msg, c.keyMap.ShiftTab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if c.hasCommandTypes() {
 				c.selected = c.previousCommandType()
 				c.setCommandItems(c.selected)
 			}
@@ -322,18 +322,33 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (c *Commands) ShortHelp() []key.Binding {
-	return []key.Binding{
-		c.keyMap.Tab,
+	bindings := []key.Binding{
 		c.keyMap.UpDown,
 		c.keyMap.Select,
 		c.keyMap.Close,
 	}
+	// Tab only switches lists when there are user commands or MCP
+	// prompts; it comes last so enter and esc survive truncation.
+	if c.hasCommandTypes() {
+		bindings = append(bindings, c.keyMap.Tab)
+	}
+	return bindings
+}
+
+// hasCommandTypes reports whether there is more than one list of commands
+// to switch between.
+func (c *Commands) hasCommandTypes() bool {
+	return len(c.customCommands) > 0 || len(c.mcpPrompts) > 0
 }
 
 // FullHelp implements [help.KeyMap].
 func (c *Commands) FullHelp() [][]key.Binding {
+	row := []key.Binding{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous}
+	if c.hasCommandTypes() {
+		row = append(row, c.keyMap.Tab)
+	}
 	return [][]key.Binding{
-		{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous, c.keyMap.Tab},
+		row,
 		{c.keyMap.Close},
 	}
 }

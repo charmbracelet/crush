@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,4 +297,17 @@ func TestSessionDeleteAfterWheelScrollsSelectionBackIntoView(t *testing.T) {
 
 	require.True(t, dialog.list.SelectedItemInView(), "deleting off-screen must show what it landed on")
 	require.Equal(t, "s01", dialog.selectedSessionItem().ID())
+}
+
+// TestSessionFitsShortTerminal verifies that when there is no room for any
+// list rows the dialog skips the empty list body, which used to add a line
+// plus its margin and push the help and bottom border off-screen.
+func TestSessionFitsShortTerminal(t *testing.T) {
+	t.Parallel()
+
+	for _, h := range []int{7, 8, 9} {
+		dialog := newSessionMouseDialog(t, testSessions(5), "")
+		lines := drawFits(t, dialog, 40, h)
+		require.Contains(t, strings.Join(lines, "\n"), "choose", "help visible at 40x%d", h)
+	}
 }

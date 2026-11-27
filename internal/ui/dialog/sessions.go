@@ -323,13 +323,20 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		cur = s.Cursor()
 		rc.AddPart(inputView)
 	}
-	bodyView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
-	bodyView = joinScrollbar(t, bodyView, listHeight, listTotalHeight, listHeight, s.list.Offset())
-	rc.AddPart(bodyView)
+	// With no room for list rows, skip the body entirely: an empty list
+	// still renders a line plus its margin, pushing the dialog past the area.
+	var bodyView string
+	if listHeight > 0 {
+		bodyView = t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
+		bodyView = joinScrollbar(t, bodyView, listHeight, listTotalHeight, listHeight, s.list.Offset())
+		rc.AddPart(bodyView)
+	}
 	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 
 	view := rc.Render()
-	s.updateSessionListArea(area, view, bodyView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
+	if listHeight > 0 {
+		s.updateSessionListArea(area, view, bodyView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
+	}
 
 	DrawCenterCursor(scr, area, view, cur)
 	return cur

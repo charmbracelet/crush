@@ -83,3 +83,20 @@ func TestQuestionFormEscInNoteKeepsBatch(t *testing.T) {
 	require.False(t, *cancelled, "esc in a note must not cancel the batch")
 	require.Equal(t, "h", yn.notes[question.QuestionNoteKey])
 }
+
+// TestInlineQuestionEscLabels verifies each inline question labels esc
+// by what it does: it cancels the batch from a question, goes back from
+// the confirm tab, and goes back from the plan feedback editor.
+func TestInlineQuestionEscLabels(t *testing.T) {
+	t.Parallel()
+	form, _ := newTestBatchForm(t)
+	require.Equal(t, "cancel", helpFor(form.ShortHelp(), "esc"), "choice question")
+	form.switchTab(1)
+	require.Equal(t, "cancel", helpFor(form.ShortHelp(), "esc"), "yes/no question")
+	form.switchTab(2)
+	require.Equal(t, "back", helpFor(form.ShortHelp(), "esc"), "confirm tab")
+
+	p := newTestPlanHandoff()
+	p.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	require.Equal(t, "back", helpFor(p.ShortHelp(), "esc"), "plan feedback editor")
+}

@@ -391,7 +391,7 @@ func (p *PlanHandoffInline) SetFocused(focused bool) {
 // ShortHelp returns key bindings for the status bar.
 func (p *PlanHandoffInline) ShortHelp() []key.Binding {
 	if p.editing {
-		return []key.Binding{p.keyEnter, p.keyNewline, p.keyClose}
+		return []key.Binding{p.keyEnter, p.keyNewline, questionBackKey}
 	}
 	return []key.Binding{p.keyLeftRight, p.keyEnter, p.keyCoding, p.keyYolo, p.keyNo}
 }

@@ -106,7 +106,7 @@ func (d *FreeText) GetRequest() question.Question { return d.Request }
 
 // ShortHelp returns key bindings for the status bar.
 func (d *FreeText) ShortHelp() []key.Binding {
-	return []key.Binding{d.keyEnter, d.keyNewline, d.keyClose}
+	return []key.Binding{d.keyEnter, d.keyNewline, cancelKey}
 }
 
 // Height returns the visual height at the default max width.

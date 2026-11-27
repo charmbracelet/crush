@@ -101,7 +101,7 @@ func (d *YesNo) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
 		return []key.Binding{questionBackKey, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
 	}
-	return []key.Binding{d.keyLeftRight, d.keyEnter, d.keyYes, d.keyNo, d.keyNote}
+	return []key.Binding{d.keyLeftRight, d.keyEnter, d.keyYes, d.keyNo, d.keyNote, cancelKey}
 }
 
 func (d *YesNo) respond(yes bool) question.Answer {

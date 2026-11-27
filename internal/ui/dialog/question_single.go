@@ -151,7 +151,7 @@ func (d *SingleChoice) ShortHelp() []key.Binding {
 	if d.isFillIn() && d.fillIn.Focused() {
 		return []key.Binding{d.navUp, d.keyEnter, questionBackKey}
 	}
-	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyClose}
+	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote, cancelKey}
 }
 
 func (d *SingleChoice) Height(width int) int { return d.height(width, d.renderItem) }

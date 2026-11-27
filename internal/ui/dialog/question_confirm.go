@@ -68,7 +68,7 @@ func NewConfirmComponent(sty *styles.Styles, title, description string, labels [
 		keyYes:           key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yes")),
 		keyNo:            key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "no")),
 		keyEnter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
-		keyClose:         CloseKey,
+		keyClose:         questionBackKey, // esc returns to the questions
 		keyUp:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "scroll")),
 		keyDown:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓", "scroll")),
 	}

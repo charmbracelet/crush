@@ -325,39 +325,6 @@
       }
     },
     {
-      "id": "inkling",
-      "name": "Inkling",
-      "pricing": {
-        "input": 1.0888,
-        "output": 4.40964,
-        "cache_hit": 0.185096
-      },
-      "context_window": 1048576,
-      "default_max_tokens": 65536,
-      "reasoning": {
-        "thinking": "toggleable",
-        "effort_levels": [
-          {
-            "value": "low",
-            "display": "Low"
-          },
-          {
-            "value": "medium",
-            "display": "Medium"
-          },
-          {
-            "value": "high",
-            "display": "High"
-          }
-        ],
-        "default_effort_level": "medium"
-      },
-      "capabilities": {
-        "vision": true,
-        "audio": true
-      }
-    },
-    {
       "id": "qwen4-max",
       "name": "Qwen4-Max",
       "pricing": {

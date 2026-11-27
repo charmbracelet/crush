@@ -41,12 +41,25 @@ func ParsePrompt(prompt string) PromptRequest {
 	}
 
 	style := classifyStyle(lower, kind)
+	message := style.message(prompt, keyInfo)
+
+	// Host key questions are only answerable with the host and the
+	// fingerprint in view, both of which OpenSSH puts in the prompt.
+	if style == styleHostKey {
+		host, keyType, fingerprint := hostKeyFromPrompt(prompt)
+		keyInfo = fingerprint
+		if host != "" {
+			message = "OpenSSH has not seen " + host + " before. Trust its " +
+				strings.TrimSpace(keyType+" key") + "?"
+		}
+	}
+
 	return PromptRequest{
 		Prompt:  prompt,
 		Kind:    kind,
 		KeyInfo: keyInfo,
 		Title:   style.title(),
-		Message: style.message(prompt, keyInfo),
+		Message: message,
 	}
 }
 
@@ -54,10 +67,14 @@ func ParsePrompt(prompt string) PromptRequest {
 // for key-related prompts (passphrases, security keys), "Account" for
 // password prompts.
 func KeyInfoLabel(prompt string, kind Kind) string {
-	if classifyStyle(strings.ToLower(prompt), kind) == stylePassword {
+	switch classifyStyle(strings.ToLower(prompt), kind) {
+	case stylePassword:
 		return "Account"
+	case styleHostKey:
+		return "Fingerprint"
+	default:
+		return "Key"
 	}
-	return "Key"
 }
 
 // Describe returns a copy of req with the friendly copy filled in,
@@ -241,6 +258,24 @@ func keyInfoFromPrompt(prompt string) string {
 		return tidy(prompt[i+len("password for "):])
 	}
 	return ""
+}
+
+var (
+	hostKeyHost        = regexp.MustCompile(`authenticity of host '([^']+)'`)
+	hostKeyFingerprint = regexp.MustCompile(`(?m)^(\S+) key fingerprint is:?\s+(\S+?)\.?\s*$`)
+)
+
+// hostKeyFromPrompt extracts the host, key type and fingerprint from
+// OpenSSH's unknown host key question. Each is empty when the prompt
+// does not carry it.
+func hostKeyFromPrompt(prompt string) (host, keyType, fingerprint string) {
+	if m := hostKeyHost.FindStringSubmatch(prompt); m != nil {
+		host = m[1]
+	}
+	if m := hostKeyFingerprint.FindStringSubmatch(prompt); m != nil {
+		keyType, fingerprint = m[1], m[2]
+	}
+	return host, keyType, fingerprint
 }
 
 // keyPath cleans the remainder of a prompt that names a key: quoted

@@ -117,6 +117,28 @@ func TestParsePrompt(t *testing.T) {
 			message: "OpenSSH has not seen this host before. Trust its key?",
 		},
 		{
+			name: "host key acceptance with host and fingerprint",
+			prompt: "The authenticity of host 'beef (100.64.0.3)' can't be established.\n" +
+				"ED25519 key fingerprint is SHA256:Kx3nZ0h1nqk8m3QYV9Z5Qk2b0dF7Yw3sXo4n0eJt6aE.\n" +
+				"This key is not known by any other names.\n" +
+				"Are you sure you want to continue connecting (yes/no/[fingerprint])? ",
+			kind:    KindConfirm,
+			keyInfo: "SHA256:Kx3nZ0h1nqk8m3QYV9Z5Qk2b0dF7Yw3sXo4n0eJt6aE",
+			title:   "New Host",
+			message: "OpenSSH has not seen beef (100.64.0.3) before. Trust its ED25519 key?",
+		},
+		{
+			name: "host key acceptance as worded by OpenSSH 10",
+			prompt: "The authenticity of host 'github.com (140.82.114.3)' can't be established.\n" +
+				"ED25519 key fingerprint is: SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU\n" +
+				"This key is not known by any other names.\n" +
+				"Are you sure you want to continue connecting (yes/no/[fingerprint])? ",
+			kind:    KindConfirm,
+			keyInfo: "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU",
+			title:   "New Host",
+			message: "OpenSSH has not seen github.com (140.82.114.3) before. Trust its ED25519 key?",
+		},
+		{
 			name:    "ssh-add key use",
 			prompt:  "Allow use of key /home/user/.ssh/id_ed25519?\nKey fingerprint: SHA256:abcdef",
 			kind:    KindConfirm,
@@ -159,6 +181,7 @@ func TestKeyInfoLabel(t *testing.T) {
 	require.Equal(t, "Key", KeyInfoLabel("Enter passphrase for key '/k': ", KindPassword))
 	require.Equal(t, "Key", KeyInfoLabel("Enter PIN for key '/k': ", KindPassword))
 	require.Equal(t, "Key", KeyInfoLabel("Allow use of key /k?", KindConfirm))
+	require.Equal(t, "Fingerprint", KeyInfoLabel("Are you sure you want to continue connecting (yes/no)?", KindConfirm))
 }
 
 func TestDescribeFillsInParsedCopy(t *testing.T) {

@@ -653,6 +653,8 @@ type Styles struct {
 		ModeBannerYoloBadge     lipgloss.Style
 		ModeBannerSysadmin      lipgloss.Style
 		ModeBannerSysadminBadge lipgloss.Style
+		ModeBannerCode          lipgloss.Style
+		ModeBannerCodeBadge     lipgloss.Style
 
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style

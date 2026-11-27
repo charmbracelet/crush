@@ -41,8 +41,9 @@ type AWSSSO struct {
 	spinner spinner.Model
 	help    help.Model
 	keyMap  struct {
-		Open  key.Binding
-		Close key.Binding
+		Open    key.Binding
+		CopyURL key.Binding
+		Close   key.Binding
 	}
 
 	width  int
@@ -76,6 +77,11 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 	m.keyMap.Open = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "open in browser"),
+	)
+	// Same keys as the MCP dialog, which also has no code to copy.
+	m.keyMap.CopyURL = key.NewBinding(
+		key.WithKeys("c", "u"),
+		key.WithHelp("c", "copy url"),
 	)
 	m.keyMap.Close = CloseKey
 
@@ -126,6 +132,11 @@ func (m *AWSSSO) HandleMsg(msg tea.Msg) Action {
 			}
 			if m.state == awsSSOStateSuccess {
 				return ActionClose{}
+			}
+
+		case key.Matches(msg, m.keyMap.CopyURL):
+			if m.state == awsSSOStateWaiting && m.url != "" {
+				return ActionCmd{common.CopyToClipboard(m.url, "URL copied to clipboard")}
 			}
 
 		case key.Matches(msg, m.keyMap.Close):
@@ -190,13 +201,16 @@ func (m *AWSSSO) innerDialogContent() string {
 	case awsSSOStateWaiting:
 		if m.url != "" {
 			// URL found; show it and wait for auth to complete.
-			displayURL := ansi.Truncate(m.url, max(0, innerWidth-2), "…") // -2 for padding
-			link := linkStyle.Hyperlink(m.url, "id=aws-sso-verify").Render(displayURL)
+			// Show the whole URL, broken at fixed widths: the user code
+			// sits at its end. Each piece keeps the hyperlink.
+			var linkLines []string
+			for _, line := range strings.Split(ansi.Hardwrap(m.url, max(1, innerWidth-2), false), "\n") { // -2 for padding
+				linkLines = append(linkLines, linkStyle.Hyperlink(m.url, "id=aws-sso-verify").Render(line))
+			}
 			urlBox := lipgloss.NewStyle().
 				Width(innerWidth).
 				Padding(0, 1).
-				Align(lipgloss.Center).
-				Render(link)
+				Render(strings.Join(linkLines, "\n"))
 
 			waiting := statusTextStyle.
 				Width(innerWidth).
@@ -274,7 +288,7 @@ func (m *AWSSSO) ShortHelp() []key.Binding {
 		}
 	default:
 		if m.url != "" {
-			return []key.Binding{m.keyMap.Open, m.keyMap.Close}
+			return []key.Binding{m.keyMap.Open, m.keyMap.Close, m.keyMap.CopyURL}
 		}
 		return []key.Binding{m.keyMap.Close}
 	}

@@ -250,3 +250,22 @@ func TestQuitWrapsTextToSmallTerminal(t *testing.T) {
 		require.NotNil(t, q.compositor, "buttons should be clickable at %dx%d", sz[0], sz[1])
 	}
 }
+
+// TestQuitNarrowKeepsPaddingAndBalance verifies the quit dialog keeps its
+// text off the border on narrow terminals and splits a wrapped warning
+// into even lines instead of leaving a word on its own.
+func TestQuitNarrowKeepsPaddingAndBalance(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range []int{24, 30, 40, 50, 80} {
+		lines := drawFits(t, NewQuit(newPickerTestCommon(), 2), w, 16)
+		for _, l := range lines {
+			l = strings.TrimSpace(l)
+			if strings.HasPrefix(l, "│") && strings.Trim(l, "│ ") != "" {
+				require.True(t, strings.HasPrefix(l, "│ ") && strings.HasSuffix(l, " │"), "text touches the border at %d cols: %q", w, l)
+			}
+		}
+	}
+	require.Equal(t, "2 subagents are still\nrunning and will be cut off.",
+		balancedWrap("2 subagents are still running and will be cut off.", 47))
+}

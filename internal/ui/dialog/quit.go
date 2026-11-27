@@ -161,24 +161,37 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	buttons := strings.Join(buttonViews, " ")
 	buttonsWidth := lipgloss.Width(buttons)
 
-	// Wrap the text to the narrowest frame the dialog can fall back to
-	// (border only, no horizontal padding) so a small terminal wraps the
-	// lines instead of pushing the dialog, and its buttons, off-screen.
-	textWidth := max(buttonsWidth, area.Dx()-q.com.Styles.Dialog.Quit.Frame.GetHorizontalBorderSize()-baseStyle.GetHorizontalFrameSize())
-	wrap := func(s string) string { return ansi.Wrap(s, textWidth, "") }
-	question := wrap(quitQuestion)
-
+	// Wrap the text inside the frame's padding so a small terminal wraps
+	// the lines, keeping them off the border, instead of pushing the
+	// dialog and its buttons off-screen. Each wrapped line is centered
+	// like the rest of the dialog rather than hanging off the left.
 	// Quitting cuts off any subagent mid-turn.
-	var warning string
+	var warningText string
 	if q.runningSubAgents > 0 {
 		noun := "subagents are"
 		if q.runningSubAgents == 1 {
 			noun = "subagent is"
 		}
-		warning = warningStyle.Render(wrap(fmt.Sprintf(
-			"%d %s still running and will be cut off.",
-			q.runningSubAgents, noun,
-		)))
+		warningText = fmt.Sprintf("%d %s still running and will be cut off.", q.runningSubAgents, noun)
+	}
+
+	// Wrapping inside the padding costs lines; when that would make the
+	// dialog taller than the screen, wrap to the border instead (the
+	// frame then drops its horizontal padding below).
+	frame := q.com.Styles.Dialog.Quit.Frame
+	textWidth := max(buttonsWidth, area.Dx()-frame.GetHorizontalFrameSize()-baseStyle.GetHorizontalFrameSize())
+	if quitHeight(textWidth, warningText)+frame.GetVerticalFrameSize() > area.Dy() {
+		textWidth = max(buttonsWidth, area.Dx()-frame.GetHorizontalBorderSize()-baseStyle.GetHorizontalFrameSize())
+	}
+	wrap := func(s string) string {
+		wrapped := balancedWrap(s, textWidth)
+		return lipgloss.NewStyle().Width(lipgloss.Width(wrapped)).Align(lipgloss.Center).Render(wrapped)
+	}
+	question := wrap(quitQuestion)
+
+	var warning string
+	if warningText != "" {
+		warning = warningStyle.Render(wrap(warningText))
 	}
 
 	// buttonLine is the index of the content line reserved for the buttons,
@@ -285,4 +298,33 @@ func (q *Quit) FullHelp() [][]key.Binding {
 		{q.keyMap.LeftRight, q.keyMap.EnterSpace, q.keyMap.Yes, q.keyMap.No},
 		{q.keyMap.Tab, q.keyMap.Close},
 	}
+}
+
+// quitHeight is the quit dialog's content height with its text wrapped
+// to width: question, optional warning, buttons and the two hint lines,
+// with blank rows between.
+func quitHeight(width int, warning string) int {
+	rows := func(s string) int { return strings.Count(balancedWrap(s, width), "\n") + 1 }
+	h := rows(quitQuestion) + 3 + rows(quitHintLineOne) + rows(quitHintLineTwo)
+	if warning != "" {
+		h += rows(warning) + 1
+	}
+	return h
+}
+
+// balancedWrap wraps s to at most width columns using the narrowest width
+// that still needs the same number of lines, so a wrapped sentence splits
+// into lines of similar length instead of leaving one word on its own.
+func balancedWrap(s string, width int) string {
+	wrapped := ansi.Wrap(s, width, "")
+	lines := strings.Count(wrapped, "\n")
+	if lines == 0 {
+		return wrapped
+	}
+	for w := ansi.StringWidth(s)/(lines+1) + 1; w < width; w++ {
+		if b := ansi.Wrap(s, w, ""); strings.Count(b, "\n") == lines {
+			return b
+		}
+	}
+	return wrapped
 }

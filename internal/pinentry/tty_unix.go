@@ -7,18 +7,27 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/sys/unix"
 )
 
-// ReapplyTerminalModes puts the controlling terminal back into
-// non-canonical, no-echo mode after the terminal handover restored the
-// pre-Crush modes. It is a no-op when the terminal cannot be configured;
-// callers have no useful recovery, and the visible hint on the terminal
-// remains as the fallback.
-func ReapplyTerminalModes() {
+const handoverHint = "GPG is asking for your passphrase on this terminal (pinentry). Type it and press Enter; input is hidden."
+
+// BeginHandover prepares a just-released terminal for a pinentry dialog.
+// The hint lives on a scratch alt screen so it never reaches scrollback.
+func BeginHandover(ctrlLRedraw bool) {
 	if err := SetTerminalRawNoEcho(); err != nil {
 		slog.Debug("Failed to configure terminal modes for pinentry", "error", err)
 	}
+	fmt.Fprint(os.Stdout, ansi.SetModeAltScreenSaveCursor+ansi.EraseEntireScreen+ansi.CursorHomePosition+handoverHint+"\r\n")
+	if ctrlLRedraw {
+		injectCtrlLRedraw()
+	}
+}
+
+// EndHandover discards the scratch screen BeginHandover drew on.
+func EndHandover() {
+	fmt.Fprint(os.Stdout, ansi.ResetModeAltScreenSaveCursor)
 }
 
 // SetTerminalRawNoEcho puts the controlling terminal into non-canonical,

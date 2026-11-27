@@ -29,11 +29,13 @@ func newTestBackend(t *testing.T) (*Backend, *atomic.Int32) {
 	t.Helper()
 	var shutdownCount atomic.Int32
 	b := &Backend{
-		workspaces:  csync.NewMap[string, *Workspace](),
-		pathIndex:   make(map[string]string),
-		ctx:         context.Background(),
-		createGrace: 50 * time.Millisecond,
-		shutdownFn:  func() { shutdownCount.Add(1) },
+		workspaces:   csync.NewMap[string, *Workspace](),
+		pathIndex:    make(map[string]string),
+		ctx:          context.Background(),
+		createGrace:  50 * time.Millisecond,
+		idleShutdown: true,
+		autoClose:    true,
+		shutdownFn:   func() { shutdownCount.Add(1) },
 	}
 	return b, &shutdownCount
 }
@@ -470,18 +472,27 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	wsA, protoA, err := b.CreateWorkspace(argsA)
 	require.NoError(t, err)
 	require.Equal(t, proto.WorkspacePermissionModeYolo, protoA.PermissionMode)
-	require.Equal(t, originalEnv, protoA.Env)
+	require.Equal(t, originalEnv, wsA.Env)
+	require.Empty(t, protoA.Env, "proto responses must not leak workspace Env")
 
 	argsB := protoWS(cwd, dataDir, uuid.New().String())
 	argsB.PermissionMode = proto.WorkspacePermissionModeNormal
 	argsB.Debug = true
 	argsB.Env = []string{"BAZ=qux"}
-	_, protoB, err := b.CreateWorkspace(argsB)
+	wsB, protoB, err := b.CreateWorkspace(argsB)
 	require.NoError(t, err)
 	require.Equal(t, protoA.ID, protoB.ID)
 	require.Equal(t, proto.WorkspacePermissionModeYolo, protoB.PermissionMode, "first wins: PermissionMode must remain yolo")
-	require.Equal(t, originalEnv, protoB.Env, "proto must carry the originating client's Env")
+	require.Equal(t, originalEnv, wsB.Env, "workspace must keep the originating client's Env")
+	require.Empty(t, protoB.Env, "proto responses must not leak workspace Env")
 	require.Equal(t, permission.PermissionModeYolo, wsA.Cfg.Overrides().PermissionMode)
+
+	for _, listed := range b.ListWorkspaces() {
+		require.Empty(t, listed.Env, "ListWorkspaces must not leak workspace Env")
+	}
+	got, err := b.GetWorkspaceProto(wsA.ID)
+	require.NoError(t, err)
+	require.Empty(t, got.Env, "GetWorkspaceProto must not leak workspace Env")
 }
 
 // TestPathDedupe_Symlink confirms two paths that resolve to the same
@@ -749,14 +760,14 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			t.Cleanup(func() { drainBackend(t, b) })
 
 			argsA := protoWS(cwd, dataDir, uuid.New().String())
-			argsA.Env = []string{"FOO=bar"}
+			argsA.Env = []string{"FOO=bar", "SECRET_A=hunter2"}
 			wsA, _, err := b.CreateWorkspace(argsA)
 			require.NoError(t, err)
 			originalDebug := wsA.Cfg.Config().Options.Debug
 			originalMode := wsA.Cfg.Overrides().PermissionMode
 
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
-			argsB.Env = []string{"FOO=bar"} // identical by default
+			argsB.Env = []string{"FOO=bar", "SECRET_A=hunter2"} // identical by default
 			tc.mutate(&argsB)
 			_, _, err = b.CreateWorkspace(argsB)
 			require.NoError(t, err)
@@ -766,6 +777,8 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 				"Workspace flag mismatch on duplicate create",
 				"expected debug log for mismatching %s", tc.name,
 			)
+			require.NotContains(t, buf.String(), "hunter2", "env values must not be logged")
+			require.NotContains(t, buf.String(), "NEW=val", "env values must not be logged")
 			// Existing workspace's PermissionMode and Debug must not change.
 			require.Equal(t, originalMode, wsA.Cfg.Overrides().PermissionMode, "PermissionMode must be immutable on first-wins")
 			require.Equal(t, originalDebug, wsA.Cfg.Config().Options.Debug, "Debug must be immutable on first-wins")
@@ -1509,6 +1522,81 @@ func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
 		"idle server must shut down after the linger window")
 }
 
+// TestServer_DisabledIdleShutdownKeepsServerUp covers a server the user
+// started explicitly with `crush server`: neither the idle timer armed at
+// startup nor the last client leaving may shut it down. It runs until it
+// is stopped.
+func TestServer_DisabledIdleShutdownKeepsServerUp(t *testing.T) {
+	t.Parallel()
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(100 * time.Millisecond)
+	b.DisableIdleShutdown()
+
+	b.ArmIdleShutdown()
+	require.Zero(t, shutdownCount.Load(),
+		"the startup idle timer must not shut down a server with idle shutdown disabled")
+
+	wsA, _ := insertTestWorkspace(t, b, "/tmp/no-linger")
+	cidA := newClientID(t)
+	require.NoError(t, b.AttachClient(wsA.ID, cidA))
+	b.DetachClient(wsA.ID, cidA)
+
+	require.Never(t, func() bool { return shutdownCount.Load() > 0 },
+		500*time.Millisecond, 10*time.Millisecond,
+		"a server with idle shutdown disabled must stay up when idle")
+}
+
+// TestDisableWorkspaceAutoClose_KeepsHeadlessWork covers a server started
+// explicitly with `crush server`: neither an expired creation hold, a
+// detached stream, nor a retired client may close the workspace. Departed
+// clients must still be forgotten, so they do not linger as viewers or keep
+// another client's explicit delete from closing the workspace.
+func TestDisableWorkspaceAutoClose_KeepsHeadlessWork(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	b.DisableIdleShutdown()
+	b.DisableWorkspaceAutoClose()
+	b.createGrace = time.Millisecond
+	b.SetDetachGrace(time.Millisecond)
+
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/headless-work")
+
+	neverAttached := newClientID(t)
+	b.registerClient(ws, neverAttached)
+
+	disconnected := newClientID(t)
+	b.registerClient(ws, disconnected)
+	require.NoError(t, b.AttachClient(ws.ID, disconnected))
+	b.DetachClient(ws.ID, disconnected)
+
+	retired := newClientID(t)
+	b.registerClient(ws, retired)
+	require.NoError(t, b.AttachClient(ws.ID, retired))
+	require.NoError(t, b.RetireClient(retired))
+
+	require.Eventually(t, func() bool {
+		ws.clientsMu.Lock()
+		defer ws.clientsMu.Unlock()
+		return len(ws.clients) == 0
+	}, time.Second, 10*time.Millisecond, "departed clients must be forgotten")
+	_, err := b.GetWorkspace(ws.ID)
+	require.NoError(t, err, "the workspace must remain open for headless work")
+	require.Zero(t, wsShutdowns.Load(), "the workspace must not be torn down")
+	require.Zero(t, serverShutdowns.Load(), "the server must remain open")
+
+	require.NoError(t, b.DeleteWorkspace(ws.ID, newClientID(t)))
+	require.Eventually(t, func() bool {
+		_, err := b.GetWorkspace(ws.ID)
+		return errors.Is(err, ErrWorkspaceNotFound)
+	}, time.Second, 10*time.Millisecond,
+		"an explicit delete must still close a workspace no client holds")
+	require.Equal(t, int32(1), wsShutdowns.Load())
+	require.Zero(t, serverShutdowns.Load(),
+		"deleting the last workspace must not shut down an explicitly started server")
+}
+
 // -- Detach grace --
 //
 // The SSE stream is a client's refcount claim, so a stream that drops
@@ -1784,6 +1872,20 @@ func TestShutdownIfIdle_GrantedAndFinal(t *testing.T) {
 
 	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), newClientID(t)))
 	require.ErrorIs(t, err, ErrServerShuttingDown)
+}
+
+// TestShutdownIfIdle_RefusedByExplicitServer keeps a client of another
+// build from replacing a server the user started with `crush server`: the
+// replacement it spawns would shut itself down once idle.
+func TestShutdownIfIdle_RefusedByExplicitServer(t *testing.T) {
+	t.Parallel()
+
+	b, shutdowns := newTestBackend(t)
+	b.DisableIdleShutdown()
+
+	require.False(t, b.ShutdownIfIdle(), "an explicitly started server must refuse")
+	require.Equal(t, int32(0), shutdowns.Load())
+	require.False(t, b.Closing())
 }
 
 // TestIdleShutdown_RefusesLaterCreates covers the same finality for the

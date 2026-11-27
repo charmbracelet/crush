@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleOption implements the `option` builtin.
@@ -36,6 +38,8 @@ import (
 //	option max-background-jobs 200
 //	option pinentry-integrated false
 //	option pinentry-cache-timeout 300
+//	option coreutils turtle
+//	option experimental client-server true
 //
 // Boolean shortcuts: for boolean fields, omitting the value sets it to true.
 func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -52,6 +56,9 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 
 	if key == "ui" {
 		return optionUI(o, args, stderr)
+	}
+	if key == "experimental" {
+		return optionExperimental(o, args, stderr)
 	}
 
 	if key == "prompt" {
@@ -113,6 +120,20 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		childMap(o, "attribution")["generated_with"] = bv
 		slog.Info("Option set in shell config", "key", key, "value", bv)
+		return nil
+	}
+
+	if key == "coreutils" {
+		if val == "" {
+			return usage(stderr, "option: coreutils requires a value")
+		}
+		switch shell.CoreutilsMode(val) {
+		case shell.CoreutilsTurtle, shell.CoreutilsSystem, shell.CoreutilsAuto, shell.CoreutilsOff:
+		default:
+			return usage(stderr, fmt.Sprintf("option: coreutils expects turtle, system, auto, or off, got %q", val))
+		}
+		o["coreutils"] = val
+		slog.Info("Option set in shell config", "key", key, "value", val)
 		return nil
 	}
 
@@ -308,6 +329,38 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	}
 
 	slog.Info("UI option set in shell config", "key", key, "value", value)
+	return nil
+}
+
+// optionExperimental implements "option experimental <key> <value>" for
+// unfinished features that live under options.experimental.
+func optionExperimental(options map[string]any, args []string, stderr io.Writer) error {
+	if len(args) != 4 {
+		return usage(stderr, "usage: option experimental <client-server|server-ready-timeout|server-idle-timeout|server-detach-grace> <value>")
+	}
+
+	key := args[2]
+	value := args[3]
+	exp := childMap(options, "experimental")
+
+	switch key {
+	case "client-server":
+		parsed, err := parseBool(value)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option experimental %s expects true/false, got %q", key, value))
+		}
+		exp["client_server"] = parsed
+	case "server-ready-timeout", "server-idle-timeout", "server-detach-grace":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			return usage(stderr, fmt.Sprintf("option experimental %s expects a non-negative number of seconds, got %q", key, value))
+		}
+		exp[strings.ReplaceAll(key, "-", "_")] = parsed
+	default:
+		return usage(stderr, fmt.Sprintf("option experimental: unknown key %q", key))
+	}
+
+	slog.Info("Experimental option set in shell config", "key", key, "value", value)
 	return nil
 }
 

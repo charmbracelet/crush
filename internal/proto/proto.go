@@ -35,7 +35,10 @@ type Workspace struct {
 	Version        string                  `json:"version,omitempty"`
 	ClientID       string                  `json:"client_id,omitempty"`
 	Config         *config.Config          `json:"config,omitempty"`
-	Env            []string                `json:"env,omitempty"`
+	// Env carries the client's environment on workspace creation requests
+	// only. Server responses omit it so secrets in the environment are not
+	// exposed to other clients.
+	Env []string `json:"env,omitempty"`
 	// Channels lists the MCP servers opted in as channels for this workspace
 	// (from the --channels flag).
 	Channels []string `json:"channels,omitempty"`
@@ -156,6 +159,9 @@ type AgentInfo struct {
 	IsReady  bool                 `json:"is_ready"`
 	Model    catwalk.Model        `json:"model"`
 	ModelCfg config.SelectedModel `json:"model_cfg"`
+	// MainAgent names the active agent ("coder" or "plan"), which every
+	// client of the workspace shares. Empty when the agent is not ready.
+	MainAgent string `json:"main_agent,omitempty"`
 }
 
 // IsZero checks if the AgentInfo is zero-valued.
@@ -204,6 +210,9 @@ type ShellCommandRequest struct {
 	SessionID string `json:"session_id"`
 	Command   string `json:"command"`
 	TermWidth int    `json:"term_width,omitempty"`
+	// IsFirstMessage marks the command that started the session, so the
+	// session is titled after it.
+	IsFirstMessage bool `json:"is_first_message,omitempty"`
 }
 
 // ShellCommandResponse represents the result of a direct shell command.
@@ -466,6 +475,14 @@ func (e LSPEventType) MarshalText() ([]byte, error) {
 func (e *LSPEventType) UnmarshalText(data []byte) error {
 	*e = LSPEventType(data)
 	return nil
+}
+
+// ToolProgress is the wire form of live output for a running tool call.
+type ToolProgress struct {
+	SessionID  string `json:"session_id"`
+	ToolCallID string `json:"tool_call_id"`
+	ShellID    string `json:"shell_id,omitempty"`
+	Output     string `json:"output"`
 }
 
 // LSPEvent represents an event in the LSP system.

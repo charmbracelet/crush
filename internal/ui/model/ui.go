@@ -153,6 +153,9 @@ type shellResultMsg struct {
 	ExitCode  int
 }
 
+// bangRun identifies a bang-mode shell command by the session it ran in.
+type bangRun struct{ sessionID, command string }
+
 // shellStreamMsg carries incremental output from a streaming shell command.
 type shellStreamMsg struct {
 	PendingID string
@@ -326,6 +329,10 @@ type UI struct {
 	// modeSwitching is true while the async agent-model update kicked off
 	// by setInputMode is still in flight; sending is blocked meanwhile.
 	modeSwitching bool
+	// modeAdopted is set when mode follows a switch of the shared main
+	// agent that another client made (see followMainAgent), and cleared
+	// when this client switches.
+	modeAdopted bool
 
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
@@ -368,6 +375,12 @@ type UI struct {
 
 	// lastTerminalBell is the last child bell the status bar surfaced.
 	lastTerminalBell time.Time
+
+	// liveBangRuns counts the bang commands this UI ran, and so shows live,
+	// whose stored copy has not arrived yet. That copy is skipped so the
+	// command shows once; any other stored one, such as a command another
+	// client ran in the session, is shown.
+	liveBangRuns map[bangRun]int
 
 	header *header
 
@@ -547,6 +560,12 @@ type UI struct {
 	// needed to release and restore the terminal when a terminal-based GPG
 	// pinentry dialog takes over the screen.
 	program *tea.Program
+
+	// resumeCommand brings Crush back after the terminal restarts, and
+	// quitting is set once the user quits so the terminal forgets it. See
+	// programResume.
+	resumeCommand []string
+	quitting      bool
 
 	// pinentryActive tracks whether the terminal is currently handed over
 	// to a pinentry dialog; pinentryTouchPending tracks whether the status
@@ -1281,6 +1300,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+	case pubsub.Event[agenttools.ToolProgress]:
+		if m.session == nil {
+			break
+		}
+		if msg.Payload.SessionID != "" && msg.Payload.SessionID != m.session.ID {
+			break
+		}
+		if item := m.chat.MessageItem(msg.Payload.ToolCallID); item != nil && item.ID() == msg.Payload.ToolCallID {
+			if live, ok := item.(chat.LiveOutputItem); ok && live.SetLiveOutput(msg.Payload.Output) {
+				if m.chat.Follow() {
+					m.chat.ScrollToBottom()
+				}
+			}
+		}
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -1295,6 +1328,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.handleChannelMessage(msg.Payload)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
+		// The server re-sends a pending request whenever a client reports
+		// its session; keep the dialog already showing it, so its scroll,
+		// diff mode, and selected button survive, and don't notify again.
+		if d, ok := m.dialog.Dialog(dialog.PermissionsID).(*dialog.Permissions); ok && d.RequestID() == msg.Payload.ID {
+			break
+		}
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2202,9 +2241,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 
 	switch msg.Role {
 	case message.User:
-		// Shell commands are rendered live via shellResultMsg; skip
-		// the persisted duplicate.
-		if msg.HasShellCommand() {
+		if m.takeLiveBangRun(msg) {
 			return nil
 		}
 		// A subagent report arrives on a user-role message but is not
@@ -2259,6 +2296,21 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 	}
 	return tea.Sequence(cmds...)
+}
+
+// takeLiveBangRun reports whether msg is the stored copy of a bang command
+// this UI ran, and so already shows live, and if so stops waiting for it.
+func (m *UI) takeLiveBangRun(msg message.Message) bool {
+	cmds := msg.ShellCommands()
+	if len(cmds) == 0 {
+		return false
+	}
+	run := bangRun{msg.SessionID, cmds[0].Command}
+	if m.liveBangRuns[run] == 0 {
+		return false
+	}
+	m.liveBangRuns[run]--
+	return true
 }
 
 func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
@@ -2881,6 +2933,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
+		m.quitting = true
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -4345,11 +4398,12 @@ func (m *UI) View() tea.View {
 	return v
 }
 
-// applyTerminalStatus attaches the program status, and the terminal progress
-// bar while the agent is busy. Kept outside the frame cache so the
-// randomized progress value stays fresh.
+// applyTerminalStatus attaches the program status, how to resume Crush, and
+// the terminal progress bar while the agent is busy. Kept outside the frame
+// cache so the randomized progress value stays fresh.
 func (m *UI) applyTerminalStatus(v *tea.View) {
 	v.ProgramStatus = m.programStatus()
+	v.ProgramResume = m.programResume()
 	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
@@ -4389,7 +4443,6 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	switch m.state {
 	case uiInitialize:
-		binds = append(binds, k.Quit)
 	case uiChat:
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
@@ -4520,10 +4573,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 	switch m.state {
 	case uiInitialize:
-		binds = append(binds,
-			[]key.Binding{
-				k.Quit,
-			})
 	case uiChat:
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
@@ -5500,6 +5549,10 @@ func (m *UI) applyModeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 		return []tea.Cmd{util.ReportError(msg.err)}
 	}
 	m.mode = msg.mode
+	m.modeAdopted = false
+	// Supersede any in-flight busy probe: it may have read the agent from
+	// before this switch, and followMainAgent would then switch back.
+	m.busyFetchGen++
 	m.setEditorPrompt(m.permModeCached())
 	var cmds []tea.Cmd
 	if msg.continueSessionID != "" && m.session != nil && m.session.ID == msg.continueSessionID {
@@ -5525,6 +5578,31 @@ type modeSwitchedMsg struct {
 	mode              uiInputMode
 	perm              permission.PermissionMode
 	err               error
+}
+
+// followMainAgent adopts the input mode of the workspace's main agent and
+// reports whether the mode changed. Every client of a server workspace
+// shares that agent, so this is how a switch another client made shows
+// here. It never switches the agent itself, and it leaves the mode alone
+// while this client's own switch is in flight or when the agent is unknown,
+// as with a server too old to report it.
+func (m *UI) followMainAgent(agent string) bool {
+	if m.modeSwitching {
+		return false
+	}
+	mode := m.mode
+	switch agent {
+	case config.AgentCoder:
+		mode = uiInputModeCode
+	case config.AgentPlan:
+		mode = uiInputModePlan
+	}
+	if mode == m.mode {
+		return false
+	}
+	m.mode = mode
+	m.modeAdopted = true
+	return true
 }
 
 // sysadminPromptFunc returns the sysadmin mode editor prompt style with red
@@ -6100,6 +6178,11 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 
 	sessionID := m.session.ID
 	contentWidth := min(m.layout.main.Dx()-2, 120)
+
+	if m.liveBangRuns == nil {
+		m.liveBangRuns = make(map[bangRun]int)
+	}
+	m.liveBangRuns[bangRun{sessionID, command}]++
 
 	// Append a pending shell item immediately so the user sees feedback.
 	pendingItem := chat.NewPendingShellItem(m.com.Styles, command)
@@ -7015,14 +7098,16 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 
 // resetPlanModeState drops any pending plan handoff and, when plan mode is
 // active, switches back to code mode. Used when the UI moves to a different
-// session, since plan mode is scoped to the session it was enabled in.
+// session, since plan mode is scoped to the session it was enabled in. Plan
+// mode followed from another client is kept: the agent is shared, so
+// switching it back would end planning in the client that enabled it.
 func (m *UI) resetPlanModeState() tea.Cmd {
 	m.setPlanReadyPending("")
 	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
 		m.activeInline = nil
 		m.prompt.Focus()
 	}
-	if m.mode != uiInputModePlan {
+	if m.mode != uiInputModePlan || m.modeAdopted {
 		return nil
 	}
 	// The backend rejects agent switches while a run is active (409). When

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -285,6 +286,18 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 	require.Equal(t, "seeded", got[0].Name)
 }
 
+// TestSessionConversionKeepsEstimatedUsage verifies that the flag marking a
+// session's usage as estimated survives the trip to and from the server, so
+// the TUI can mark the numbers as estimates.
+func TestSessionConversionKeepsEstimatedUsage(t *testing.T) {
+	t.Parallel()
+
+	in := proto.Session{ID: "s1", PromptTokens: 10, EstimatedUsage: true}
+	got := protoToSession(in)
+	require.True(t, got.EstimatedUsage)
+	require.True(t, sessionToProto(got).EstimatedUsage)
+}
+
 // TestTranslateEvent_HostTheme verifies that host theme events reach the
 // TUI as HostThemeEvent: the theme for an update, nil for a clear.
 func TestTranslateEvent_HostTheme(t *testing.T) {
@@ -308,6 +321,24 @@ func TestTranslateEvent_HostTheme(t *testing.T) {
 	got, ok = out.(HostThemeEvent)
 	require.True(t, ok, "expected HostThemeEvent, got %T", out)
 	require.Nil(t, got.Theme)
+}
+
+// TestTranslateEvent_ClientSessionIsQuiet verifies that the events telling
+// which session each client views are dropped without a warning: the
+// server sends them to every client whenever any client switches sessions.
+func TestTranslateEvent_ClientSessionIsQuiet(t *testing.T) {
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	out := w.translateEvent(pubsub.Event[proto.ClientSession]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.ClientSession{ClientID: "c1", SessionID: "s1"},
+	})
+	require.Nil(t, out)
+	require.Empty(t, logs.String())
 }
 
 func TestTranslateReauthenticateEvent(t *testing.T) {
@@ -384,6 +415,31 @@ func TestClientWorkspaceListMCPPrompts(t *testing.T) {
 			},
 		},
 	}, got)
+}
+
+// A '!' command that starts a session must tell the server so, or the
+// session is never titled.
+func TestClientWorkspaceRunShellCommandSendsFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	got := make(chan proto.ShellCommandRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req proto.ShellCommandRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		got <- req
+		_ = json.NewEncoder(w).Encode(proto.ShellCommandResponse{})
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	_, err = workspace.AgentRunShellCommand(t.Context(), "s1", "ls", 80, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, proto.ShellCommandRequest{Command: "ls", TermWidth: 80, IsFirstMessage: true}, <-got)
 }
 
 func TestClientWorkspaceListMCPPromptsServerError(t *testing.T) {
@@ -560,6 +616,15 @@ func TestClientWorkspace_AgentReadyErr(t *testing.T) {
 		require.NotErrorIs(t, readyErr, ErrAgentNotInitialized)
 		require.False(t, ws.AgentIsReady())
 	})
+}
+
+// The TUI's busy probe reads the shared main agent from the agent info it
+// already fetches for the model, so following another client's switch to
+// plan mode costs no extra request.
+func TestClientWorkspace_AgentModelReportsMainAgent(t *testing.T) {
+	t.Parallel()
+	ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: true, MainAgent: config.AgentPlan})
+	require.Equal(t, config.AgentPlan, ws.AgentModel().Agent)
 }
 
 // agentInfoWorkspace returns a ClientWorkspace whose server answers the
@@ -763,6 +828,18 @@ func (r *connectionRecorder) sawStuck() bool {
 	return false
 }
 
+// TestRecreateArgs_KeepsPromptOverrides verifies that re-registering a
+// workspace the server lost asks for the --prompt overrides the client
+// started with, so the agent does not silently fall back to the built-in
+// prompts after a server restart.
+func TestRecreateArgs_KeepsPromptOverrides(t *testing.T) {
+	t.Parallel()
+
+	prompts := config.PromptPaths{"coder": "/tmp/coder.md.tpl"}
+	ws := NewClientWorkspace(nil, proto.Workspace{ID: "ws-1", Path: "/tmp/p", Prompts: prompts})
+	require.Equal(t, prompts, ws.recreateArgs().Prompts)
+}
+
 // TestClientWorkspace_RecoversFromWorkspaceGone is the headline client
 // regression: a 404 for the cached workspace ID must make the client
 // re-register, adopt the new ID, re-assert the session it was viewing,
@@ -807,6 +884,38 @@ func TestClientWorkspace_RecoversFromWorkspaceGone(t *testing.T) {
 		return degraded && recovered
 	}, 3*time.Second, 5*time.Millisecond,
 		"the UI must be told to resync after the workspace was re-created")
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_ReportsLandingScreenOnAttach covers a window that
+// opens on the landing screen: it must tell the server it views no session
+// as soon as its event stream attaches. The server sends a client that never
+// reported a session the permission and question prompts of every session.
+func TestClientWorkspace_ReportsLandingScreenOnAttach(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	srv := &recoveryServer{liveID: "ws-1"}
+	c := srv.start(t)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/landing"})
+
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(func(tea.Msg) {})
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		var posts []string
+		srv.snapshot(func(s *recoveryServer) { posts = append(posts, s.sessionPosts...) })
+		return len(posts) > 0 && posts[0] == ""
+	}, 3*time.Second, 5*time.Millisecond,
+		"the first attach must report the landing screen")
 
 	ws.Shutdown()
 	select {

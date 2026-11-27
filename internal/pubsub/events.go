@@ -39,6 +39,7 @@ const (
 	PayloadTypePermissionModeChanged  PayloadType = "permission_mode_changed"
 	PayloadTypeLSPHost                PayloadType = "lsp_host"
 	PayloadTypeTerminalCall           PayloadType = "terminal_call"
+	PayloadTypeToolProgress           PayloadType = "tool_progress"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.

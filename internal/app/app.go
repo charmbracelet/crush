@@ -17,9 +17,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
-	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
@@ -91,6 +91,7 @@ type App struct {
 	// drive their exit on a deterministic, payload-bearing event
 	// instead of guessing from message finish parts.
 	runCompletions *pubsub.Broker[notify.RunComplete]
+	toolProgress   *pubsub.Broker[tools.ToolProgress]
 
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
@@ -130,7 +131,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 	hookRunner := hooks.NewRunner(func() map[string][]config.HookConfig {
 		return store.Config().Hooks
-	}, store.WorkingDir(), store.WorkingDir())
+	}, store.WorkingDir(), store.WorkingDir(), hooks.WithCoreutils(func() shell.CoreutilsMode {
+		return store.Config().Options.GetCoreutils()
+	}))
 
 	permSvc := permission.NewPermissionService(store.WorkingDir(), allowedTools, permissionHooks{hookRunner})
 	if store.Overrides().PermissionMode != permission.PermissionModeNormal {
@@ -159,6 +162,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+		toolProgress:       pubsub.NewCoalescingBroker(toolProgressCoalesceKey),
 	}
 
 	app.setupEvents()
@@ -479,29 +483,26 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)
 
-	type response struct {
-		result *fantasy.AgentResult
-		err    error
+	answer, err := newAnswerPrinter(ctx, output, sess.ID, app.Messages, continueSessionID != "" || useLast)
+	if err != nil {
+		return err
 	}
-	done := make(chan response, 1)
 
+	// Subscribe before the agent starts, so no update is published before
+	// anyone listens.
+	subCtx, cancelSub := context.WithCancel(ctx)
+	defer cancelSub()
+	messageEvents := app.Messages.Subscribe(subCtx)
+
+	done := make(chan error, 1)
 	coord := app.Agent()
 	go func(ctx context.Context, sessionID, prompt string) {
-		result, err := coord.Run(ctx, sess.ID, prompt)
-		if err != nil {
-			done <- response{
-				err: fmt.Errorf("failed to start agent processing stream: %w", err),
-			}
+		if _, err := coord.Run(ctx, sessionID, prompt); err != nil {
+			done <- fmt.Errorf("failed to start agent processing stream: %w", err)
 			return
 		}
-		done <- response{
-			result: result,
-		}
+		done <- nil
 	}(ctx, sess.ID, prompt)
-
-	messageEvents := app.Messages.Subscribe(ctx)
-	messageReadBytes := make(map[string]int)
-	var printed bool
 
 	defer func() {
 		if progress && stderrTTY {
@@ -513,58 +514,14 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		_, _ = fmt.Fprintln(output)
 	}()
 
-	for {
+	beforeWait := func() {
 		if progress && stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
 			// so it doesn't get hidden by the terminal due to inactivity.
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		}
-
-		select {
-		case result := <-done:
-			stopSpinner()
-			if result.err != nil {
-				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
-					return nil
-				}
-				return fmt.Errorf("agent processing failed: %w", result.err)
-			}
-			return nil
-
-		case event := <-messageEvents:
-			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
-				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and indentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimPrefix(part, "\n")
-					part = strings.TrimLeft(part, " \t")
-				}
-				// Ignore initial whitespace-only messages.
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(output, part)
-				}
-				messageReadBytes[msg.ID] = len(content)
-			}
-
-		case <-ctx.Done():
-			stopSpinner()
-			return ctx.Err()
-		}
 	}
+	return answer.printUntilDone(ctx, messageEvents, done, app.Messages, beforeWait, stopSpinner)
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {
@@ -826,6 +783,7 @@ func (app *App) setupEvents() {
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
 	app.subscribe(ctx, "mcp-channels", app.subscribeScopedChannelEvents)
 	app.subscribe(ctx, "lsp", SubscribeLSPEvents)
+	app.subscribe(ctx, "tool-progress", app.toolProgress.Subscribe)
 	if app.Skills != nil {
 		app.subscribe(ctx, "skills", app.Skills.SubscribeEvents)
 	}
@@ -869,13 +827,24 @@ func (app *App) subscribeScopedChannelEvents(ctx context.Context) <-chan pubsub.
 	return scoped
 }
 
-// eventCoalesceKey keeps at most one pending message update per message
-// for each slow app.events subscriber.
+// eventCoalesceKey keeps at most one pending message or tool-progress
+// update per item for each slow app.events subscriber.
 func eventCoalesceKey(ev pubsub.Event[tea.Msg]) string {
-	if e, ok := ev.Payload.(pubsub.Event[message.Message]); ok {
-		return message.CoalesceKey(e)
+	switch e := ev.Payload.(type) {
+	case pubsub.Event[message.Message]:
+		if k := message.CoalesceKey(e); k != "" {
+			return "msg:" + k
+		}
+	case pubsub.Event[tools.ToolProgress]:
+		if k := toolProgressCoalesceKey(e); k != "" {
+			return "tool-progress:" + k
+		}
 	}
 	return ""
+}
+
+func toolProgressCoalesceKey(ev pubsub.Event[tools.ToolProgress]) string {
+	return ev.Payload.ToolCallID
 }
 
 // subscribe fans a service's event stream into the shared app.events
@@ -983,21 +952,22 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	coord, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
-		Config:      app.config,
-		Sessions:    app.Sessions,
-		Messages:    app.Messages,
-		Permissions: app.Permissions,
-		Questions:   app.Questions,
-		Terminal:    app.Terminal,
-		History:     app.History,
-		FileTracker: app.FileTracker,
-		LSPManager:  app.LSPManager,
-		Notify:      app.agentNotifications,
-		RunComplete: app.runCompletions,
-		Skills:      app.Skills,
-		HookRunner:  app.hookRunner,
-		Interactive: interactive,
-		ShellOwner:  app,
+		Config:       app.config,
+		Sessions:     app.Sessions,
+		Messages:     app.Messages,
+		Permissions:  app.Permissions,
+		Questions:    app.Questions,
+		Terminal:     app.Terminal,
+		History:      app.History,
+		FileTracker:  app.FileTracker,
+		LSPManager:   app.LSPManager,
+		Notify:       app.agentNotifications,
+		RunComplete:  app.runCompletions,
+		ToolProgress: app.toolProgress,
+		Skills:       app.Skills,
+		HookRunner:   app.hookRunner,
+		Interactive:  interactive,
+		ShellOwner:   app,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

@@ -20,6 +20,7 @@ type Session struct {
 	MessageCount     int64   `json:"message_count"`
 	PromptTokens     int64   `json:"prompt_tokens"`
 	CompletionTokens int64   `json:"completion_tokens"`
+	EstimatedUsage   bool    `json:"estimated_usage,omitempty"`
 	SummaryMessageID string  `json:"summary_message_id"`
 	Cost             float64 `json:"cost"`
 	Todos            []Todo  `json:"todos,omitempty"`

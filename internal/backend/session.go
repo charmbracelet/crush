@@ -5,6 +5,7 @@ import (
 
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
@@ -87,7 +88,7 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 }
 
 // ListSessionHistory returns the history items for a session.
-func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID string) (any, error) {
+func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID string) ([]history.File, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
@@ -154,7 +155,11 @@ func (b *Backend) SetMCPServerConfigDisabled(ctx context.Context, workspaceID, n
 	if err != nil {
 		return err
 	}
-	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled, override)
+	if err := mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled, override); err != nil {
+		return err
+	}
+	announceConfigChanged(ws)
+	return nil
 }
 
 // SkillsDisabled returns the skills disabled for the given workspace's
@@ -198,7 +203,11 @@ func (b *Backend) SetSkillConfigDisabled(ctx context.Context, workspaceID, name 
 		return err
 	}
 
-	return ws.Cfg.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled)
+	if err := ws.Cfg.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled); err != nil {
+		return err
+	}
+	announceConfigChanged(ws)
+	return nil
 }
 
 // StartMCPServer starts the named MCP server for the given workspace even

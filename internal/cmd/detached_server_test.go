@@ -14,3 +14,15 @@ func TestDetachedServerCmd_RunsFromServerDir(t *testing.T) {
 	dir := t.TempDir()
 	require.Equal(t, dir, detachedServerCmd("crush", dir, "server").Dir)
 }
+
+// TestDetachedServerCmd_MarksItSpawned guards the marker that tells a
+// spawned server to keep its idle shutdown, so it cannot outlive the
+// client that started it. A server the user runs explicitly has no such
+// marker and stays up when idle.
+func TestDetachedServerCmd_MarksItSpawned(t *testing.T) {
+	t.Setenv(spawnedServerEnv, "")
+
+	c := detachedServerCmd("crush", t.TempDir(), "server")
+	require.Contains(t, c.Env, spawnedServerEnv+"=1",
+		"a spawned server must be marked so it still shuts down when idle")
+}

@@ -141,7 +141,7 @@ func (b *Backend) runAgent(ws *Workspace, coord agent.Coordinator, msg proto.Age
 	}
 }
 
-// GetAgentInfo returns the agent's model and busy status.
+// GetAgentInfo returns the agent's model, busy status, and active agent.
 func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
@@ -152,10 +152,11 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	if coord := ws.Coordinator(); coord != nil {
 		m := coord.Model()
 		agentInfo = proto.AgentInfo{
-			Model:    m.CatwalkCfg,
-			ModelCfg: m.ModelCfg,
-			IsBusy:   coord.IsBusy(),
-			IsReady:  true,
+			Model:     m.CatwalkCfg,
+			ModelCfg:  m.ModelCfg,
+			IsBusy:    coord.IsBusy(),
+			IsReady:   true,
+			MainAgent: coord.MainAgent(),
 		}
 	}
 	return agentInfo, nil
@@ -359,7 +360,8 @@ func (b *Backend) GetDefaultSmallModel(workspaceID, providerID string) (config.S
 }
 
 // RunShellCommand runs a shell command in the workspace directory and
-// persists the command + output as a user message in the session.
+// persists the command + output as a user message in the session. When
+// the command started the session, the session is titled after it.
 func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req proto.ShellCommandRequest) (proto.ShellCommandResponse, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
@@ -386,13 +388,32 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		Cwd:       ws.Path,
 		Env:       append(os.Environ(), ws.Env...),
 		TermWidth: req.TermWidth,
+		Coreutils: wsCoreutils(ws),
 	}, persist)
 	if err != nil {
 		return proto.ShellCommandResponse{}, err
+	}
+
+	if req.IsFirstMessage && req.SessionID != "" {
+		if coord := ws.Coordinator(); coord != nil {
+			// In the background, so the output is not held back for the
+			// title, and bound to the workspace rather than the request: a
+			// client hanging up must not cut the title short, teardown must.
+			go coord.GenerateTitle(ws.ctx, req.SessionID, "$ "+req.Command)
+		}
 	}
 
 	return proto.ShellCommandResponse{
 		Output:   result.Output,
 		ExitCode: result.ExitCode,
 	}, nil
+}
+
+// wsCoreutils returns the workspace's coreutils mode, or the shell default
+// for the test workspaces built without a config store.
+func wsCoreutils(ws *Workspace) shell.CoreutilsMode {
+	if ws == nil || ws.Cfg == nil {
+		return shell.CoreutilsTurtle
+	}
+	return ws.Cfg.Config().Options.GetCoreutils()
 }

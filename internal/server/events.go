@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
@@ -252,19 +253,22 @@ func wrapEvent(ev any) *pubsub.Payload {
 		// of the host running the watcher; the pinentry dialog would not
 		// draw on a remote client's terminal.
 		return nil
+	case pubsub.Event[tools.ToolProgress]:
+		return envelope(pubsub.PayloadTypeToolProgress, pubsub.Event[proto.ToolProgress]{
+			Type:    e.Type,
+			Payload: proto.ToolProgress(e.Payload),
+		})
 	default:
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))
 		return nil
 	}
 }
 
-// sessionScopedEventID extracts the session ID from events that
-// belong to a single session's interactive prompts (permission and
-// question requests and their resolution notifications). The second
-// return value reports whether the event is session-scoped at all. An
-// event whose session ID is empty is treated as unscoped: it cannot
-// match any client's current session, so scoping it would drop it for
-// everyone.
+// sessionScopedEventID extracts the session ID from events that belong to a
+// single session (interactive prompts and live tool progress). The second
+// return value reports whether the event is session-scoped at all. An event
+// whose session ID is empty is treated as unscoped: it cannot match any
+// client's current session, so scoping it would drop it for everyone.
 func sessionScopedEventID(ev any) (string, bool) {
 	var id string
 	switch e := ev.(type) {
@@ -275,6 +279,8 @@ func sessionScopedEventID(ev any) (string, bool) {
 	case pubsub.Event[question.Request]:
 		id = e.Payload.SessionID
 	case pubsub.Event[question.Notification]:
+		id = e.Payload.SessionID
+	case pubsub.Event[tools.ToolProgress]:
 		id = e.Payload.SessionID
 	default:
 		return "", false
@@ -369,12 +375,38 @@ func sessionToProto(s session.Session) proto.Session {
 		MessageCount:     s.MessageCount,
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
+		EstimatedUsage:   s.EstimatedUsage,
 		Cost:             s.Cost,
 		Todos:            todosToProto(s.Todos),
 		Channel:          s.Channel,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func protoToSession(s proto.Session) session.Session {
+	sess := session.Session{
+		ID:               s.ID,
+		ParentSessionID:  s.ParentSessionID,
+		Title:            s.Title,
+		SummaryMessageID: s.SummaryMessageID,
+		MessageCount:     s.MessageCount,
+		PromptTokens:     s.PromptTokens,
+		CompletionTokens: s.CompletionTokens,
+		EstimatedUsage:   s.EstimatedUsage,
+		Cost:             s.Cost,
+		Channel:          s.Channel,
+		CreatedAt:        s.CreatedAt,
+		UpdatedAt:        s.UpdatedAt,
+	}
+	for _, t := range s.Todos {
+		sess.Todos = append(sess.Todos, session.Todo{
+			Content:    t.Content,
+			Status:     session.TodoStatus(t.Status),
+			ActiveForm: t.ActiveForm,
+		})
+	}
+	return sess
 }
 
 // isSessionBusy reports whether the given workspace has an in-flight

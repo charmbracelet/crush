@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -21,6 +22,7 @@ type cappedBuffer struct {
 	ring    []byte // The latest bytes past the head, oldest at next once full.
 	next    int
 	dropped int64
+	seq     atomic.Uint64
 }
 
 func newCappedBuffer(limit int) *cappedBuffer {
@@ -28,6 +30,9 @@ func newCappedBuffer(limit int) *cappedBuffer {
 }
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	n := len(p)
@@ -48,6 +53,7 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 		b.next = (b.next + c) % b.half
 		p = p[c:]
 	}
+	b.seq.Add(1)
 	return n, nil
 }
 
@@ -96,6 +102,61 @@ func (b *cappedBuffer) String() string {
 	sb.Write(older)
 	sb.Write(newer)
 	return sb.String()
+}
+
+// Tail returns at most the last maxBytes of output without copying the whole
+// buffer. When bytes were cut from the front, leading partial UTF-8 bytes are
+// skipped so valid UTF-8 stays valid.
+func (b *cappedBuffer) Tail(maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	older, newer := b.ring[b.next:], b.ring[:b.next]
+	var head []byte
+	cut := b.dropped > 0
+
+	if len(b.ring) >= maxBytes {
+		skip := len(b.ring) - maxBytes
+		if skip > 0 {
+			cut = true
+		}
+		if skip < len(older) {
+			older = older[skip:]
+		} else {
+			newer = newer[skip-len(older):]
+			older = nil
+		}
+	} else if b.dropped == 0 {
+		needHead := maxBytes - len(b.ring)
+		if needHead < len(b.head) {
+			head = b.head[len(b.head)-needHead:]
+			cut = true
+		} else {
+			head = b.head
+		}
+	}
+
+	total := len(head) + len(older) + len(newer)
+	if total == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.Grow(total)
+	sb.Write(head)
+	sb.Write(older)
+	sb.Write(newer)
+	s := sb.String()
+	if cut {
+		skip := 0
+		for skip < len(s) && skip < utf8.UTFMax-1 && !utf8.RuneStart(s[skip]) {
+			skip++
+		}
+		s = s[skip:]
+	}
+	return s
 }
 
 // ringByte returns byte i of the tail, which is older followed by newer.

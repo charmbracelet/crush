@@ -68,7 +68,7 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 // comparable value identifying who started it, so that
 // [BackgroundShellManager.KillOwned] can stop it with that owner's other
 // shells.
-func (m *BackgroundShellManager) Start(ctx context.Context, owner any, workingDir string, blockFuncs []BlockFunc, command, description string, maxJobs int) (*BackgroundShell, error) {
+func (m *BackgroundShellManager) Start(ctx context.Context, owner any, workingDir string, blockFuncs []BlockFunc, coreutils CoreutilsMode, command, description string, maxJobs int) (*BackgroundShell, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -81,6 +81,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, owner any, workingDi
 	shell := NewShell(&Options{
 		WorkingDir: workingDir,
 		BlockFuncs: blockFuncs,
+		Coreutils:  coreutils,
 	})
 
 	shellCtx, cancel := context.WithCancel(ctx)
@@ -259,6 +260,17 @@ func (bs *BackgroundShell) GetOutput() (stdout string, stderr string, done bool,
 	default:
 		return bs.stdout.String(), bs.stderr.String(), false, nil
 	}
+}
+
+// OutputSeq returns a counter that increments whenever stdout or stderr
+// receives bytes, allowing pollers to skip unchanged output without copying.
+func (bs *BackgroundShell) OutputSeq() uint64 {
+	return bs.stdout.seq.Load() + bs.stderr.seq.Load()
+}
+
+// GetOutputTail returns at most the last maxBytes of stdout and stderr.
+func (bs *BackgroundShell) GetOutputTail(maxBytes int) (stdout, stderr string) {
+	return bs.stdout.Tail(maxBytes), bs.stderr.Tail(maxBytes)
 }
 
 // IsDone checks if the background shell has finished execution.

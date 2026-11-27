@@ -1,9 +1,7 @@
 package model
 
 import (
-	"fmt"
 	"log/slog"
-	"os"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/pinentry"
@@ -73,28 +71,7 @@ func (m *UI) releaseTerminalForPinentry() tea.Cmd {
 			slog.Error("Failed to release terminal for pinentry", "error", err)
 			return nil
 		}
-		// The release restored the pre-Crush terminal modes (canonical,
-		// echo), clobbering the modes the pinentry dialog configured when
-		// it started. Re-apply raw/noecho so the dialog's input is not
-		// line-buffered or echoed in cleartext. Platforms without a POSIX
-		// terminal (Windows) have no modes to change; the calls are
-		// resolved at compile time there.
-		if pinentry.TerminalHandoverSupported {
-			pinentry.ReapplyTerminalModes()
-			// pinentry-curses draws its dialog the moment it starts, while
-			// the renderer may still own the screen, and it does not redraw
-			// on SIGWINCH. The handover can therefore erase the first frame,
-			// so leave a hint on the normal screen. Masked-input feedback
-			// while typing still comes from pinentry itself.
-			fmt.Fprintln(os.Stdout, "\nGPG is asking for your passphrase on this terminal (pinentry). Type it and press Enter; input is hidden.")
-			if ctrlL {
-				// Ncurses pinentry flavors repaint their full dialog on
-				// Ctrl-L, recovering the frame the handover may have erased.
-				// If the injection fails (e.g. TIOCSTI disabled on Linux),
-				// the hint above remains as the fallback.
-				pinentry.InjectCtrlLRedraw()
-			}
-		}
+		pinentry.BeginHandover(ctrlL)
 		return nil
 	}
 }
@@ -109,6 +86,7 @@ func (m *UI) restoreTerminalForPinentry() tea.Cmd {
 	return func() tea.Msg {
 		m.pinentryTermMu.Lock()
 		defer m.pinentryTermMu.Unlock()
+		pinentry.EndHandover()
 		if err := program.RestoreTerminal(); err != nil {
 			slog.Error("Failed to restore terminal after pinentry", "error", err)
 		}

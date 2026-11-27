@@ -5,8 +5,10 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
@@ -30,7 +32,7 @@ type JobOutputResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 }
 
-func NewJobOutputTool(spillDir string) fantasy.AgentTool {
+func NewJobOutputTool(spillDir string, progress pubsub.Publisher[ToolProgress]) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
 		jobOutputDescription,
@@ -46,7 +48,7 @@ func NewJobOutputTool(spillDir string) fantasy.AgentTool {
 			}
 
 			if params.Wait {
-				bgShell.WaitContext(ctx)
+				waitWithProgress(ctx, bgShell, newProgressReporter(progress, GetSessionFromContext(ctx), call.ID))
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()
@@ -89,4 +91,30 @@ func NewJobOutputTool(spillDir string) fantasy.AgentTool {
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		},
 	)
+}
+
+// waitWithProgress blocks until the shell finishes or ctx is cancelled,
+// publishing live output while it waits.
+func waitWithProgress(ctx context.Context, bgShell *shell.BackgroundShell, progress *progressReporter) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-bgShell.Done():
+		return
+	default:
+	}
+	progress.report(bgShell)
+
+	ticker := time.NewTicker(progressPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-bgShell.Done():
+			return
+		case <-ticker.C:
+			progress.report(bgShell)
+		}
+	}
 }

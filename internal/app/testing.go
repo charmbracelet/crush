@@ -38,6 +38,7 @@ func NewForTest(ctx context.Context) *App {
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+		toolProgress:       pubsub.NewCoalescingBroker(toolProgressCoalesceKey),
 	}
 
 	eventsCtx, cancel := context.WithCancel(ctx)
@@ -58,6 +59,8 @@ func NewForTest(ctx context.Context) *App {
 		app.agentNotifications.Subscribe)
 	app.subscribe(eventsCtx, "run-completions",
 		app.runCompletions.Subscribe)
+	app.subscribe(eventsCtx, "tool-progress",
+		app.toolProgress.Subscribe)
 	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()

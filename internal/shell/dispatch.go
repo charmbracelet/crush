@@ -45,10 +45,12 @@ const probeWindow = 128
 // blockFuncs is the block list. It gates the interpreter a shebang script
 // names, and is passed to the nested runner built for the shell-source case
 // so deny rules apply recursively to commands an in-process script invokes.
-// It cannot reach inside a child process: once a shebang script is handed
-// to an external interpreter, whatever that interpreter goes on to run is
-// beyond this handler's view.
-func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
+// coreutils is likewise passed to the nested runner so the script's core
+// utilities resolve the same way its parent's do. Neither can reach inside
+// a child process: once a shebang script is handed to an external
+// interpreter, whatever that interpreter goes on to run is beyond this
+// handler's view.
+func scriptDispatchHandler(blockFuncs []BlockFunc, coreutils CoreutilsMode) execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 || !isPathPrefixed(args[0]) {
@@ -70,7 +72,7 @@ func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
 			case isBinary(probe):
 				return next(ctx, args)
 			default:
-				return runShellSource(ctx, scriptPath, args, blockFuncs)
+				return runShellSource(ctx, scriptPath, args, blockFuncs, coreutils)
 			}
 		}
 	}
@@ -391,12 +393,14 @@ func parseEnvShebang(rest string) (*shebang, error) {
 // in-process via a nested interp.Runner. It reuses the parent runner's cwd,
 // env, and stdio, and rebuilds the Crush handler stack so builtins and the
 // dispatch handler itself remain available to anything the script invokes.
-// Positional parameters ($1, $2, …) come from args[1:].
+// The coreutils mode is inherited so the script resolves core utilities the
+// same way its parent does. Positional parameters ($1, $2, …) come from
+// args[1:].
 //
 // This is the only branch that reads the full file; probeFile keeps its
 // read to probeWindow bytes so the binary/shebang paths never touch more
 // than 128 bytes of I/O.
-func runShellSource(ctx context.Context, path string, args []string, blockFuncs []BlockFunc) error {
+func runShellSource(ctx context.Context, path string, args []string, blockFuncs []BlockFunc, coreutils CoreutilsMode) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -414,7 +418,7 @@ func runShellSource(ctx context.Context, path string, args []string, blockFuncs 
 		interp.Interactive(false),
 		interp.Env(hc.Env),
 		interp.Dir(hc.Dir),
-		execHandlerOption(blockFuncs),
+		execHandlerOption(blockFuncs, coreutils),
 	}
 	if len(args) > 1 {
 		// Params with a leading "--" avoids any of args[1:] being

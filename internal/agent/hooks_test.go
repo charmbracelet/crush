@@ -31,7 +31,7 @@ func (m *errorStreamModel) Stream(context.Context, fantasy.Call) (fantasy.Stream
 func recordingHooks(t *testing.T, sa *sessionAgent, events ...string) func() []string {
 	t.Helper()
 	dir := t.TempDir()
-	logPath := filepath.Join(dir, "hooks.log")
+	logPath := filepath.ToSlash(filepath.Join(dir, "hooks.log"))
 	record := config.HookConfig{Command: `jq -r '[.hook_event_name, (.last_assistant_message // .error // .trigger // empty)] | join(" ")' >> ` + logPath}
 	cfg := make(map[string][]config.HookConfig, len(events))
 	for _, ev := range events {

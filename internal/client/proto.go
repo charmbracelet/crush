@@ -183,6 +183,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string, opts ...EventsO
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeToolProgress:
+				var e pubsub.Event[proto.ToolProgress]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMCPEvent:
 				var e pubsub.Event[proto.MCPEvent]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -603,10 +609,13 @@ func decodeErrorMessage(body io.Reader) string {
 }
 
 // RunShellCommand runs a shell command in the workspace without triggering the agent.
-func (c *Client) RunShellCommand(ctx context.Context, id, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
+// isFirstMessage marks the command that started the session, so the
+// session is titled after it.
+func (c *Client) RunShellCommand(ctx context.Context, id, sessionID, command string, termWidth int, isFirstMessage bool) (proto.ShellCommandResponse, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/shell", id, sessionID), nil, jsonBody(proto.ShellCommandRequest{
-		Command:   command,
-		TermWidth: termWidth,
+		Command:        command,
+		TermWidth:      termWidth,
+		IsFirstMessage: isFirstMessage,
 	}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return proto.ShellCommandResponse{}, fmt.Errorf("failed to run shell command: %w", err)

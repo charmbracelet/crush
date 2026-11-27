@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.1.2
+	charm.land/bubbletea/v2 v2.2.0
 	charm.land/catwalk/v3 v3.3.1
 	charm.land/fang/v2 v2.0.1
 	charm.land/fantasy v0.48.2
@@ -14,6 +14,7 @@ require (
 	charm.land/powernap v0.0.0
 	charm.land/superjoy v0.0.0
 	charm.land/tone v0.2.0
+	charm.land/turtle/shcoreutils v0.1.0
 	charm.land/x/nerdfont v0.1.0
 	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -80,13 +81,14 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
-	mvdan.cc/sh/v3 v3.14.1
-	mvdan.cc/sh/x v0.0.0-20260907232430-b5028a3332a4
+	mvdan.cc/sh/v3 v3.14.1-0.20261125142311-f2395c263723
 )
 
 require (
 	charm.land/hair v0.0.0 // indirect
 	charm.land/rope v0.0.0 // indirect
+	charm.land/turtle/coreutils v0.1.0 // indirect
+	charm.land/turtle/fsx v0.1.0 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.24.4 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
@@ -152,7 +154,6 @@ require (
 	github.com/kaptinlin/jsonschema v0.9.10 // indirect
 	github.com/klauspost/compress v1.20.4 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
-	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
@@ -167,7 +168,6 @@ require (
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
-	github.com/pierrec/lz4/v4 v4.1.33 // indirect
 	github.com/pjbgf/sha1cd v0.7.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
@@ -179,8 +179,6 @@ require (
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
-	github.com/u-root/u-root v0.15.1-0.20251208185023-2f8c7e763cf8 // indirect
-	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/xo/terminfo v1.0.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.7.17 // indirect

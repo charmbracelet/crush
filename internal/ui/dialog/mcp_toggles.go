@@ -100,10 +100,7 @@ func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
 
-	m.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down", "k", "j"),
-		key.WithHelp("↑/↓", "choose"),
-	)
+	m.keyMap.UpDown = upDownKey("choose")
 	m.keyMap.Up = key.NewBinding(
 		key.WithKeys("up", "k"),
 		key.WithHelp("↑/k", "up"),

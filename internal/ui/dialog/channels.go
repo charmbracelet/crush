@@ -156,10 +156,7 @@ func NewChannels(com *common.Common, states map[string]mcp.ClientInfo) *Channels
 
 	// Channels have no per-item action, so moving through the list is
 	// browsing, not choosing.
-	d.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "browse"),
-	)
+	d.keyMap.UpDown = upDownKey("browse")
 	d.keyMap.Next = key.NewBinding(
 		key.WithKeys("down"),
 		key.WithHelp("↓", "next"),

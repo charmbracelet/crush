@@ -98,10 +98,7 @@ func NewNotifications(com *common.Common) *Notifications {
 		key.WithKeys("up", "ctrl+p"),
 		key.WithHelp("↑", "previous item"),
 	)
-	n.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
+	n.keyMap.UpDown = upDownKey("choose")
 	n.keyMap.Close = CloseKey
 
 	n.setItems()

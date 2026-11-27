@@ -22,6 +22,16 @@ const (
 	inputContentHeight = 1
 )
 
+// upDownKey is the help entry for moving through a list. Lists match
+// their own up and down keys; this only describes them, the same way in
+// every dialog.
+func upDownKey(label string) key.Binding {
+	return key.NewBinding(
+		key.WithKeys("up", "down"),
+		key.WithHelp("↑/↓", label),
+	)
+}
+
 // escKey binds esc, and alt+esc which some terminals send for it, with a
 // help label saying what esc does at that point. Every dialog builds its
 // esc binding here so the keys cannot drift apart between dialogs.

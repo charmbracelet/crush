@@ -114,10 +114,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "confirm"),
 	)
-	c.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
+	c.keyMap.UpDown = upDownKey("choose")
 	c.keyMap.Next = key.NewBinding(
 		key.WithKeys("down"),
 		key.WithHelp("↓", "next item"),

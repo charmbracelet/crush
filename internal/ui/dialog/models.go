@@ -154,10 +154,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 		key.WithKeys("ctrl+e"),
 		key.WithHelp("ctrl+e", "edit"),
 	)
-	m.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
+	m.keyMap.UpDown = upDownKey("choose")
 	m.keyMap.Next = key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
 		key.WithHelp("↓", "next item"),

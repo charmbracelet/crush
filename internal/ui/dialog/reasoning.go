@@ -86,10 +86,7 @@ func NewReasoning(com *common.Common) (*Reasoning, error) {
 		key.WithKeys("up", "ctrl+p"),
 		key.WithHelp("↑", "previous item"),
 	)
-	r.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
+	r.keyMap.UpDown = upDownKey("choose")
 	r.keyMap.Close = CloseKey
 
 	if err := r.setReasoningItems(); err != nil {

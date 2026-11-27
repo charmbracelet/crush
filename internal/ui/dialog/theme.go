@@ -137,10 +137,7 @@ func NewTheme(com *common.Common) *Theme {
 		key.WithKeys("up", "ctrl+p"),
 		key.WithHelp("↑", "previous item"),
 	)
-	th.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
+	th.keyMap.UpDown = upDownKey("choose")
 	th.keyMap.EditTheme = key.NewBinding(
 		key.WithKeys("ctrl+e"),
 		key.WithHelp("ctrl+e", "edit"),

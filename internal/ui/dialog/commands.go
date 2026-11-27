@@ -165,21 +165,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		c.dockerMCPAvailable = &msg.available
 		c.dockerMCPCheckInFlight = false
 		if c.selected == SystemCommands {
-			// Preserve the current selection across the rebuild to avoid reset
-			var prevID string
-			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
-				prevID = item.id
-			}
-			c.setCommandItems(c.selected)
-			if prevID != "" {
-				for i, it := range c.list.FilteredItems() {
-					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
-						c.list.SetSelected(i)
-						c.list.ScrollToSelected()
-						break
-					}
-				}
-			}
+			c.rebuildCommandItems()
 		}
 		return nil
 	case spinner.TickMsg:
@@ -302,7 +288,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
 		// we need to reset the command items when width changes
-		c.setCommandItems(c.selected)
+		c.rebuildCommandItems()
 	}
 
 	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
@@ -449,6 +435,31 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	c.list.ScrollToTop()
 	c.list.SetSelected(0)
 	c.input.SetValue("")
+}
+
+// rebuildCommandItems refreshes the current list's items (some depend on
+// the window width or on background checks) while keeping the typed filter
+// and the selected command, so the rebuild is invisible to the user.
+func (c *Commands) rebuildCommandItems() {
+	var prevID string
+	if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
+		prevID = item.id
+	}
+	filter := c.input.Value()
+	c.setCommandItems(c.selected)
+	if filter != "" {
+		c.input.SetValue(filter)
+		c.list.SetFilter(filter)
+	}
+	if prevID != "" {
+		for i, it := range c.list.FilteredItems() {
+			if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
+				c.list.SetSelected(i)
+				c.list.ScrollToSelected()
+				break
+			}
+		}
+	}
 }
 
 // defaultCommands returns the list of default system commands.

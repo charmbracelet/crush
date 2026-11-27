@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type APIKeyInputState int
@@ -174,8 +175,11 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	content := strings.Join([]string{
 		m.headerView(),
 		inputStyle.Render(m.input.View()),
-		textStyle.Render("This will be written in your global configuration:"),
-		textStyle.Render(config.GlobalConfigData()),
+		textStyle.Width(contentWidth).Render("This will be written in your global configuration:"),
+		// Break the path at any character: it has no spaces to wrap at,
+		// and continuation lines must keep the padding.
+		textStyle.Width(contentWidth).Render(ansi.Hardwrap(config.GlobalConfigData(),
+			max(1, contentWidth-textStyle.GetHorizontalFrameSize()), true)),
 		"",
 		helpView,
 	}, "\n")

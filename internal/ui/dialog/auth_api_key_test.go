@@ -46,3 +46,44 @@ func TestAPIKeyInputLongValueStaysOnOneLine(t *testing.T) {
 }
 
 func uvRect(w, h int) uv.Rectangle { return uv.Rect(0, 0, w, h) }
+
+// TestAPIKeyInputConfigPathWraps verifies the config path note wraps
+// inside the content width with its padding on every line, both in the
+// framed dialog and in onboarding (no frame).
+func TestAPIKeyInputConfigPathWraps(t *testing.T) {
+	t.Parallel()
+
+	for _, onboarding := range []bool{false, true} {
+		for _, w := range []int{100, 40} {
+			m := newTestAPIKeyInput()
+			m.isOnboarding = onboarding
+			scr := uv.NewScreenBuffer(w, 30)
+			m.Draw(scr, scr.Bounds())
+			lines := strings.Split(scr.String(), "\n")
+			start := -1
+			for i, l := range lines {
+				if strings.Contains(l, "global") {
+					start = i
+					break
+				}
+			}
+			require.NotEqual(t, -1, start)
+			for _, l := range lines[start:] {
+				if strings.Contains(l, "enter submit") {
+					break
+				}
+				text := strings.Trim(l, " │")
+				if text == "" {
+					continue
+				}
+				// Every line keeps its one-cell inset.
+				inset := strings.Index(l, text)
+				if !onboarding {
+					inset -= strings.Index(l, "│") + len("│")
+				}
+				require.Equal(t, 1, inset, "line lost its padding (onboarding=%v, width %d): %q", onboarding, w, l)
+				require.LessOrEqual(t, len([]rune(strings.TrimRight(l, " "))), w)
+			}
+		}
+	}
+}

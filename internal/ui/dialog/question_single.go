@@ -57,9 +57,10 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 
 	if done, cmd, handled := d.handleFillInFocused(msg, d.keyEnter, func() (bool, tea.Cmd) {
+		// Esc leaves the fill-in and keeps its text; it neither
+		// submits nor cancels.
 		d.fillIn.Blur()
-		d.answer(d.respond())
-		return true, nil
+		return false, nil
 	}, func() (bool, tea.Cmd) {
 		val := strings.TrimSpace(d.fillIn.Value())
 		if val != "" {
@@ -145,10 +146,10 @@ func numKeyBinding(n int) key.Binding {
 // ShortHelp returns key bindings for the status bar.
 func (d *SingleChoice) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		return []key.Binding{d.keyClose, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
+		return []key.Binding{questionBackKey, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
 	}
 	if d.isFillIn() && d.fillIn.Focused() {
-		return []key.Binding{d.navUp, d.keyEnter, d.keyClose}
+		return []key.Binding{d.navUp, d.keyEnter, questionBackKey}
 	}
 	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyClose}
 }

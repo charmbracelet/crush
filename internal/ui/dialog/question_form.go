@@ -220,8 +220,10 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, cmd
 	}
 
-	// Global keys for question tabs.
-	if key.Matches(msg, f.keyClose) {
+	// Global keys for question tabs. Esc inside a focused text field
+	// belongs to the question (it closes the field); only cancel the
+	// batch when nothing is being edited.
+	if key.Matches(msg, f.keyClose) && !f.activeEditingText() {
 		f.cancel()
 		return true, nil
 	}
@@ -244,6 +246,16 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, cmd
 	}
 	return false, nil
+}
+
+// activeEditingText reports whether the active question has a
+// focused fill-in or note editor.
+func (f *QuestionForm) activeEditingText() bool {
+	if f.isConfirmTab() || f.activeIdx >= f.numQuestions {
+		return false
+	}
+	te, ok := f.questions[f.activeIdx].(textEditor)
+	return ok && te.editingText()
 }
 
 // HandleWheel scrolls the active choice list vertically, or delegates

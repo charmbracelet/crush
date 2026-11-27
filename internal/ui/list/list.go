@@ -92,7 +92,10 @@ func (l *List) SetSize(width, height int) {
 
 // SetGap sets the gap between items.
 func (l *List) SetGap(gap int) {
-	l.gap = gap
+	if l.gap != gap {
+		l.gap = gap
+		l.totalHeightValid = false
+	}
 }
 
 // Gap returns the gap between items.
@@ -344,6 +347,7 @@ func (l *List) invalidateAll() {
 // on next use. No-op if the item is not in the cache.
 func (l *List) Invalidate(item Item) {
 	delete(l.cache, item)
+	l.totalHeightValid = false
 }
 
 // Restyle runs restyle on every item for a change that affects colours but
@@ -410,6 +414,11 @@ func (l *List) EndSelectionDrag() {
 
 // ScrollToIndex scrolls the list to the given item index.
 func (l *List) ScrollToIndex(index int) {
+	if len(l.items) == 0 {
+		l.offsetIdx = 0
+		l.offsetLine = 0
+		return
+	}
 	if index < 0 {
 		index = 0
 	}
@@ -628,7 +637,7 @@ func (l *List) PrependItems(items ...Item) {
 func (l *List) SetItems(items ...Item) {
 	l.items = items
 	l.selectedIdx = min(l.selectedIdx, len(l.items)-1)
-	l.offsetIdx = min(l.offsetIdx, len(l.items)-1)
+	l.offsetIdx = max(0, min(l.offsetIdx, len(l.items)-1))
 	l.offsetLine = 0
 	l.retainCacheFor(items)
 	l.totalHeightValid = false
@@ -885,12 +894,20 @@ func (l *List) SelectedItem() Item {
 
 // SelectFirstInView selects the first item currently in view.
 func (l *List) SelectFirstInView() {
+	if len(l.items) == 0 {
+		l.selectedIdx = -1
+		return
+	}
 	startIdx, _ := l.VisibleItemIndices()
 	l.selectedIdx = startIdx
 }
 
 // SelectLastInView selects the last item currently in view.
 func (l *List) SelectLastInView() {
+	if len(l.items) == 0 {
+		l.selectedIdx = -1
+		return
+	}
 	_, endIdx := l.VisibleItemIndices()
 	l.selectedIdx = endIdx
 }

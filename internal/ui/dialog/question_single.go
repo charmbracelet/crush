@@ -154,7 +154,7 @@ func (d *SingleChoice) ShortHelp() []key.Binding {
 	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyClose}
 }
 
-func (d *SingleChoice) Height(width int) int { return d.height(width) }
+func (d *SingleChoice) Height(width int) int { return d.height(width, d.renderItem) }
 func (d *SingleChoice) HeightChanged() bool  { return d.heightChanged() }
 func (d *SingleChoice) SetFocused(f bool)    { d.setFocused(f) }
 func (d *SingleChoice) SetHover(x, y int)    { d.setHover(x, y) }
@@ -208,24 +208,25 @@ func (d *SingleChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		fillPrefix = d.Styles.Editor.QuestionSelected.Render("> ")
 	}
 
-	unselectedHeader := d.Styles.Editor.QuestionUnselected
-	selectedStyle := d.Styles.Editor.QuestionSelected
+	return d.drawContent(scr, area, fillPrefix, d.renderItem)
+}
 
-	return d.drawContent(scr, area, fillPrefix, func(i int, ch question.Choice, active bool, innerWidth int) string {
-		isSelected := false
-		if len(d.lastResponse.SelectedIDs) > 0 {
-			isSelected = d.lastResponse.SelectedIDs[0] == ch.ID
-		}
-		style := unselectedHeader
-		// In hover mode the committed choice stays pink so the user
-		// can see their selection while the bar tracks the mouse.
-		// While the fill-in is focused, though, the fill-in is the
-		// active answer, so suppress the choice pink to avoid the
-		// selection appearing to jump onto a choice mid-edit.
-		if active || (isSelected && d.mouseActive && !d.fillIn.Focused()) {
-			style = selectedStyle
-		}
-		barWidth := 2 // "┃ " or "  ", applied by buildLines
-		return style.Render(wrapIndent(ch.Label, innerWidth-barWidth, ""))
-	})
+// renderItem renders a choice's label for both drawing and height
+// measurement, so the two always agree on how labels wrap.
+func (d *SingleChoice) renderItem(i int, ch question.Choice, active bool, innerWidth int) string {
+	isSelected := false
+	if len(d.lastResponse.SelectedIDs) > 0 {
+		isSelected = d.lastResponse.SelectedIDs[0] == ch.ID
+	}
+	style := d.Styles.Editor.QuestionUnselected
+	// In hover mode the committed choice stays pink so the user
+	// can see their selection while the bar tracks the mouse.
+	// While the fill-in is focused, though, the fill-in is the
+	// active answer, so suppress the choice pink to avoid the
+	// selection appearing to jump onto a choice mid-edit.
+	if active || (isSelected && d.mouseActive && !d.fillIn.Focused()) {
+		style = d.Styles.Editor.QuestionSelected
+	}
+	barWidth := 2 // "┃ " or "  ", applied by buildLines
+	return style.Render(wrapIndent(ch.Label, innerWidth-barWidth, ""))
 }

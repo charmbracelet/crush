@@ -397,15 +397,15 @@ type choiceItemRenderer func(index int, choice question.Choice, active bool, inn
 // height returns the total visual height at the given width. It is
 // len(buildLines), the single source of truth for layout, and a
 // pure function of the width passed in so it always agrees with
-// the width drawContent will use this frame.
-func (c *choiceList) height(width int) int {
+// the width drawContent will use this frame. itemFn must be the
+// renderer the component draws with so wrapped labels are counted
+// at their real height.
+func (c *choiceList) height(width int, itemFn choiceItemRenderer) int {
 	if width <= 0 {
 		width = c.lastWidth
 	}
 	innerWidth := min(width-4, choiceListMaxWidth)
-	return len(c.buildLines(innerWidth, "> ", func(int, question.Choice, bool, int) string {
-		return "x" // single-line placeholder; only count matters
-	}))
+	return len(c.buildLines(innerWidth, "> ", itemFn))
 }
 
 func (c *choiceList) heightChanged() bool {

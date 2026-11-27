@@ -20,6 +20,8 @@ func newTestAPIKeyInput() *APIKeyInput {
 	return m
 }
 
+func uvRect(w, h int) uv.Rectangle { return uv.Rect(0, 0, w, h) }
+
 // TestAPIKeyInputLongValueStaysOnOneLine verifies a long key scrolls
 // within a single input row in every state, including the error state
 // whose prompt icon is wider than the default prompt.
@@ -48,8 +50,6 @@ func TestAPIKeyInputLongValueStaysOnOneLine(t *testing.T) {
 		}
 	}
 }
-
-func uvRect(w, h int) uv.Rectangle { return uv.Rect(0, 0, w, h) }
 
 // TestAPIKeyInputConfigPathWraps verifies the config path note wraps
 // inside the content width with its padding on every line, both in the

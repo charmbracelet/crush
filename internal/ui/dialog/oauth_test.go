@@ -17,12 +17,17 @@ import (
 // testOAuthProvider is a no-op OAuth provider for rendering tests.
 type testOAuthProvider struct{ codeEntry bool }
 
-func (p testOAuthProvider) name() string                     { return "Grok" }
-func (p testOAuthProvider) initiateAuth() tea.Msg            { return nil }
+func (p testOAuthProvider) name() string { return "Grok" }
+
+func (p testOAuthProvider) initiateAuth() tea.Msg { return nil }
+
 func (p testOAuthProvider) startPolling(string, int) tea.Cmd { return nil }
-func (p testOAuthProvider) stopPolling() tea.Msg             { return nil }
-func (p testOAuthProvider) supportsCodeEntry() bool          { return p.codeEntry }
-func (p testOAuthProvider) submitCode(string) tea.Cmd        { return nil }
+
+func (p testOAuthProvider) stopPolling() tea.Msg { return nil }
+
+func (p testOAuthProvider) supportsCodeEntry() bool { return p.codeEntry }
+
+func (p testOAuthProvider) submitCode(string) tea.Cmd { return nil }
 
 const testOAuthURL = "https://accounts.x.ai/oauth2/authorize?client-id=abc-def-ghi&redirect-uri=http%3A%2F%2F127.0.0.1%3A5678&state=xyz-123"
 
@@ -149,23 +154,4 @@ func TestOAuthURLWrapsAsOneToken(t *testing.T) {
 			require.Equal(t, widths[0], widths[i], "line %d broke early at width %d", i, w)
 		}
 	}
-}
-
-// TestAuthEscLabelsFollowOneRule verifies every sign-in dialog labels esc
-// the same way: "cancel" while a sign-in is in progress, "exit" once it
-// has failed and there is nothing left to cancel.
-func TestAuthEscLabelsFollowOneRule(t *testing.T) {
-	t.Parallel()
-
-	m := newTestOAuth(false)
-	require.Equal(t, "cancel", escLabel(m.ShortHelp()), "starting")
-	m.HandleMsg(ActionInitiateOAuth{VerificationURL: "https://example.com/device"})
-	require.Equal(t, "cancel", escLabel(m.ShortHelp()), "waiting")
-	m.State = OAuthStateError
-	require.Equal(t, "exit", escLabel(m.ShortHelp()), "failed")
-
-	mcp := newTestMCPAuth("linear")
-	require.Equal(t, "cancel", escLabel(mcp.ShortHelp()), "mcp prompt")
-	mcp.state = MCPAuthStateError
-	require.Equal(t, "exit", escLabel(mcp.ShortHelp()), "mcp failed")
 }

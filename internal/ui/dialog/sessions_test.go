@@ -1,13 +1,17 @@
 package dialog
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/stretchr/testify/require"
 )
+
+var ctrlR = tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
 
 // TestSessionItemCachesRender verifies a session row keeps its rendered
 // line so repeated renders at the same width are reused.
@@ -37,16 +41,46 @@ func TestSessionItemRefreshesRelativeTime(t *testing.T) {
 	require.Contains(t, item.Render(60), "3 minutes ago")
 }
 
-// TestNotificationItemCachesRender verifies a notification style row keeps
-// its rendered line, and that focus changes still invalidate it.
-func TestNotificationItemCachesRender(t *testing.T) {
+// TestSessionsHelpKeepsEsc verifies the sessions help line uses distinct
+// labels for moving and opening, and never truncates esc away.
+func TestSessionsHelpKeepsEsc(t *testing.T) {
 	t.Parallel()
-	com := newPickerTestCommon()
-	item := &NotificationItem{Versioned: &list.Versioned{}, style: NotificationStyle{ID: "bell", Title: "Bell"}, t: com.Styles}
-	first := item.Render(40)
-	require.Len(t, item.cache, 1)
-	require.Equal(t, first, item.Render(40))
+	for _, w := range []int{100, 40} {
+		d := newSessionMouseDialog(t, []session.Session{{ID: "a", Title: "alpha"}}, "a")
+		text := strings.Join(drawFits(t, d, w, 30), "\n")
+		if w == 100 {
+			require.Contains(t, text, "↑/↓ choose")
+		}
+		require.Contains(t, text, "enter open")
+		require.Contains(t, text, "esc exit")
+	}
+}
 
-	item.SetFocused(true)
-	require.NotEqual(t, first, item.Render(40), "focus change must invalidate the cache")
+// TestRenameIgnoredWithoutSelection verifies ctrl+r does nothing when the
+// filter matches nothing, instead of entering rename mode and making the
+// dialog vanish.
+func TestRenameIgnoredWithoutSelection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sessions", func(t *testing.T) {
+		t.Parallel()
+		d := newSessionMouseDialog(t, []session.Session{{ID: "a", Title: "alpha"}}, "a")
+		for _, r := range "zzzz" {
+			d.HandleMsg(keyMsg(r))
+		}
+		d.HandleMsg(ctrlR)
+		require.Equal(t, sessionsModeNormal, d.sessionsMode)
+		drawFits(t, d, 100, 30)
+	})
+
+	t.Run("themes", func(t *testing.T) {
+		t.Parallel()
+		d := NewTheme(newPickerTestCommon())
+		for _, r := range "zzzzqqq" {
+			d.HandleMsg(keyMsg(r))
+		}
+		d.HandleMsg(ctrlR)
+		require.Equal(t, themesModeNormal, d.mode)
+		drawFits(t, d, 100, 30)
+	})
 }

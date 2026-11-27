@@ -246,3 +246,13 @@ func TestChannels_FitsSmallTerminal(t *testing.T) {
 		require.NotContains(t, text, "│↑", "help flush against the border at %dx%d", sz[0], sz[1])
 	}
 }
+
+// TestChannelsHelpDoesNotOfferChoosing verifies the channels help does not
+// advertise choosing, since enter does nothing there.
+func TestChannelsHelpDoesNotOfferChoosing(t *testing.T) {
+	t.Parallel()
+	for _, b := range newTestChannels(t, nil).ShortHelp() {
+		require.NotEqual(t, "choose", b.Help().Desc)
+		require.NotEqual(t, "enter", b.Help().Key)
+	}
+}

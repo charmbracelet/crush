@@ -7,16 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// escLabel returns the help label bound to esc, or "" when none is.
-func escLabel(bindings []key.Binding) string {
-	for _, b := range bindings {
-		if b.Help().Key == "esc" {
-			return b.Help().Desc
-		}
-	}
-	return ""
-}
-
 // TestPickerEscLabels verifies esc is labeled "exit" when it just closes a
 // picker and "cancel" when it discards edits.
 func TestPickerEscLabels(t *testing.T) {
@@ -63,4 +53,23 @@ func TestPickerHelpPutsEscNearTheFront(t *testing.T) {
 		require.GreaterOrEqual(t, pos, 0, "%s has no esc hint", name)
 		require.LessOrEqual(t, pos, 1, "%s lists esc too late", name)
 	}
+}
+
+// TestArrowHelpNotation verifies pickers write arrow keys as "↑/↓" (and
+// "←/→") rather than mixing "↑↓", "↑/k up" and similar forms.
+func TestArrowHelpNotation(t *testing.T) {
+	t.Parallel()
+	com := newPickerTestCommon()
+	fp, _ := NewFilePicker(com)
+	keys := func(km interface{ ShortHelp() []key.Binding }) []string {
+		var out []string
+		for _, b := range km.ShortHelp() {
+			out = append(out, b.Help().Key)
+		}
+		return out
+	}
+	items := []MCPToggleItem{{Name: "docker", Status: "connected"}}
+	require.Contains(t, keys(NewMCPToggles(com, items)), "↑/↓")
+	require.Contains(t, keys(NewSkillsToggles(com, []SkillToggleItem{{Name: "s"}})), "↑/↓")
+	require.Contains(t, keys(fp), "↑/↓/←/→")
 }

@@ -22,18 +22,6 @@ func newTestArguments(t *testing.T, description string) *Arguments {
 	}, nil)
 }
 
-// TestArgumentsHelpShowsEsc verifies the help line keeps the esc hint
-// on wide and narrow screens instead of truncating it away.
-func TestArgumentsHelpShowsEsc(t *testing.T) {
-	t.Parallel()
-	for _, w := range []int{100, 40} {
-		a := newTestArguments(t, "")
-		scr := uv.NewScreenBuffer(w, 30)
-		a.Draw(scr, image.Rect(0, 0, w, 30))
-		require.Containsf(t, scr.String(), "esc", "esc hint missing at %d cols:\n%s", w, scr.String())
-	}
-}
-
 func drawArguments(a *Arguments, w, h int) []string {
 	scr := uv.NewScreenBuffer(w, h)
 	a.Draw(scr, image.Rect(0, 0, w, h))
@@ -44,6 +32,18 @@ func drawArguments(a *Arguments, w, h int) []string {
 		}
 	}
 	return rows
+}
+
+// TestArgumentsHelpShowsEsc verifies the help line keeps the esc hint
+// on wide and narrow screens instead of truncating it away.
+func TestArgumentsHelpShowsEsc(t *testing.T) {
+	t.Parallel()
+	for _, w := range []int{100, 40} {
+		a := newTestArguments(t, "")
+		scr := uv.NewScreenBuffer(w, 30)
+		a.Draw(scr, image.Rect(0, 0, w, 30))
+		require.Containsf(t, scr.String(), "esc", "esc hint missing at %d cols:\n%s", w, scr.String())
+	}
 }
 
 // TestArgumentsSpacing verifies a long description wraps in full with a

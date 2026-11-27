@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -22,6 +23,20 @@ func drawNotifications(n *Notifications, w, h int) string {
 	scr := uv.NewScreenBuffer(w, h)
 	n.Draw(scr, image.Rect(0, 0, w, h))
 	return strings.Join(strings.Fields(scr.String()), " ")
+}
+
+// TestNotificationItemCachesRender verifies a notification style row keeps
+// its rendered line, and that focus changes still invalidate it.
+func TestNotificationItemCachesRender(t *testing.T) {
+	t.Parallel()
+	com := newPickerTestCommon()
+	item := &NotificationItem{Versioned: &list.Versioned{}, style: NotificationStyle{ID: "bell", Title: "Bell"}, t: com.Styles}
+	first := item.Render(40)
+	require.Len(t, item.cache, 1)
+	require.Equal(t, first, item.Render(40))
+
+	item.SetFocused(true)
+	require.NotEqual(t, first, item.Render(40), "focus change must invalidate the cache")
 }
 
 // TestNotificationsShowsHighlightedDescription verifies the picker

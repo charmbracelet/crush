@@ -5,11 +5,40 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
+
+// escLabel returns the help label bound to esc, or "" when none is.
+func escLabel(bindings []key.Binding) string {
+	for _, b := range bindings {
+		if b.Help().Key == "esc" {
+			return b.Help().Desc
+		}
+	}
+	return ""
+}
+
+// pickerTestWorkspace is a minimal workspace for rendering picker dialogs.
+type pickerTestWorkspace struct{ workspace.Workspace }
+
+func (pickerTestWorkspace) Config() *config.Config {
+	return &config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}}
+}
+
+func (pickerTestWorkspace) WorkingDir() string { return "/nonexistent-crush-test-dir" }
+
+func newPickerTestCommon() *common.Common {
+	s := styles.CharmtonePantera()
+	return &common.Common{Styles: &s, Workspace: pickerTestWorkspace{}}
+}
 
 // drawFits draws d into a w×h screen and asserts the whole dialog frame
 // landed on screen: the first and last drawn rows are the complete top and

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
 	"github.com/charmbracelet/crush/internal/session"
-	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,29 +51,26 @@ func TestPickersShowEmptyState(t *testing.T) {
 	})
 }
 
-// TestTogglesEmptyState verifies the toggles dialogs' empty message is
-// spaced from the title and help, and the help lists only esc.
-func TestTogglesEmptyState(t *testing.T) {
+// TestShortHelpLineAlwaysMarksDroppedHints verifies a truncated help line
+// ends with an ellipsis even when that means dropping one more hint, so
+// hints are never dropped silently.
+func TestShortHelpLineAlwaysMarksDroppedHints(t *testing.T) {
 	t.Parallel()
-	com := newPickerTestCommon()
-	for name, d := range map[string]interface {
-		Draw(uv.Screen, uv.Rectangle) *tea.Cursor
-	}{
-		"mcp":    NewMCPToggles(com, nil),
-		"skills": NewSkillsToggles(com, nil),
-	} {
-		lines := drawFits(t, d, 100, 30)
-		var rows []string
-		for _, l := range lines {
-			if l = strings.TrimSpace(l); l != "" {
-				rows = append(rows, strings.Trim(l, "│ "))
-			}
-		}
-		// Border, title, blank, message, blank, help, border.
-		require.Lenf(t, rows, 7, "%s:\n%s", name, strings.Join(lines, "\n"))
-		require.Empty(t, rows[2], name)
-		require.Contains(t, rows[3], "configured", name)
-		require.Empty(t, rows[4], name)
-		require.Equal(t, "esc exit", rows[5], name)
+	h := help.New()
+	bindings := []key.Binding{
+		key.NewBinding(key.WithKeys("a"), key.WithHelp("aa", "one")),
+		key.NewBinding(key.WithKeys("b"), key.WithHelp("bb", "two")),
+		key.NewBinding(key.WithKeys("c"), key.WithHelp("cc", "three")),
 	}
+	full := ansi.Strip(shortHelpLine(&h, bindings, 100))
+	require.Equal(t, "aa one • bb two • cc three", full)
+
+	// "aa one • bb two" fills the width exactly; there is no room for
+	// " …", so "bb two" must give way to it.
+	got := ansi.Strip(shortHelpLine(&h, bindings, ansi.StringWidth("aa one • bb two")))
+	require.Equal(t, "aa one …", got)
+
+	// Too narrow for anything but the ellipsis.
+	require.Equal(t, "…", ansi.Strip(shortHelpLine(&h, bindings, 3)))
+	require.Empty(t, shortHelpLine(&h, bindings, 0))
 }

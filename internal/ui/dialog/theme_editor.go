@@ -144,7 +144,6 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	inputPrefixWidth := lipgloss.Width(labelPrefix)
 	inputWidth := listWidth - t.Dialog.NormalItem.GetPaddingLeft() - t.Dialog.NormalItem.GetPaddingRight() - inputPrefixWidth
 	ed.input.SetWidth(max(0, inputWidth))
-	ed.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = fmt.Sprintf("Edit Theme: %s", ed.name)
@@ -155,7 +154,7 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
 	}
 	rc.AddPart(listView)
-	rc.Help = ed.help.View(ed)
+	rc.Help = renderDialogHelp(t, &ed.help, ed, innerWidth)
 
 	view := rc.Render()
 

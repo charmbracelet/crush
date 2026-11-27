@@ -175,6 +175,10 @@ The type describes the API format the provider speaks: `completions`
 litellm, lmstudio, …) keep their own type. Legacy values (`openai`,
 `openai-compat`, `anthropic`, …) are migrated automatically at load.
 
+For short-lived API keys, pass a literal command substitution such as
+`--api-key '$(my-cli get-token)'`. The single quotes defer evaluation to
+the provider, which can then rerun the command and retry after an HTTP 401.
+
 Headers whose value resolves to the empty string (an unset `$VAR`, a
 `$(...)` that prints nothing, or a literal `""`) are dropped from the
 outgoing request. This makes env-gated headers safe:

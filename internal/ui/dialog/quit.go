@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // QuitID is the identifier for the quit dialog.
@@ -160,6 +161,13 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	buttons := strings.Join(buttonViews, " ")
 	buttonsWidth := lipgloss.Width(buttons)
 
+	// Wrap the text to the narrowest frame the dialog can fall back to
+	// (border only, no horizontal padding) so a small terminal wraps the
+	// lines instead of pushing the dialog, and its buttons, off-screen.
+	textWidth := max(buttonsWidth, area.Dx()-q.com.Styles.Dialog.Quit.Frame.GetHorizontalBorderSize()-baseStyle.GetHorizontalFrameSize())
+	wrap := func(s string) string { return ansi.Wrap(s, textWidth, "") }
+	question := wrap(quitQuestion)
+
 	// Quitting cuts off any subagent mid-turn.
 	var warning string
 	if q.runningSubAgents > 0 {
@@ -167,16 +175,16 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		if q.runningSubAgents == 1 {
 			noun = "subagent is"
 		}
-		warning = warningStyle.Render(fmt.Sprintf(
+		warning = warningStyle.Render(wrap(fmt.Sprintf(
 			"%d %s still running and will be cut off.",
 			q.runningSubAgents, noun,
-		))
+		)))
 	}
 
 	// buttonLine is the index of the content line reserved for the buttons,
 	// which are drawn as layers on top of the frame. The warning, when
 	// present, pushes that row down by its own height plus a blank line.
-	buttonLine := 2
+	buttonLine := lipgloss.Height(question) + 1
 	if warning != "" {
 		buttonLine += lipgloss.Height(warning) + 1
 	}
@@ -185,7 +193,7 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// blank row of the same width reserves space for the buttons, which are
 	// painted as layers so their bounds double as mouse hit regions.
 	renderContent := func(buttonRow string) string {
-		lines := []string{quitQuestion}
+		lines := []string{question}
 		if warning != "" {
 			lines = append(lines, "", warning)
 		}
@@ -193,8 +201,8 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			"",
 			buttonRow,
 			"",
-			hintStyle.Render(quitHintLineOne),
-			hintStyle.Render(quitHintLineTwo),
+			hintStyle.Render(wrap(quitHintLineOne)),
+			hintStyle.Render(wrap(quitHintLineTwo)),
 		)
 		return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
 	}
@@ -203,8 +211,12 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	frameStyle := q.com.Styles.Dialog.Quit.Frame
 	maxWidth := area.Dx() - frameStyle.GetHorizontalBorderSize()
-	if maxWidth < lipgloss.Width(content) {
-		frameStyle = frameStyle.Padding(1, 0)
+	if maxWidth < lipgloss.Width(content)+frameStyle.GetHorizontalPadding() {
+		frameStyle = frameStyle.PaddingLeft(0).PaddingRight(0)
+	}
+	maxHeight := area.Dy() - frameStyle.GetVerticalBorderSize()
+	if maxHeight < lipgloss.Height(content)+frameStyle.GetVerticalPadding() {
+		frameStyle = frameStyle.PaddingTop(0).PaddingBottom(0)
 	}
 	view := frameStyle.Render(content)
 

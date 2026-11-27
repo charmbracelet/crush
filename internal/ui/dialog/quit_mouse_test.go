@@ -126,8 +126,10 @@ func TestQuitMouseButtonsRenderInlineWhenTheyDontFit(t *testing.T) {
 	t.Parallel()
 
 	q := newTestQuit()
-	scr := uv.NewScreenBuffer(24, 20)
-	q.Draw(scr, image.Rect(0, 0, 24, 20))
+	// The text wraps to the area, but the button row plus the border needs
+	// 23 columns, so at 20 the dialog cannot fit.
+	scr := uv.NewScreenBuffer(20, 20)
+	q.Draw(scr, image.Rect(0, 0, 20, 20))
 
 	// The dialog does not fit, so the buttons fall back to inline
 	// rendering: they stay visible, but are not clickable.
@@ -229,4 +231,22 @@ func TestQuitKeyboardUnchanged(t *testing.T) {
 	require.Nil(t, q.HandleMsg(tea.KeyPressMsg{Code: tea.KeyRight}))
 	require.False(t, q.selectedNo)
 	require.IsType(t, ActionQuit{}, q.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+}
+
+// TestQuitWrapsTextToSmallTerminal verifies that the question, subagent
+// warning and hints wrap to a small terminal so the whole dialog, buttons
+// included, stays on screen. Previously the lines rendered at their natural
+// width (54 columns with a subagent warning), pushing "Nope" off-screen.
+func TestQuitWrapsTextToSmallTerminal(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	for _, sz := range [][2]int{{30, 12}, {24, 20}} {
+		q := NewQuit(&common.Common{Styles: &sty}, 1)
+		lines := drawFits(t, q, sz[0], sz[1])
+		text := strings.Join(lines, "\n")
+		require.Contains(t, text, "Yep!")
+		require.Contains(t, text, "Nope")
+		require.NotNil(t, q.compositor, "buttons should be clickable at %dx%d", sz[0], sz[1])
+	}
 }

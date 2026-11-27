@@ -64,12 +64,11 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	srv := acp.NewServer(app, log, stdin, stdout)
 	srv.SetLogger(log)
 
-	// Wire the ACP permission service into the app so tools use it. The
-	// coordinator captured the original TUI permission service during app
-	// setup, so rebuild it to pick up the ACP bridge; without this, tool
-	// permission requests would wait for a UI that never appears.
-	app.Permissions = srv.PermissionService()
-	if err := app.InitCoderAgentNonInteractive(cmd.Context()); err != nil {
+	// Wire the ACP permission service into the app and rebuild the coder
+	// agent so the tools use it. Without this, tool permission requests go
+	// to the service the coordinator captured at app setup, which no UI or
+	// bridge answers, and every bash call waits forever.
+	if err := app.SetPermissions(cmd.Context(), srv.PermissionService()); err != nil {
 		return fmt.Errorf("init coder agent: %w", err)
 	}
 

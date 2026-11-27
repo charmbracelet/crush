@@ -258,6 +258,116 @@ func TestEventBridge_ToolResultFailedStatus(t *testing.T) {
 	}
 }
 
+// TestEventBridge_ToolCallInputEnrichment is a regression test: a tool call is
+// first reported when the model starts emitting it, before its arguments
+// exist. Without a follow-up update the client keeps the argument-less start
+// and renders the call as a bare "Bash" with no command.
+func TestEventBridge_ToolCallInputEnrichment(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 4)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	msg := message.Message{
+		ID:        "msg-c",
+		SessionID: "sess-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-c", Name: "bash"},
+		},
+	}
+	b.handleMessage(context.Background(), msg)
+
+	var start acp.SessionUpdate
+	select {
+	case start = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call start received")
+	}
+	require.NotNil(t, start.ToolCall)
+	require.Equal(t, "Bash", start.ToolCall.Title, "no arguments yet")
+
+	// The arguments arrive in a later snapshot of the same message.
+	msg.Parts = []message.ContentPart{
+		message.ToolCall{ID: "call-c", Name: "bash", Input: `{"command":"git status"}`, Finished: true},
+	}
+	b.handleMessage(context.Background(), msg)
+
+	var enrich acp.SessionUpdate
+	select {
+	case enrich = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call input update received")
+	}
+	require.NotNil(t, enrich.ToolCallUpdate)
+	require.Equal(t, acp.ToolCallId("call-c"), enrich.ToolCallUpdate.ToolCallId)
+	title, ok := enrich.ToolCallUpdate.Title.Value()
+	require.True(t, ok, "the title must be set")
+	require.Contains(t, title, "git status", "the title must name the command")
+	raw, ok := enrich.ToolCallUpdate.RawInput.Value()
+	require.True(t, ok, "the raw input must be set")
+	require.JSONEq(t, `{"command":"git status"}`, string(raw))
+}
+
+// TestEventBridge_ToolCallStaysInProgressUntilResult is a regression test:
+// message.ToolCall.Finished marks the end of argument streaming, so a call
+// reported with Finished already set must still start in progress. Stamping
+// it completed made a client render the call as done before the tool ran,
+// and the turn then looked stalled while the tool waited.
+func TestEventBridge_ToolCallStaysInProgressUntilResult(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	// Argument streaming is done, but no result has arrived yet.
+	b.handleMessage(context.Background(), message.Message{
+		ID:        "msg-b",
+		SessionID: "sess-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-b", Name: "bash", Input: `{"command":"git status"}`, Finished: true},
+		},
+	})
+
+	var u acp.SessionUpdate
+	select {
+	case u = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call start received")
+	}
+	require.NotNil(t, u.ToolCall)
+	require.Equal(t, acp.ToolCallId("call-b"), u.ToolCall.ToolCallId)
+	require.Equal(t, acp.ToolCallStatusInProgress, u.ToolCall.Status,
+		"a tool call starts in progress; only its result completes it")
+}
+
 // TestEventBridge_ToolCallEnrichment verifies a tool_call start carries a
 // human-readable title, the tool kind, file locations, and rawInput (S10).
 func TestEventBridge_ToolCallEnrichment(t *testing.T) {

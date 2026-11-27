@@ -120,7 +120,7 @@ func toolKindFor(name string) acp.ToolKind {
 	switch strings.ToLower(name) {
 	case "read", "view", "glob", "grep", "ls", "cat":
 		return acp.ToolKindRead
-	case "edit", "write", "str_replace":
+	case "edit", "write", "str_replace", "multiedit":
 		return acp.ToolKindEdit
 	case "delete", "rm":
 		return acp.ToolKindDelete
@@ -568,12 +568,11 @@ func (b *eventBridge) streamThoughts(ctx context.Context, m message.Message) {
 // emitted by the permission bridge (see permission.go).
 func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 	type action struct {
-		id       string
-		name     string
-		input    string
-		finished bool
+		id    string
+		name  string
+		input string
 	}
-	var starts, updates []action
+	var starts, enrichments []action
 
 	b.mu.Lock()
 	seen := b.toolCalls[m.ID]
@@ -583,31 +582,48 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 	}
 	for _, tc := range m.ToolCalls() {
 		// A terminal status reported via the tool-result path wins; skip the
-		// redundant completed update for this call.
+		// redundant start for this call.
 		if b.finished[tc.ID] {
 			seen[tc.ID] = true
 			continue
 		}
-		prev, ok := seen[tc.ID]
-		if !ok {
-			seen[tc.ID] = tc.Finished
+		if !seen[tc.ID] {
+			seen[tc.ID] = true
 			b.toolInputs[tc.ID] = tc.Input
-			starts = append(starts, action{id: tc.ID, name: tc.Name, input: tc.Input, finished: tc.Finished})
-		} else if prev != tc.Finished {
-			seen[tc.ID] = tc.Finished
-			updates = append(updates, action{id: tc.ID, finished: tc.Finished})
+			starts = append(starts, action{id: tc.ID, name: tc.Name, input: tc.Input})
+			continue
+		}
+		// A tool call is reported as soon as the model starts emitting it,
+		// before its arguments exist. The arguments that arrive afterwards
+		// are what the client needs to render the call, so re-announce the
+		// title and rawInput once the input shows up.
+		if prev := b.toolInputs[tc.ID]; prev != tc.Input && tc.Input != "" {
+			b.toolInputs[tc.ID] = tc.Input
+			enrichments = append(enrichments, action{id: tc.ID, name: tc.Name, input: tc.Input})
 		}
 	}
 	b.mu.Unlock()
 
 	sessionID := acp.SessionId(m.SessionID)
-	for _, a := range starts {
-		status := acp.ToolCallStatusInProgress
-		if a.finished {
-			status = acp.ToolCallStatusCompleted
+	for _, a := range enrichments {
+		opts := []acp.ToolCallUpdateOpt{
+			acp.WithUpdateTitle(toolTitle(a.name, a.input)),
+			acp.WithUpdateRawInput(toolRawInput(a.input)),
 		}
+		if locs := b.toolLocations(a.input); len(locs) > 0 {
+			opts = append(opts, acp.WithUpdateLocations(locs))
+		}
+		note := b.note(sessionID, acp.UpdateToolCall(acp.ToolCallId(a.id), opts...))
+		if err := b.conn.SessionUpdate(ctx, note); err != nil {
+			b.log.Warn("Failed to send tool call input update", "error", err)
+		}
+	}
+	for _, a := range starts {
+		// A tool call is in progress from its first report until its result
+		// arrives. message.ToolCall.Finished means the model finished sending
+		// the arguments, not that the tool ran, so it cannot drive the status.
 		opts := []acp.ToolCallStartOpt{
-			acp.WithStartStatus(status),
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
 			acp.WithStartName(a.name),
 			acp.WithStartKind(toolKindFor(a.name)),
 			acp.WithStartRawInput(toolRawInput(a.input)),
@@ -622,15 +638,6 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 		}
 		note := b.note(sessionID, acp.StartToolCall(acp.ToolCallId(a.id), toolTitle(a.name, a.input), opts...))
 		if err := b.conn.SessionUpdate(ctx, note); err != nil {
-			b.log.Warn("Failed to send tool call update", "error", err)
-		}
-	}
-	for _, a := range updates {
-		update := acp.SessionNotification{
-			SessionId: sessionID,
-			Update:    acp.UpdateToolCall(acp.ToolCallId(a.id), acp.WithUpdateStatus(acp.ToolCallStatusCompleted)),
-		}
-		if err := b.conn.SessionUpdate(ctx, update); err != nil {
 			b.log.Warn("Failed to send tool call update", "error", err)
 		}
 	}
@@ -676,7 +683,7 @@ func planUpdateFor(tr message.ToolResult) *acp.SessionUpdatePlan {
 // when no diff data is available. An empty old content means the file was
 // created, which the protocol represents as a diff without oldText.
 func diffContentFor(b absPather, name, input string, tr message.ToolResult) *acp.ToolCallContent {
-	if tr.IsError || (name != "edit" && name != "multiedit") {
+	if tr.IsError || (name != "edit" && name != "multiedit" && name != "lsp_replace_symbol") {
 		return nil
 	}
 	var meta struct {

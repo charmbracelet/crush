@@ -17,6 +17,10 @@ import (
 type permissionBridge struct {
 	conn *acp.AgentSideConnection
 	log  *slog.Logger
+	// absPath resolves a tool path into the absolute form every path on the
+	// wire must take (overview.md:160); the diff content a prompt shows uses
+	// it. A nil resolver leaves paths as the tool reported them.
+	absPath func(string) string
 	// remembered holds allow_always/reject_always decisions by session and
 	// tool scope. The spec makes the Agent the owner of a remembered
 	// decision's scope (tool-calls.md:237-241); the tool name is the scope
@@ -61,16 +65,27 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 		return granted, nil
 	}
 
-	// Build the tool call update for the permission request.
+	// Build the tool call update for the permission request. A
+	// file-modifying tool carries a diff of the change it is about to make,
+	// so the client can show what is being approved rather than only the
+	// file name (tool-calls.md:218-229).
 	title := fmt.Sprintf("%s: %s%s", req.ToolName, req.Description, executionControlSuffix(req.Path))
+	diffs := toolDiffContent(b.absPath, req.Params)
 	toolCallUpdate := acp.ToolCallUpdate{
 		ToolCallId: acp.ToolCallId(req.ToolCallID),
 		Title:      acp.PatchSet(title),
+		Kind:       acp.PatchSet(toolKindFor(req.ToolName)),
+	}
+	if path := toolFilePath(req.Params); path != "" {
+		toolCallUpdate.Locations = acp.PatchSet([]acp.ToolCallLocation{{Path: b.resolveAbs(path)}})
+	}
+	if len(diffs) > 0 {
+		toolCallUpdate.Content = acp.PatchSet(diffs)
 	}
 
 	// Report the pending status while the user decides (S10 lifecycle: a tool
 	// call sits in pending from its first report until permission resolves).
-	b.pushToolCallStatus(ctx, req.SessionID, req.ToolCallID, title, acp.ToolCallStatusPending, "")
+	b.pushToolCallStatus(ctx, req.SessionID, req.ToolCallID, title, acp.ToolCallStatusPending, diffs)
 
 	options := buildPermissionOptions(req.ToolName)
 
@@ -110,7 +125,7 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 	// client does not show a tool stuck in pending/in_progress (S10).
 	if !granted && resp.Outcome.Cancelled == nil {
 		b.pushToolCallStatus(ctx, req.SessionID, req.ToolCallID, title,
-			acp.ToolCallStatusFailed, "Permission denied by user")
+			acp.ToolCallStatusFailed, []acp.ToolCallContent{acp.ToolContent(acp.TextBlock("Permission denied by user"))})
 	}
 
 	b.log.Info("ACP permission result", "sessionId", req.SessionID, "tool", req.ToolName, "granted", granted)
@@ -125,16 +140,15 @@ func (b *permissionBridge) remember(scope scopeKey, granted bool) {
 }
 
 // pushToolCallStatus emits a tool_call_update so the client observes the
-// pending/failed transitions around a permission request.
-func (b *permissionBridge) pushToolCallStatus(ctx context.Context, sessionID, toolCallID, title string, status acp.ToolCallStatus, content string) {
+// pending/failed transitions around a permission request. Content is any
+// tool-call content to attach, such as the diff a write would make.
+func (b *permissionBridge) pushToolCallStatus(ctx context.Context, sessionID, toolCallID, title string, status acp.ToolCallStatus, content []acp.ToolCallContent) {
 	opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
 	if title != "" {
 		opts = append(opts, acp.WithUpdateTitle(title))
 	}
-	if content != "" {
-		opts = append(opts, acp.WithUpdateContent([]acp.ToolCallContent{
-			acp.ToolContent(acp.TextBlock(content)),
-		}))
+	if len(content) > 0 {
+		opts = append(opts, acp.WithUpdateContent(content))
 	}
 	note := acp.SessionNotification{
 		SessionId: acp.SessionId(sessionID),
@@ -143,6 +157,15 @@ func (b *permissionBridge) pushToolCallStatus(ctx context.Context, sessionID, to
 	if err := b.conn.SessionUpdate(ctx, note); err != nil {
 		b.log.Warn("Failed to send tool call status update", "error", err)
 	}
+}
+
+// resolveAbs resolves a path to the absolute form the wire requires, falling
+// back to the path as given when no resolver is installed.
+func (b *permissionBridge) resolveAbs(path string) string {
+	if b.absPath == nil {
+		return path
+	}
+	return b.absPath(path)
 }
 
 // executionControlSuffix labels writes to files that can change what runs or

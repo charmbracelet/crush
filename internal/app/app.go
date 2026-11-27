@@ -912,6 +912,24 @@ func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return app.initCoderAgent(ctx, false)
 }
 
+// SetPermissions installs the permission service the tools use and rebuilds
+// the coder coordinator, which captured the previous service when it was
+// constructed. Callers that answer permission requests themselves (the ACP
+// server) must use this: assigning app.Permissions alone leaves the tools
+// talking to the service the coordinator already holds.
+func (app *App) SetPermissions(ctx context.Context, svc permission.Service) error {
+	app.agentInitMu.Lock()
+	old := app.AgentCoordinator
+	app.AgentCoordinator = nil
+	app.agentInteractive = false
+	app.Permissions = svc
+	app.agentInitMu.Unlock()
+	if old != nil {
+		old.CancelAll()
+	}
+	return app.InitCoderAgentNonInteractive(ctx)
+}
+
 // initCoderAgent builds the workspace's coder coordinator. It is
 // create-only: once a coordinator exists the call is a no-op, so a
 // channel push initializing the agent headlessly cannot race a client

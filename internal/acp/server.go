@@ -69,8 +69,17 @@ func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) 
 	d.conn = conn
 	ca.conn = conn
 
-	// Create permission bridge and wrap the real service.
+	// Create event bridge for streaming notifications.
+	eventBridge := newEventBridge(conn, a, log)
+	eventBridge.noticesEnabled = ca.noticesEnabled
+	eventBridge.compactionEnabled = ca.CompactionEnabled
+	ca.bridge = eventBridge
+
+	// Create permission bridge and wrap the real service. Its diff content
+	// resolves paths the same way the event bridge does, so both report the
+	// same file for one call.
 	permb := newPermissionBridge(conn, log)
+	permb.absPath = eventBridge.absPath
 	permService := newACPPermissionService(a.Permissions, permb)
 
 	// Install the client file system so view/write tools delegate to the
@@ -78,12 +87,6 @@ func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) 
 	// adapter reads the capabilities at call time, since Initialize arrives
 	// after the tools are constructed.
 	tools.SetClientFS(&clientFSAdapter{agent: ca})
-
-	// Create event bridge for streaming notifications.
-	eventBridge := newEventBridge(conn, a, log)
-	eventBridge.noticesEnabled = ca.noticesEnabled
-	eventBridge.compactionEnabled = ca.CompactionEnabled
-	ca.bridge = eventBridge
 
 	return &Server{
 		conn:        conn,
@@ -322,14 +325,12 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 					continue
 				}
 				started[p.ID] = p.Input
-				status := acp.ToolCallStatusInProgress
-				if p.Finished {
-					status = acp.ToolCallStatusCompleted
-				}
+				// Finished means the model stopped streaming arguments, not that
+				// the tool ran: the result, replayed below, is what completes it.
 				err = send(acp.StartToolCall(acp.ToolCallId(p.ID), toolTitle(p.Name, p.Input),
 					acp.WithStartName(p.Name),
 					acp.WithStartKind(toolKindFor(p.Name)),
-					acp.WithStartStatus(status),
+					acp.WithStartStatus(acp.ToolCallStatusInProgress),
 					acp.WithStartRawInput(toolRawInput(p.Input)),
 				))
 			case message.ToolResult:

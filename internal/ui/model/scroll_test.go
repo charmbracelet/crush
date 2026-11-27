@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,4 +62,26 @@ func TestChatFollow_RemovingItemKeepsViewPinned(t *testing.T) {
 	wantIdx, wantLine := u.chat.ScrollPosition()
 	require.Equal(t, wantIdx, gotIdx)
 	require.Equal(t, wantLine, gotLine)
+}
+
+func TestSubagentReport_DoesNotPullScrolledUpViewDown(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.chat.ScrollToBottom()
+	_ = u.View()
+	u.applyChatScroll(-20)
+	_ = u.View()
+	idx, line := u.chat.ScrollPosition()
+
+	u.appendSessionMessage(message.Message{
+		ID:    "report",
+		Role:  message.User,
+		Parts: []message.ContentPart{message.SubAgentReport{Label: "betty", Output: "done"}},
+	})
+	_ = u.View()
+
+	gotIdx, gotLine := u.chat.ScrollPosition()
+	require.False(t, u.chat.Follow())
+	require.Equal(t, idx, gotIdx)
+	require.Equal(t, line, gotLine)
 }

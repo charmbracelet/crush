@@ -936,3 +936,70 @@ func TestList_Restyle_KeepsHeights(t *testing.T) {
 	require.Equal(t, 2, items[19].renderHits)
 	require.Equal(t, 1, items[10].renderHits, "off-screen items keep their cached render")
 }
+
+// linesItem renders n numbered lines under a name.
+type linesItem struct {
+	*Versioned
+	name string
+	n    int
+}
+
+func (i *linesItem) Render(int) string {
+	lines := make([]string, i.n)
+	for j := range lines {
+		lines[j] = i.name + strconv.Itoa(j)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestList_AnchorBelow_GrowingFirstItemKeepsRowsBelow(t *testing.T) {
+	t.Parallel()
+
+	top := &linesItem{Versioned: NewVersioned(), name: "a", n: 10}
+	below := &linesItem{Versioned: NewVersioned(), name: "b", n: 10}
+	l := NewList(top, below)
+	l.SetSize(20, 5)
+	l.offsetIdx, l.offsetLine = 0, 8
+	require.Equal(t, "a8\na9\nb0\nb1\nb2", l.Render())
+
+	// The partly scrolled-out first item grows at its end, as a running
+	// subagent does. The rows below it stay put.
+	top.n = 14
+	top.Bump()
+	require.Equal(t, "a12\na13\nb0\nb1\nb2", l.Render())
+
+	top.n = 11
+	top.Bump()
+	require.Equal(t, "a9\na10\nb0\nb1\nb2", l.Render())
+}
+
+func TestList_AnchorBelow_TopAlignedItemIsNotAnchored(t *testing.T) {
+	t.Parallel()
+
+	top := &linesItem{Versioned: NewVersioned(), name: "a", n: 2}
+	below := &linesItem{Versioned: NewVersioned(), name: "b", n: 10}
+	l := NewList(top, below)
+	l.SetSize(20, 4)
+	require.Equal(t, "a0\na1\nb0\nb1", l.Render())
+
+	top.n = 3
+	top.Bump()
+	require.Equal(t, "a0\na1\na2\nb0", l.Render())
+}
+
+func TestList_KeepScrollPosition_SkipsAnchoring(t *testing.T) {
+	t.Parallel()
+
+	top := &linesItem{Versioned: NewVersioned(), name: "a", n: 10}
+	below := &linesItem{Versioned: NewVersioned(), name: "b", n: 10}
+	l := NewList(top, below)
+	l.SetSize(20, 5)
+	l.offsetIdx, l.offsetLine = 0, 8
+	_ = l.Render()
+
+	l.KeepScrollPosition(func() {
+		top.n = 14
+		top.Bump()
+	})
+	require.Equal(t, "a8\na9\na10\na11\na12", l.Render())
+}

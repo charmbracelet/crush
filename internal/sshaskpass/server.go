@@ -174,6 +174,13 @@ func handleConnection(ctx context.Context, conn net.Conn) {
 		}
 	}()
 
+	// A touch notice is never answered: ssh ignores the helper's output
+	// and kills it when the touch lands, ending reqCtx above.
+	if req.Request.Kind == KindTouch {
+		defaultPrompts.Notice(reqCtx, req.Request)
+		return
+	}
+
 	secret, err := defaultPrompts.Prompt(reqCtx, req.Request)
 
 	resp := socketResponse{Secret: secret, Cancelled: errors.Is(err, ErrCancelled)}

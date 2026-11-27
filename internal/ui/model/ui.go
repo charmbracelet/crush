@@ -516,6 +516,11 @@ type UI struct {
 	// pinentryCtrlL tracks whether the active pinentry dialog is an
 	// ncurses flavor that repaints its UI on Ctrl-L.
 	pinentryCtrlL bool
+	// sshTouchID is the pending SSH security key touch notice, and
+	// sshTouchSeq the status message showing it, so the warning can be
+	// cleared when that touch lands.
+	sshTouchID  string
+	sshTouchSeq uint64
 	// pinentryTermMu serializes terminal release/restore commands, which
 	// Bubble Tea runs on separate goroutines.
 	pinentryTermMu sync.Mutex

@@ -132,3 +132,54 @@ func TestPromptsDoubleResolveDoesNotBlock(t *testing.T) {
 	svc.Respond(ev.Payload.ID, "x")
 	svc.Respond(ev.Payload.ID, "y")
 }
+
+// TestNoticeHoldsUntilDoneWithoutBlockingPrompts verifies a touch notice
+// is published, stays pending until its context ends (ssh killing the
+// helper), then notifies, and never holds up a credential prompt.
+func TestNoticeHoldsUntilDoneWithoutBlockingPrompts(t *testing.T) {
+	svc := NewPrompts()
+	sub := svc.Subscribe(t.Context())
+	notifications := svc.SubscribeNotifications(t.Context())
+
+	touchCtx, touchLands := context.WithCancel(t.Context())
+	noticeDone := make(chan struct{})
+	go func() {
+		svc.Notice(touchCtx, PromptRequest{ID: "touch", Kind: KindTouch, Prompt: "Confirm user presence"})
+		close(noticeDone)
+	}()
+	require.Equal(t, "touch", (<-sub).Payload.ID)
+
+	// A password prompt goes through while the touch is still pending.
+	secret := make(chan string, 1)
+	go func() {
+		s, _ := svc.Prompt(t.Context(), PromptRequest{ID: "pw", Prompt: "password: "})
+		secret <- s
+	}()
+	select {
+	case ev := <-sub:
+		require.Equal(t, "pw", ev.Payload.ID)
+		require.True(t, svc.Respond("pw", "hunter2"))
+	case <-time.After(5 * time.Second):
+		t.Fatal("pending touch blocked the password prompt")
+	}
+	require.Equal(t, "hunter2", <-secret)
+	require.Equal(t, "pw", (<-notifications).Payload.RequestID)
+
+	select {
+	case <-noticeDone:
+		t.Fatal("notice ended before the touch landed")
+	default:
+	}
+
+	touchLands()
+	select {
+	case <-noticeDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("notice never ended")
+	}
+	require.Equal(t, "touch", (<-notifications).Payload.RequestID)
+}
+
+func TestNoticeWithoutSubscriberReturns(t *testing.T) {
+	NewPrompts().Notice(t.Context(), PromptRequest{Kind: KindTouch})
+}

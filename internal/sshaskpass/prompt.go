@@ -187,6 +187,23 @@ func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error)
 	}
 }
 
+// Notice publishes a request that needs no answer, such as a security
+// key touch, and holds it until ctx ends. OpenSSH kills its askpass
+// helper once the touch lands, which is what ends ctx; clients then get
+// a resolution notification and drop the notice. Notices do not take a
+// turn, so a pending touch never holds up a credential prompt.
+func (s *Prompts) Notice(ctx context.Context, req PromptRequest) {
+	if s.broker.GetSubscriberCount() == 0 {
+		return
+	}
+	if req.ID == "" {
+		req.ID = uuid.New().String()
+	}
+	s.broker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, req)
+	<-ctx.Done()
+	s.notify(req.ID)
+}
+
 // notify publishes a resolution so clients close the matching dialog.
 func (s *Prompts) notify(id string) {
 	s.notificationBroker.Publish(pubsub.UpdatedEvent, Notification{RequestID: id})

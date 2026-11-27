@@ -22,3 +22,11 @@ func TestSectionHeadersKeepRightPadding(t *testing.T) {
 		require.False(t, strings.HasSuffix(plain, " "), plain)
 	}
 }
+
+// TestThemeListNewThemeUsesEllipsis verifies the new theme entry uses a
+// real ellipsis like other labels.
+func TestThemeListNewThemeUsesEllipsis(t *testing.T) {
+	t.Parallel()
+	text := strings.Join(drawFits(t, NewTheme(newPickerTestCommon()), 100, 30), "\n")
+	require.Contains(t, text, "New Theme…")
+}

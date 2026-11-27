@@ -19,7 +19,7 @@ import (
 const (
 	ThemeID = "theme"
 
-	// newThemeItemName is the sentinel name for the "New Theme..." entry.
+	// newThemeItemName is the sentinel name for the "New Theme…" entry.
 	newThemeItemName = "__new_theme__"
 )
 
@@ -627,16 +627,16 @@ func (th *Theme) setThemeItems() {
 
 	items := make([]list.FilterableItem, 0, len(allThemes)+5)
 
-	// "New Theme..." sentinel — no divider above it.
+	// "New Theme…" sentinel — no divider above it.
 	items = append(items, &ThemeItem{
 		Versioned: &list.Versioned{},
 		name:      newThemeItemName,
-		label:     "New Theme...",
+		label:     "New Theme…",
 		t:         th.com.Styles,
 		mode:      th.mode,
 	})
 
-	// Spacer after "New Theme...".
+	// Spacer after "New Theme…".
 	items = append(items, &themeSpacer{Versioned: &list.Versioned{}, height: 1})
 
 	// System section.

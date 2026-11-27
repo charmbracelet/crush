@@ -90,6 +90,15 @@ func (l *List) SetSize(width, height int) {
 	l.height = height
 }
 
+// KeepScrollPosition runs fn, an in-place change the user made such as
+// expanding an item, without anchoring the rows below the first item.
+func (l *List) KeepScrollPosition(fn func()) {
+	idx, line := l.offsetIdx, l.offsetLine
+	fn()
+	l.itemHeight(idx)
+	l.offsetIdx, l.offsetLine = idx, line
+}
+
 // SetGap sets the gap between items.
 func (l *List) SetGap(gap int) {
 	l.gap = gap
@@ -325,6 +334,11 @@ func (l *List) render(idx int, item Item) *listCacheEntry {
 	}
 	if entry.height != len(lines) {
 		l.totalHeightValid = false
+		// A partly scrolled-out first item grows into the offset, so the
+		// rows below it stay where the user is reading.
+		if idx == l.offsetIdx && l.offsetLine > 0 && entry.height > 0 {
+			l.offsetLine = max(0, l.offsetLine+len(lines)-entry.height)
+		}
 	}
 	// The version is read after Render so a bump Render itself causes is
 	// not mistaken for a later mutation.
@@ -553,6 +567,7 @@ func (l *List) Render() string {
 // renderWindow collects at most budget lines starting at the scroll offset.
 func (l *List) renderWindow(budget int) []string {
 	lines := make([]string, 0, budget)
+	l.drawEntry(l.offsetIdx) // May anchor offsetLine, so draw before reading it.
 	currentIdx := l.offsetIdx
 	currentOffset := l.offsetLine
 

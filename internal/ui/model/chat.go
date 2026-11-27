@@ -903,12 +903,14 @@ func (m *Chat) MessageItemAt(i int) chat.MessageItem {
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
-		wasFollowing := m.follow
-		expandable.ToggleExpanded()
-		if wasFollowing {
-			m.ScrollToBottom()
-		}
+		m.toggleExpanded(expandable)
 	}
+}
+
+// toggleExpanded expands or collapses an item in place. In follow mode Draw
+// re-pins the view to the bottom.
+func (m *Chat) toggleExpanded(expandable chat.Expandable) {
+	m.list.KeepScrollPosition(func() { expandable.ToggleExpanded() })
 }
 
 // IsSelectedShellItem returns true if the currently selected item is a
@@ -1032,11 +1034,7 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		// toggling expansion for clicks outside the clickable area.
 		if handled {
 			if expandable, ok := selectedItem.(chat.Expandable); ok {
-				wasFollowing := m.follow
-				expandable.ToggleExpanded()
-				if wasFollowing {
-					m.ScrollToBottom()
-				}
+				m.toggleExpanded(expandable)
 			}
 		}
 		return handled

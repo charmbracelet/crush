@@ -2081,7 +2081,10 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.chat.AppendMessages(items...)
-		m.chat.ScrollToBottom()
+		// A subagent report leaves a scrolled-up reader where they are.
+		if !msg.HasSubAgentReport() || m.chat.Follow() {
+			m.chat.ScrollToBottom()
+		}
 	case message.Assistant:
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.setMessagePlanFlags(items)

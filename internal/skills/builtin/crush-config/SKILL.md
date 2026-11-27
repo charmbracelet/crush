@@ -186,7 +186,8 @@ option reset <list-key>    # clear a list option back to empty
   `auto-lsp`, `progress`.
 - **Boolean keys phrased positively** (stored as the negated field): `metrics`,
   `auto-summarize`, `provider-auto-update`,
-  `default-providers`. Example: `option metrics false` disables metrics.
+  `default-providers`, `subagents`. Example: `option metrics false` disables
+  metrics; `option subagents false` stops agents from starting subagents.
 - **String keys**: `data-directory`, `initialize-as`, `notifications`.
 - **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
   `assisted-by`) and `attribution-generated-with` (boolean).

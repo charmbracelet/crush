@@ -470,6 +470,7 @@ type Options struct {
 	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
 	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableSubagents          bool         `json:"disable_subagents,omitempty" jsonschema:"description=Prevent agents from starting subagents. Removes the agent\\, agent_dispatch\\, agent_send\\, agent_status\\, agent_stop\\, and agentic_fetch tools,default=false"`
 	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
@@ -1141,6 +1142,9 @@ func allToolNames() []string {
 	}
 }
 
+// subagentToolNames are the tools that start or manage subagents.
+var subagentToolNames = []string{"agent", "agent_dispatch", "agent_send", "agent_status", "agent_stop", "agentic_fetch"}
+
 func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 	if disabledTools == nil {
 		return allTools
@@ -1199,7 +1203,11 @@ func filterSlice(data []string, mask []string, include bool) []string {
 }
 
 func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	disabled := c.Options.DisabledTools
+	if c.Options.DisableSubagents {
+		disabled = append(slices.Clone(disabled), subagentToolNames...)
+	}
+	allowedTools := resolveAllowedTools(allToolNames(), disabled)
 
 	agents := map[string]Agent{
 		AgentCoder: {

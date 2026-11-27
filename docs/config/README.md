@@ -489,6 +489,8 @@ Boolean Keys:
   auto-summarize                 automatically summarize long conversations
   provider-auto-update           update the provider catalog automatically
   default-providers              include built-in providers
+  subagents                      let agents start subagents (agent,
+                                 agent_dispatch, agentic_fetch)
   attribution-generated-with     add the Generated with Crush line
 
 String Keys:

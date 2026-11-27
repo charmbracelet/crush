@@ -85,3 +85,18 @@ func TestOAuthBusyStatesShowTitleAndHelp(t *testing.T) {
 		require.Contains(t, out, "Fetching models...")
 	}
 }
+
+// TestOAuthHelpKeepsEscWhenNarrow verifies esc stays in the help bar
+// when the optional hints are truncated.
+func TestOAuthHelpKeepsEscWhenNarrow(t *testing.T) {
+	t.Parallel()
+
+	for _, codeEntry := range []bool{false, true} {
+		for _, userCode := range []string{"", "ABCD-EFGH"} {
+			m := newTestOAuth(codeEntry)
+			m.HandleMsg(ActionInitiateOAuth{UserCode: userCode, VerificationURL: "https://example.com/device"})
+			out := strings.Join(drawFits(t, m, 40, 30), "\n")
+			require.Contains(t, out, "esc exit", "codeEntry=%v userCode=%q", codeEntry, userCode)
+		}
+	}
+}

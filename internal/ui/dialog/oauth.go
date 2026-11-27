@@ -549,18 +549,16 @@ func (m *OAuth) ShortHelp() []key.Binding {
 				key.WithHelp("enter", "open browser"),
 			)
 		}
-		h := []key.Binding{
-			m.keyMap.CopyURL,
-			submit,
-			m.keyMap.Close,
+		// The main action and esc come first so a narrow help bar
+		// truncates the optional hints rather than the way out.
+		h := []key.Binding{submit, m.keyMap.Close}
+		if m.codeEntryActive() {
+			h = append(h, m.keyMap.FocusCode)
 		}
 		if m.userCode != "" {
-			h = append([]key.Binding{m.keyMap.Copy}, h...)
+			h = append(h, m.keyMap.Copy)
 		}
-		if m.codeEntryActive() {
-			h = append([]key.Binding{m.keyMap.FocusCode}, h...)
-		}
-		return h
+		return append(h, m.keyMap.CopyURL)
 	}
 }
 

@@ -46,23 +46,24 @@ func (m *UI) landingView() string {
 	// section, spacer) and each column's heading and blank line are spent.
 	// Overshooting this clips the "and N more" hint off the bottom.
 	pageHeight := m.layout.main.Dy() - 1
-	sectionHeight := max(1, pageHeight-1-lipgloss.Height(infoSection)-1-2)
-
-	lspSection := m.lspInfo(mcpLspSectionWidth, sectionHeight, false)
-	mcpSection := m.mcpInfo(mcpLspSectionWidth, sectionHeight, false)
-	skillsSection := m.skillsInfo(mcpLspSectionWidth, sectionHeight, false)
-	sections := []string{lspSection, " ", mcpSection, " ", skillsSection}
-	if len(channels) > 0 {
-		sections = append(sections, " ", m.channelsInfo(channels, mcpLspSectionWidth, sectionHeight, false))
+	sectionHeight := pageHeight - 1 - lipgloss.Height(infoSection) - 1 - 2
+	page := infoSection
+	if sectionHeight >= 1 {
+		lspSection := m.lspInfo(mcpLspSectionWidth, sectionHeight, false)
+		mcpSection := m.mcpInfo(mcpLspSectionWidth, sectionHeight, false)
+		skillsSection := m.skillsInfo(mcpLspSectionWidth, sectionHeight, false)
+		sections := []string{lspSection, " ", mcpSection, " ", skillsSection}
+		if len(channels) > 0 {
+			sections = append(sections, " ", m.channelsInfo(channels, mcpLspSectionWidth, sectionHeight, false))
+		}
+		content := lipgloss.JoinHorizontal(lipgloss.Left, sections...)
+		page = lipgloss.JoinVertical(lipgloss.Left, infoSection, "", content)
 	}
-
-	content := lipgloss.JoinHorizontal(lipgloss.Left, sections...)
 
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(pageHeight).
+		MaxHeight(max(1, pageHeight)).
 		PaddingTop(1).
-		Render(
-			lipgloss.JoinVertical(lipgloss.Left, infoSection, "", content),
-		)
+		Render(page)
 }

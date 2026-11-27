@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // channelsInfo renders the channel status section for items, as built by
@@ -15,7 +16,7 @@ import (
 func (m *UI) channelsInfo(items []channelStatusItem, width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
-	title := t.Resource.Heading.Render("Channels")
+	title := t.Resource.Heading.Render(ansi.Truncate("Channels", width, "…"))
 	if isSection {
 		title = common.Section(t, title, width)
 	}
@@ -93,18 +94,6 @@ func (m *UI) channelStatusItems() []channelStatusItem {
 }
 
 func channelList(t *styles.Styles, items []channelStatusItem, width, maxItems int) string {
-	if maxItems <= 0 {
-		return ""
-	}
-
-	if len(items) > maxItems {
-		visibleItems := items[:maxItems-1]
-		remaining := len(items) - (maxItems - 1)
-		items = append(visibleItems, channelStatusItem{
-			title: t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)),
-		})
-	}
-
 	renderedItems := make([]string, 0, len(items))
 	for _, item := range items {
 		renderedItems = append(renderedItems, common.Status(t, common.StatusOpts{
@@ -113,5 +102,5 @@ func channelList(t *styles.Styles, items []channelStatusItem, width, maxItems in
 			Description: item.description,
 		}, width))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, renderedItems...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedItems, maxItems, width, t.Resource.AdditionalText)...)
 }

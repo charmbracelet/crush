@@ -41,9 +41,9 @@ func PrettyPathWithBranch(t *styles.Styles, path, branch string, width int) stri
 func PrettyPathInline(t *styles.Styles, path, branch string, width int) string {
 	formatted := home.Short(path)
 	if branch != "" {
-		combined := branch + " " + formatted
-		formatted = ansi.Truncate(combined, width, "…")
+		formatted = branch + " " + formatted
 	}
+	formatted = ansi.Truncate(formatted, width, "…")
 	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
 }
 
@@ -67,7 +67,7 @@ type ModelContextInfo struct {
 // settings, and optional context usage/cost.
 func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int, hyperCredits *int) string {
 	modelIcon := t.ModelInfo.Icon.Render(styles.ModelIcon)
-	modelName = t.ModelInfo.Name.Render(modelName)
+	modelName = t.ModelInfo.Name.Render(ansi.Truncate(modelName, max(0, width-lipgloss.Width(modelIcon)-1), "…"))
 
 	// Build first line with model name and optionally provider on the same line
 	var firstLine string
@@ -199,20 +199,25 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	titleColor := cmp.Or(opts.TitleColor, t.Resource.DefaultTitleFg)
 	descriptionColor := cmp.Or(opts.DescriptionColor, t.Resource.DefaultDescFg)
 
-	// The title gets first claim on the row; truncating it keeps long names
-	// from wrapping inside narrow columns.
+	// The title gets first claim on the row after the icon and any extra
+	// content; truncating it keeps long names from wrapping inside narrow
+	// columns. Extra content that cannot fit beside a title is dropped.
 	iconWidth := 0
 	if icon != "" {
 		iconWidth = lipgloss.Width(icon) + 1
 	}
-	title = ansi.Truncate(title, max(0, width-iconWidth), "…")
+	extra := opts.ExtraContent
+	extraContentWidth := 0
+	if extra != "" {
+		extraContentWidth = lipgloss.Width(extra) + 1
+		if width-iconWidth-extraContentWidth < 2 {
+			extra, extraContentWidth = "", 0
+		}
+	}
+	title = ansi.Truncate(title, max(0, width-iconWidth-extraContentWidth), "…")
 	title = t.Resource.RowTitleBase.Foreground(titleColor).Render(title)
 
 	if description != "" {
-		extraContentWidth := lipgloss.Width(opts.ExtraContent)
-		if extraContentWidth > 0 {
-			extraContentWidth += 1
-		}
 		descWidth := width - iconWidth - lipgloss.Width(title) - 1 - extraContentWidth
 		if descWidth < 2 {
 			description = ""
@@ -230,8 +235,8 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	if description != "" {
 		content = append(content, description)
 	}
-	if opts.ExtraContent != "" {
-		content = append(content, opts.ExtraContent)
+	if extra != "" {
+		content = append(content, extra)
 	}
 
 	return strings.Join(content, " ")

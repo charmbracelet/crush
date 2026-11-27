@@ -47,6 +47,8 @@ func TestStatusFitsNarrowWidth(t *testing.T) {
 		{"long title", StatusOpts{Icon: "●", Title: "thermo-nuclear-code-review"}, "● thermo-nucl…"},
 		{"title squeezes description", StatusOpts{Icon: "●", Title: "cloudflare-mcp", Description: "error"}, "● cloudflare-…"},
 		{"fits", StatusOpts{Icon: "●", Title: "jj", Description: "2 tools"}, "● jj 2 tools"},
+		{"extra content keeps its room", StatusOpts{Icon: "●", Title: "typescript-lsp", ExtraContent: "E3"}, "● typescri… E3"},
+		{"extra content dropped when it crowds the title", StatusOpts{Icon: "●", Title: "typescript-lsp", ExtraContent: "E3 W12 I4 H9"}, "● typescript-…"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

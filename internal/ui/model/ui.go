@@ -6678,21 +6678,16 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	height := area.Dy() - s.CompactDetails.View.GetVerticalFrameSize()
 
 	title := s.CompactDetails.Title.Width(width).MaxHeight(2).Render(m.session.Title)
-	blocks := []string{
-		title,
-		"",
-		m.modelInfo(width),
-		"",
-	}
-
-	detailsHeader := lipgloss.JoinVertical(
-		lipgloss.Left,
-		blocks...,
-	)
-
 	version := s.CompactDetails.Version.Width(width).AlignHorizontal(lipgloss.Right).Render(version.Version)
 
+	// Spacers go first when the terminal is short, so the sections keep
+	// as many rows as possible.
+	detailsHeader := lipgloss.JoinVertical(lipgloss.Left, title, "", m.modelInfo(width), "")
 	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
+	if remainingHeight < 3 {
+		detailsHeader = lipgloss.JoinVertical(lipgloss.Left, title, m.modelInfo(width))
+		remainingHeight = height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
+	}
 
 	const maxSectionWidth = 50
 	// Subagents take the leading column when any exist, since a running
@@ -6703,28 +6698,28 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 		columns++
 	}
 	sectionWidth := max(1, min(maxSectionWidth, (width-(columns-1))/columns)) // one space between columns
-	maxItemsPerSection := max(0, remainingHeight-3)                           // Account for section title and spacing
+	maxItemsPerSection := remainingHeight - 2                                 // Account for section title and spacing
 
-	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
-	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
-	skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
-	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
-	if len(subAgents) > 0 {
-		sections = lipgloss.JoinHorizontal(lipgloss.Top, m.subAgentsInfo(subAgents, sectionWidth, maxItemsPerSection, false), " ", sections)
+	var sections string
+	if maxItemsPerSection >= 1 {
+		lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
+		mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
+		skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
+		filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
+		sections = lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
+		if len(subAgents) > 0 {
+			sections = lipgloss.JoinHorizontal(lipgloss.Top, m.subAgentsInfo(subAgents, sectionWidth, maxItemsPerSection, false), " ", sections)
+		}
+		sections = lipgloss.NewStyle().MaxWidth(width).MaxHeight(remainingHeight).Render(sections)
 	}
-	sections = lipgloss.NewStyle().MaxWidth(width).MaxHeight(max(0, remainingHeight)).Render(sections)
+	body := []string{detailsHeader, version}
+	if sections != "" {
+		body = []string{detailsHeader, sections, version}
+	}
 	uv.NewStyledString(
 		s.CompactDetails.View.
 			Width(area.Dx()).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					detailsHeader,
-					sections,
-					version,
-				),
-			),
+			Render(lipgloss.JoinVertical(lipgloss.Left, body...)),
 	).Draw(scr, area)
 }
 

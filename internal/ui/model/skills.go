@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type skillStatusItem struct {
@@ -44,7 +45,7 @@ func cachedBuiltinSkills() []*skills.Skill {
 func (m *UI) skillsInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
-	title := t.Resource.Heading.Render("Skills")
+	title := t.Resource.Heading.Render(ansi.Truncate("Skills", width, "…"))
 	if isSection {
 		title = common.Section(t, title, width)
 	}

@@ -19,7 +19,7 @@ func TestQueueItemRendersSubagentReport(t *testing.T) {
 		Label:  "nancy-roadrunner-recheck",
 		Output: "Verification complete.\n\nFinal verdict below.",
 	}
-	got := ansi.Strip(queueList([]string{report.PromptText()}, u.com.Styles))
+	got := ansi.Strip(queueList([]string{report.PromptText()}, u.com.Styles, 80))
 
 	require.Equal(t, "Subagent Report → Nancy roadrunner-recheck", strings.TrimSpace(strings.TrimLeft(got, "•▶ ")))
 }
@@ -28,7 +28,7 @@ func TestQueueItemKeepsMultilinePromptOnOneRow(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	got := ansi.Strip(queueList([]string{"first\nsecond", "third"}, u.com.Styles))
+	got := ansi.Strip(queueList([]string{"first\nsecond", "third"}, u.com.Styles, 80))
 	require.Equal(t, 2, strings.Count(got, "\n")+1)
 	require.Contains(t, got, "first second")
 }

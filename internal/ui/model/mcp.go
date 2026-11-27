@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // mcpStatesTTL bounds how long the memoized MCP state may go without a
@@ -174,7 +175,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 		}
 	}
 
-	title := t.Resource.Heading.Render("MCPs")
+	title := t.Resource.Heading.Render(ansi.Truncate("MCPs", width, "…"))
 	if isSection {
 		title = common.Section(t, title, width)
 	}

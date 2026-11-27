@@ -58,7 +58,8 @@ func NewThemeNew(com *common.Common, base string) *ThemeNew {
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "create"),
 	)
-	d.keyMap.Close = CloseKey
+	// Esc abandons creating the theme and the typed name.
+	d.keyMap.Close = cancelKey
 
 	return d
 }

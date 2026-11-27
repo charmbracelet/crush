@@ -90,10 +90,7 @@ func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
 		key.WithKeys("right", "l", "left", "h", "up", "k", "down", "j"),
 		key.WithHelp("↑↓←→", "navigate"),
 	)
-	f.km.Close = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
-		key.WithHelp("esc", "close/exit"),
-	)
+	f.km.Close = CloseKey
 
 	fp := filepicker.New()
 	fp.AllowedTypes = common.AllowedImageTypes

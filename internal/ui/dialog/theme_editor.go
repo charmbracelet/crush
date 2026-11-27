@@ -69,7 +69,8 @@ func NewThemeEditor(com *common.Common, themeName string) *ThemeEditor {
 	ed.keyMap.Save = key.NewBinding(key.WithKeys("enter", "ctrl+s"), key.WithHelp("enter", "save"))
 	ed.keyMap.Next = key.NewBinding(key.WithKeys("down", "ctrl+n", "tab"), key.WithHelp("↓", "next"))
 	ed.keyMap.Previous = key.NewBinding(key.WithKeys("up", "ctrl+p", "shift+tab"), key.WithHelp("↑", "previous"))
-	ed.keyMap.Close = CloseKey
+	// Esc reverts the palette edits, so it cancels rather than exits.
+	ed.keyMap.Close = cancelKey
 
 	ed.loadTheme()
 	ed.syncInput()

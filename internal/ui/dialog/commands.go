@@ -134,9 +134,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		key.WithKeys("shift+tab"),
 		key.WithHelp("shift+tab", "switch selection prev"),
 	)
-	closeKey := CloseKey
-	closeKey.SetHelp("esc", "cancel")
-	c.keyMap.Close = closeKey
+	c.keyMap.Close = CloseKey
 
 	if available, known := config.DockerMCPAvailabilityCached(); known {
 		c.dockerMCPAvailable = &available

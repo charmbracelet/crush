@@ -166,9 +166,7 @@ func NewChannels(com *common.Common, states map[string]mcp.ClientInfo) *Channels
 		key.WithKeys("up"),
 		key.WithHelp("↑", "previous"),
 	)
-	closeKey := CloseKey
-	closeKey.SetHelp("esc", "close")
-	d.keyMap.Close = closeKey
+	d.keyMap.Close = CloseKey
 
 	return d
 }

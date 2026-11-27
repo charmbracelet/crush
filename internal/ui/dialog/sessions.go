@@ -185,6 +185,10 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 			case key.Matches(msg, s.keyMap.Close):
 				return ActionClose{}
 			case key.Matches(msg, s.keyMap.Rename):
+				// Nothing to rename when the filter matches no session.
+				if s.selectedSessionItem() == nil {
+					break
+				}
 				s.sessionsMode = sessionsModeUpdating
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Delete):

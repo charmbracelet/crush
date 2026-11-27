@@ -248,10 +248,7 @@ func (m *SkillToggles) innerContent() string {
 	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 
 	if len(m.items) == 0 {
-		return t.Dialog.SecondaryText.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render("No skills configured.")
+		return toggleEmptyState(t, "No skills configured.", innerWidth)
 	}
 
 	// Cap the visible rows so a long skill list cannot make the dialog
@@ -348,5 +345,9 @@ func (m *SkillToggles) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (m *SkillToggles) ShortHelp() []key.Binding {
+	if len(m.items) == 0 {
+		// Nothing to move between or toggle: only closing does anything.
+		return []key.Binding{m.keyMap.Close}
+	}
 	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
 }

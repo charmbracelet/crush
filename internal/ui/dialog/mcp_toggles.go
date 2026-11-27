@@ -262,10 +262,7 @@ func (m *MCPToggles) innerContent() string {
 	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 
 	if len(m.items) == 0 {
-		return t.Dialog.SecondaryText.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render("No MCP servers configured.")
+		return toggleEmptyState(t, "No MCP servers configured.", innerWidth)
 	}
 
 	// Cap the visible rows so a long server list cannot make the dialog
@@ -387,5 +384,9 @@ func (m *MCPToggles) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (m *MCPToggles) ShortHelp() []key.Binding {
+	if len(m.items) == 0 {
+		// Nothing to move between or toggle: only closing does anything.
+		return []key.Binding{m.keyMap.Close}
+	}
 	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
 }

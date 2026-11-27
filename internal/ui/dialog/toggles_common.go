@@ -77,3 +77,10 @@ func joinToggleRows(t *styles.Styles, rows []string, contentSize, visible, offse
 	// Blank spacer lines above and below, matching the unscrolled layout.
 	return lipgloss.JoinVertical(lipgloss.Left, "", b.String(), "")
 }
+
+// toggleEmptyState renders a toggles dialog's empty message with the same
+// blank spacer lines above and below as a populated list, so it does not
+// crowd the title or the help line.
+func toggleEmptyState(t *styles.Styles, msg string, innerWidth int) string {
+	return lipgloss.JoinVertical(lipgloss.Left, "", dialogEmptyState(t, msg, innerWidth), "")
+}

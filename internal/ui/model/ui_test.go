@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -230,6 +231,73 @@ func TestAttachmentsLimit(t *testing.T) {
 		ui.attachments.Update(message.Attachment{FileName: "b.png"})
 		require.True(t, ui.attachmentsLimitReached())
 	})
+}
+
+func TestCompletionPopupFollowsTheCursorWord(t *testing.T) {
+	t.Parallel()
+	open := func(t *testing.T, value string, start int) (*UI, image.Point) {
+		t.Helper()
+		u := newFrameTestUI(t)
+		// Typing @ reads the completion limits from the TUI options.
+		u.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}}}
+		u.focus = uiFocusEditor
+		u.completions = completions.New(u.com.Styles.Completions.Normal, u.com.Styles.Completions.Focused, u.com.Styles.Completions.Match)
+		u.completions.SetItems([]completions.FileCompletionValue{{Path: "candidate.go"}}, nil)
+		u.textarea.SetValue(value)
+		u.textarea.MoveToEnd()
+		u.completionsOpen, u.completionsStartIndex = true, start
+		u.completionsPositionStart = image.Pt(5, 15)
+		frame, area := ansi.Strip(u.View().Content), u.textareaArea()
+		for y, line := range strings.Split(frame, "\n") {
+			if before, _, ok := strings.Cut(line, value); ok && y >= area.Min.Y && y < area.Max.Y {
+				return u, image.Pt(ansi.StringWidth(before), y)
+			}
+		}
+		t.Fatalf("Prompt %q not painted", value)
+		return nil, image.Point{}
+	}
+	click := func(u *UI, x, y int) {
+		u.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+		u.Update(tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
+	}
+
+	u, text := open(t, "a @cand", 2)
+	click(u, text.X+5, text.Y)
+	require.True(t, u.completionsOpen, "the cursor stays in the @word")
+	require.Equal(t, "cand", u.completionsQuery)
+	click(u, text.X, text.Y)
+	require.False(t, u.completionsOpen, "leaving the @word ends the completion")
+	require.Equal(t, "a @cand", u.textarea.Value())
+
+	u, _ = open(t, "a @cand", 2)
+	click(u, u.layout.main.Min.X+1, u.layout.main.Min.Y+1)
+	require.False(t, u.completionsOpen, "a click outside the editor ends the completion")
+
+	u, text = open(t, "see @ba and more", 4)
+	u.Update(tea.MouseClickMsg{X: text.X + 6, Y: text.Y, Button: tea.MouseLeft})
+	require.True(t, u.completionsOpen, "the press lands inside the @word")
+	u.Update(tea.MouseMotionMsg{X: text.X + 16, Y: text.Y, Button: tea.MouseLeft})
+	u.Update(tea.MouseReleaseMsg{X: text.X + 16, Y: text.Y, Button: tea.MouseLeft})
+	require.False(t, u.completionsOpen, "dragging out of the @word ends the completion")
+
+	for _, value := range []string{"see @ba and more", "first line\nsee @ba and more"} {
+		start := strings.Index(value, "@")
+		u, _ = open(t, "see @ba and more", 4)
+		u.textarea.SetValue(value)
+		u.completionsStartIndex = start
+		u.setTextareaCursorOffset(start + len("@b"))
+		require.True(t, u.insertCompletionText("candidate.go"))
+		want := strings.Replace(value, "@ba", "candidate.go", 1)
+		require.Equal(t, want, u.textarea.Value(), "accepting replaces only the @word")
+		require.Equal(t, start+len("candidate.go "), u.textareaCursorOffset(), "the cursor follows the inserted text")
+	}
+
+	u, _ = open(t, "a b", 0)
+	u.closeCompletions()
+	u.textarea.SetCursorColumn(2)
+	u.Update(tea.KeyPressMsg{Code: '@', Text: "@"})
+	require.True(t, u.completionsOpen, "an @ typed after a space mid-prompt opens completions")
+	require.Equal(t, 2, u.completionsStartIndex)
 }
 
 func TestMouseMode(t *testing.T) {
@@ -757,7 +825,7 @@ func TestPlanHandoffRequestChangesRoutesEditorTextSelection(t *testing.T) {
 	scr := uv.NewScreenBuffer(80, u.layout.editor.Max.Y)
 	inline.Draw(scr, u.layout.editor)
 
-	u.Update(tea.MouseClickMsg{X: 4, Y: 12})
+	u.Update(tea.MouseClickMsg{X: 4, Y: 12, Button: tea.MouseLeft})
 	u.Update(tea.MouseMotionMsg{X: 8, Y: 12})
 	_, cmd := u.Update(tea.MouseReleaseMsg{X: 8, Y: 12})
 

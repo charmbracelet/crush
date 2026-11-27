@@ -679,7 +679,7 @@ func TestE2E_UnansweredPromptDoesNotBlockOtherSessions(t *testing.T) {
 }
 
 // TestE2E_AutoApproveSession guards the endpoint `crush run` uses to grant
-// its own session's permission requests without a prompt.
+// ordinary permission requests without approving dangerous commands.
 func TestE2E_AutoApproveSession(t *testing.T) {
 	t.Parallel()
 	h := newE2EHarness(t)
@@ -703,6 +703,17 @@ func TestE2E_AutoApproveSession(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, granted)
+
+	granted, err = h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:  "s-run",
+		ToolCallID: "tc-danger",
+		ToolName:   "bash",
+		Action:     "execute",
+		Path:       h.workspace.Path,
+		Danger:     "blocked command",
+	})
+	require.ErrorIs(t, err, permission.ErrDangerousAutoApproval)
+	require.False(t, granted)
 }
 
 // TestE2E_KillingClientASSEDoesNotBreakClientB covers PLAN item 6

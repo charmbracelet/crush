@@ -611,8 +611,11 @@ To disable tools from MCP servers, see the [MCP config section](#mcps).
 
 ### You only live once
 
-You can also skip all permission prompts completely by running Crush with the
-`--yolo` flag. Be very, very careful with this feature.
+`--yolo` skips permission prompts but blocks dangerous shell commands.
+Non-interactive `crush run` also approves ordinary requests without prompting
+while refusing dangerous shell commands. Use interactive normal mode to
+review a dangerous command before running it. Sysadmin mode (`-yy`) opts out
+of the dangerous-command block; use it with care.
 
 ### Disabling Skills
 

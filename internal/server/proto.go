@@ -768,8 +768,8 @@ func (c *controllerV1) handlePostWorkspacePermissionsGrant(w http.ResponseWriter
 	jsonEncode(w, proto.PermissionGrantResponse{Resolved: resolved})
 }
 
-// handlePostWorkspaceSessionAutoApprove auto-approves every permission
-// request a session raises.
+// handlePostWorkspaceSessionAutoApprove skips permission prompts for a
+// session without granting permission to run dangerous commands.
 func (c *controllerV1) handlePostWorkspaceSessionAutoApprove(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")

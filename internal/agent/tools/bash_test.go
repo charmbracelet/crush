@@ -600,6 +600,54 @@ func TestBashTool_YoloModeRunsOrdinaryCommands(t *testing.T) {
 	require.FileExists(t, filepath.Join(workingDir, "ran"))
 }
 
+func TestBashTool_AutoApprovedSessionPermission(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name         string
+		mode         permission.PermissionMode
+		inherited    bool
+		allowedTools []string
+	}{
+		{name: "normal"},
+		{name: "normal with bash allowlisted", allowedTools: []string{BashToolName}},
+		{name: "inherited", inherited: true},
+		{name: "sysadmin", mode: permission.PermissionModeSysadmin},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			perms := permission.NewPermissionService(wd, tt.allowedTools, nil)
+			perms.SetPermissionMode(tt.mode)
+			const sessionID = "run"
+			if tt.inherited {
+				perms.AutoApproveSession("parent")
+				perms.InheritAutoApproval("parent", sessionID)
+			} else {
+				perms.AutoApproveSession(sessionID)
+			}
+			ctx, cancel := context.WithTimeout(context.WithValue(t.Context(), SessionIDContextKey, sessionID), 3*time.Second)
+			defer cancel()
+			attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+			policy := &config.Permissions{BlockedCommands: []string{"touch"}}
+			tool := NewBashTool(perms, wd, wd, attribution, "test-model", config.DefaultMaxBackgroundJobs, shell.CoreutilsTurtle, policy, nil, nil)
+
+			resp := runBashTool(t, tool, ctx, BashParams{Description: "ordinary write", Command: "printf ok > ordinary"})
+			require.False(t, resp.IsError, resp.Content)
+			require.FileExists(t, filepath.Join(wd, "ordinary"))
+
+			resp = runBashTool(t, tool, ctx, BashParams{Description: "blocked command", Command: "touch marker"})
+			if tt.mode == permission.PermissionModeSysadmin {
+				require.False(t, resp.IsError, resp.Content)
+				require.FileExists(t, filepath.Join(wd, "marker"))
+				return
+			}
+			require.True(t, resp.IsError)
+			require.Contains(t, resp.Content, "touch is a dangerous command")
+			require.Contains(t, resp.Content, "non-interactive")
+			require.NoFileExists(t, filepath.Join(wd, "marker"))
+		})
+	}
+}
+
 func TestBashTool_SysadminModeRunsDangerousCommands(t *testing.T) {
 	tool, _, ctx, workingDir := newModeBashTool(t, permission.PermissionModeSysadmin)
 	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\nexit 0\n"), 0o755))

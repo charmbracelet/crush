@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -325,6 +326,12 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 					},
 				)
 				if err != nil {
+					if errors.Is(err, permission.ErrDangerousAutoApproval) {
+						return fantasy.NewTextErrorResponse(fmt.Sprintf(
+							"blocked: %s is a dangerous command, and non-interactive sessions cannot ask for approval. Tell the user: they can run interactively to review it, use sysadmin mode to allow it, or mark it safe with `permissions safe`.",
+							check.Reason,
+						)), nil
+					}
 					return fantasy.ToolResponse{}, err
 				}
 				if !p {
@@ -332,7 +339,8 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 				}
 			}
 
-			// A named match reaching here was approved at a prompt; keep the block list for everything else.
+			// A named match reaching here was permitted explicitly; keep the
+			// block list for commands the check did not recognize.
 			var blocksToUse []shell.BlockFunc
 			if !check.Matched && mode != permission.PermissionModeSysadmin {
 				blocksToUse = blockFuncs(blocked)

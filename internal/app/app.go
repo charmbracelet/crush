@@ -471,8 +471,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
-	// Automatically approve all permission requests for this non-interactive
-	// session.
+	// Ordinary requests in this non-interactive session cannot wait for a
+	// prompt. Dangerous commands still require explicit permission.
 	app.Permissions.AutoApproveSession(sess.ID)
 
 	// Report session identity to herdr.

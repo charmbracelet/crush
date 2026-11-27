@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ModelType represents the type of model to select.
@@ -320,8 +321,18 @@ func (m *Models) Cursor() *tea.Cursor {
 	return InputCursor(m.com.Styles, m.input.Cursor())
 }
 
-// modelTypeRadioView returns the radio view for model type selection.
-func (m *Models) modelTypeRadioView() string {
+// modelTypeRadioView returns the radio view for model type selection,
+// using the short "Large"/"Small" labels when the full ones would not fit
+// beside the title in width columns.
+func (m *Models) modelTypeRadioView(width int) string {
+	full := m.renderModelTypeRadio(ModelTypeLarge.String(), ModelTypeSmall.String())
+	if lipgloss.Width(full) <= width {
+		return full
+	}
+	return m.renderModelTypeRadio("Large", "Small")
+}
+
+func (m *Models) renderModelTypeRadio(largeLabel, smallLabel string) string {
 	t := m.com.Styles
 	textStyle := t.Radio.Label
 	largeRadioStyle := t.Radio.Off
@@ -336,8 +347,16 @@ func (m *Models) modelTypeRadioView() string {
 	smallRadio := smallRadioStyle.Padding(0, 1).Render()
 
 	return fmt.Sprintf("%s%s  %s%s",
-		largeRadio, textStyle.Render(ModelTypeLarge.String()),
-		smallRadio, textStyle.Render(ModelTypeSmall.String()))
+		largeRadio, textStyle.Render(largeLabel),
+		smallRadio, textStyle.Render(smallLabel))
+}
+
+// basePlaceholder returns the untruncated input placeholder.
+func (m *Models) basePlaceholder() string {
+	if m.isOnboarding {
+		return onboardingModelInputPlaceholder
+	}
+	return m.modelType.Placeholder()
 }
 
 // Draw implements [Dialog].
@@ -350,13 +369,18 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			onboardingLogoHeight-onboardingTopGap(area.Dy()))
 	}
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
+	inputWidth := dialogInputTextWidth(t, m.input, innerWidth)
+	m.input.SetWidth(inputWidth)
+	// Ellipsize the placeholder instead of letting it cut off mid-word.
+	m.input.Placeholder = ansi.Truncate(m.basePlaceholder(), inputWidth, "…")
 
 	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
-	rc.TitleInfo = m.modelTypeRadioView()
+	const titleGap = 1
+	rc.TitleInfo = m.modelTypeRadioView(innerWidth - t.Dialog.Title.GetHorizontalFrameSize() -
+		lipgloss.Width(rc.Title) - titleGap)
 
 	if m.isOnboarding {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")

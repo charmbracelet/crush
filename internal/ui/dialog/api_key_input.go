@@ -165,7 +165,7 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// The prompt icon differs per state (the error icon is wider), so
 	// set it before sizing the text area around it.
 	m.applyInputState()
-	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
+	sizeDialogInput(t, &m.input, contentWidth)
 
 	textStyle := t.Dialog.SecondaryText
 	dialogStyle := t.Dialog.View.Width(m.width)

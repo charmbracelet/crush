@@ -29,6 +29,18 @@ func dialogInputTextWidth(t *styles.Styles, input textinput.Model, contentWidth 
 		cursorPadding)
 }
 
+// sizeDialogInput fits input to contentWidth (see [dialogInputTextWidth])
+// and re-scrolls it to the cursor. The input only recomputes which part
+// of a long value is visible as the cursor moves, so without the re-scroll
+// a resize, or a state change that widens the prompt, leaves a stale
+// window that wraps past the dialog until the next key press.
+func sizeDialogInput(t *styles.Styles, input *textinput.Model, contentWidth int) {
+	if w := dialogInputTextWidth(t, *input, contentWidth); w != input.Width() {
+		input.SetWidth(w)
+		input.SetCursor(input.Position())
+	}
+}
+
 // sizer is satisfied by any list type that can report its total content
 // height and accept a viewport size. Both *list.List and *list.FilterableList
 // (and wrappers embedding them) implement this.

@@ -110,7 +110,7 @@ func (m *Pinentry) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	contentWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
+	sizeDialogInput(t, &m.input, contentWidth)
 
 	// What is being unlocked comes before the input, the way a terminal
 	// pinentry lays out its description.

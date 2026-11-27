@@ -184,7 +184,7 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize() + descHeight
 
-	n.input.SetWidth(dialogInputTextWidth(t, n.input, innerWidth))
+	sizeDialogInput(t, &n.input, innerWidth)
 	// Size the list to its options so no blank rows pile up between
 	// the last one and the help line.
 	n.list.SetSize(innerWidth, min(max(0, height-heightOffset), len(n.list.Items())))

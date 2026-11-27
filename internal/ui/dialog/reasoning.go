@@ -166,7 +166,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(reasoningDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
-	r.input.SetWidth(dialogInputTextWidth(t, r.input, innerWidth))
+	sizeDialogInput(t, &r.input, innerWidth)
 
 	// Size the dialog to fit the list content, clamped to min/max bounds.
 	listTotalHeight := r.list.TotalHeight()

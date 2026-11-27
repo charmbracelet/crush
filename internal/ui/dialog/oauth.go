@@ -456,7 +456,7 @@ func (m *OAuth) innerDialogContent() string {
 			// The manual fallback: the authorization page shows a code
 			// to paste when the redirect cannot come back on its own.
 			inputStyle := t.Dialog.InputPrompt
-			m.codeInput.SetWidth(dialogInputTextWidth(t, m.codeInput, innerWidth))
+			sizeDialogInput(t, &m.codeInput, innerWidth)
 			elements = append(elements,
 				statusTextStyle.
 					Width(innerWidth).

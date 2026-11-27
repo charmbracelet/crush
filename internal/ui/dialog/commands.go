@@ -290,7 +290,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
-	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
+	sizeDialogInput(t, &c.input, innerWidth)
 	listHeight, listTotalHeight, listWidth := sizeDialogList(t, c.list, innerWidth, height)
 
 	// Hide the shortcut hints uniformly when the widest would crowd names.

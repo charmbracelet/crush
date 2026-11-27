@@ -99,7 +99,7 @@ func (d *ThemeNew) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(themeNewDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
-	d.input.SetWidth(dialogInputTextWidth(t, d.input, innerWidth))
+	sizeDialogInput(t, &d.input, innerWidth)
 	d.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)

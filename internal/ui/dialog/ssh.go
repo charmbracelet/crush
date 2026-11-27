@@ -138,7 +138,7 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	contentWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 	m.input.Prompt = "> "
-	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
+	sizeDialogInput(t, &m.input, contentWidth)
 
 	// What OpenSSH is asking for comes before the input; confirmations
 	// have no input, just a blank row before the help.

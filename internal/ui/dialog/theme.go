@@ -463,7 +463,7 @@ func (th *Theme) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
-	th.input.SetWidth(dialogInputTextWidth(t, th.input, innerWidth))
+	sizeDialogInput(t, &th.input, innerWidth)
 	listHeight, listTotalHeight, _ := sizeDialogList(t, th.list, innerWidth, height)
 
 	var cur *tea.Cursor

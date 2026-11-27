@@ -32,11 +32,15 @@ func TestAPIKeyInputLongValueStaysOnOneLine(t *testing.T) {
 			m.state = st
 			m.input.SetValue(strings.Repeat("sk-abcdefgh", 12))
 			lines := drawFits(t, m, w, 30)
-			count := 0
+			// Any fragment of the key counts, so a wrapped tail that starts
+			// mid-word still shows up as a second row.
+			rows := 0
 			for _, l := range lines {
-				count += strings.Count(l, "sk-abcdefgh")
+				if strings.Contains(l, "sk-") || strings.Contains(l, "abcd") || strings.Contains(l, "efgh") {
+					rows++
+				}
 			}
-			require.Less(t, count, 12, "key wrapped onto extra rows (state %d, width %d)", st, w)
+			require.Equal(t, 1, rows, "key must sit on exactly one row (state %d, width %d)", st, w)
 			cur := m.Draw(uv.NewScreenBuffer(w, 30), uvRect(w, 30))
 			if cur != nil {
 				require.Contains(t, lines[cur.Y], "sk-abcdefgh")

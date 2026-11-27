@@ -280,7 +280,7 @@ func (d *Channels) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	d.input.SetWidth(dialogInputTextWidth(t, d.input, innerWidth))
+	sizeDialogInput(t, &d.input, innerWidth)
 	listHeight, listTotalHeight, _ := sizeDialogList(t, d.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)

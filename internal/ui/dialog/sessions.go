@@ -287,7 +287,7 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	s.input.SetWidth(dialogInputTextWidth(t, s.input, innerWidth))
+	sizeDialogInput(t, &s.input, innerWidth)
 	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height)
 
 	// Hide the timestamps uniformly when the widest would crowd the title.

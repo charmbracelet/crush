@@ -3,6 +3,7 @@ package dialog
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -417,7 +418,7 @@ func (p *Permissions) dialogSize(area uv.Rectangle) (width, maxHeight int, force
 // content; diff and fullscreen views always take all remaining height.
 func (p *Permissions) contentViewportHeight(forceFullscreen bool, maxHeight, fixedHeight, contentHeight int) int {
 	if p.hasDiffView() || forceFullscreen {
-		return maxHeight - fixedHeight
+		return max(maxHeight-fixedHeight, 1)
 	}
 	if fixedHeight+contentHeight < maxHeight {
 		return max(contentHeight, 3)
@@ -448,8 +449,19 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// scrollable viewport into whatever height the fixed chrome leaves.
 	renderedContent := p.renderContent(contentWidth)
 	contentHeight := lipgloss.Height(renderedContent)
+	// Diffs always fill the remaining height, and their pre-rendered
+	// height can be stale here, so they always ask for the full minimum.
+	minContent := min(contentHeight, minContentLines)
+	if p.hasDiffView() {
+		minContent = minContentLines
+	}
+	header, buttons, helpView, spacing := p.fitChrome(maxHeight-dialogStyle.GetVerticalFrameSize(),
+		minContent, contentWidth, header, buttons, helpView)
 	fixedHeight := lipgloss.Height(header) + lipgloss.Height(buttons) +
-		lipgloss.Height(helpView) + dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
+		dialogStyle.GetVerticalFrameSize() + spacing
+	if helpView != "" {
+		fixedHeight += lipgloss.Height(helpView)
+	}
 	availableHeight := p.contentViewportHeight(forceFullscreen, maxHeight, fixedHeight, contentHeight)
 
 	// Determine if scrollbar is needed.
@@ -482,15 +494,67 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		content = joinScrollbar(t, content, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
 	}
 
+	// Blank spacer lines are dropped by fitChrome when the window is too
+	// short to afford them.
+	var gap []string
+	if spacing > 0 {
+		gap = []string{""}
+	}
 	parts := []string{header}
 	if content != "" {
-		parts = append(parts, "", content)
+		parts = append(append(parts, gap...), content)
 	}
-	parts = append(parts, "", buttons, "", helpView)
+	parts = append(append(parts, gap...), buttons)
+	if helpView != "" {
+		parts = append(append(parts, gap...), helpView)
+	}
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
 	return nil
+}
+
+// minContentLines is how many rows of the request content (the command or
+// diff) the dialog tries to keep visible when the window is short.
+const minContentLines = 3
+
+// fitChrome trims the fixed chrome around the content viewport so the
+// content keeps at least minContent rows within innerHeight (the dialog
+// height inside its frame). The request content is what the user is
+// approving, so it wins over decoration: spacer lines go first, then the
+// stacked buttons collapse onto one compact row when it fits, then the
+// help line goes, and finally the header is cut down from the bottom. The
+// returned spacing is the number of blank lines to reserve.
+func (p *Permissions) fitChrome(innerHeight, minContent, contentWidth int, header, buttons, helpView string) (string, string, string, int) {
+	minContent = max(minContent, 1)
+	spacing := layoutSpacingLines
+	short := func() bool {
+		used := lipgloss.Height(header) + lipgloss.Height(buttons) + spacing
+		if helpView != "" {
+			used += lipgloss.Height(helpView)
+		}
+		return innerHeight-used < minContent
+	}
+	if !short() {
+		return header, buttons, helpView, spacing
+	}
+	spacing = 0
+	if short() && lipgloss.Height(buttons) > 1 {
+		if compact := p.renderButtonGroupPadded(" ", 1); lipgloss.Width(compact) <= contentWidth {
+			buttons = lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center).Render(compact)
+		}
+	}
+	if short() {
+		helpView = ""
+	}
+	if short() {
+		lines := slices.DeleteFunc(strings.Split(header, "\n"), func(l string) bool {
+			return strings.TrimSpace(ansi.Strip(l)) == ""
+		})
+		keep := innerHeight - lipgloss.Height(buttons) - minContent
+		header = strings.Join(lines[:max(1, min(len(lines), keep))], "\n")
+	}
+	return header, buttons, helpView, spacing
 }
 
 func (p *Permissions) renderHeader(contentWidth int) string {
@@ -829,6 +893,12 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 // because approving is the destructive choice here and it should not wear
 // the same inviting highlight it does on an ordinary prompt.
 func (p *Permissions) renderButtonGroup(spacing string) string {
+	return p.renderButtonGroupPadded(spacing, 0)
+}
+
+// renderButtonGroupPadded is renderButtonGroup with a custom horizontal
+// button padding; zero keeps the default.
+func (p *Permissions) renderButtonGroupPadded(spacing string, padding int) string {
 	t := p.com.Styles
 	approveStyles := t
 	if p.permission.Danger != "" {
@@ -851,6 +921,7 @@ func (p *Permissions) renderButtonGroup(spacing string) string {
 			Text:           text,
 			UnderlineIndex: underline,
 			Selected:       p.selectedOption == i,
+			Padding:        padding,
 		})
 	}
 

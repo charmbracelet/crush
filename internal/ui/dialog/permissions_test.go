@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -221,4 +222,44 @@ func TestPermissions_BashSessionButtonNamesProgram(t *testing.T) {
 	require.Contains(t, buttons("git"), "Allow git for Session")
 	require.Contains(t, buttons(""), "Allow for Session")
 	require.NotContains(t, buttons(""), "git")
+}
+
+type permissionsTestWorkspace struct{ workspace.Workspace }
+
+func (permissionsTestWorkspace) WorkingDir() string { return "/tmp" }
+
+// TestPermissions_SmallWindowShowsContent verifies that in a window too
+// small for the normal layout the request content (the command or diff the
+// user is approving) stays visible and the whole dialog fits the area.
+// Previously the fixed chrome left a zero or negative viewport, so the user
+// approved blind, and at the smallest sizes the buttons and border were
+// clipped.
+func TestPermissions_SmallWindowShowsContent(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s, Workspace: permissionsTestWorkspace{}}
+
+	reqs := map[string]struct {
+		req  permission.PermissionRequest
+		want string
+	}{
+		"bash": {permission.PermissionRequest{
+			ID: "p", ToolName: tools.BashToolName, Path: "/tmp",
+			Params: tools.BashPermissionsParams{Command: "rm -rf /tmp/foo", Description: "Remove foo"},
+		}, "rm -rf /tmp/foo"},
+		"edit": {permission.PermissionRequest{
+			ID: "p", ToolName: tools.EditToolName, Path: "/tmp",
+			Params: tools.EditPermissionsParams{FilePath: "/tmp/a.go", OldContent: "a\nb\n", NewContent: "a\nc\n"},
+		}, "@@"},
+	}
+	for name, tc := range reqs {
+		for _, sz := range [][2]int{{40, 14}, {30, 10}} {
+			p := NewPermissions(com, tc.req)
+			lines := drawFits(t, p, sz[0], sz[1])
+			text := strings.Join(lines, "\n")
+			require.Containsf(t, text, tc.want, "%s at %dx%d hides the content:\n%s", name, sz[0], sz[1], text)
+			require.Contains(t, text, "Deny")
+			require.GreaterOrEqual(t, p.viewport.Height(), 3, "%s at %dx%d", name, sz[0], sz[1])
+		}
+	}
 }

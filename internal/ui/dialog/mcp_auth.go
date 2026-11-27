@@ -127,7 +127,7 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			case MCPAuthStatePrompt:
 				return m.startAuth()
 			case MCPAuthStateAuthenticating:
-				m.openAuthURL()
+				return ActionCmd{m.openAuthURL()}
 			case MCPAuthStateSuccess:
 				return m.advance()
 			}
@@ -198,9 +198,13 @@ func (m *MCPAuth) advance() Action {
 	return nil
 }
 
-func (m *MCPAuth) openAuthURL() {
-	if u := m.authURL(); u != "" {
-		browser.OpenURL(u)
+func (m *MCPAuth) openAuthURL() tea.Cmd {
+	u := m.authURL()
+	return func() tea.Msg {
+		if u != "" {
+			_ = browser.OpenURL(u)
+		}
+		return nil
 	}
 }
 

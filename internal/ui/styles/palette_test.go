@@ -9,6 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSelectedRowHintsMatchRowText(t *testing.T) {
+	t.Parallel()
+	for _, name := range BuiltinThemeNames() {
+		s, err := LoadTheme(name)
+		require.NoError(t, err)
+		row := colorToHex(s.Dialog.SelectedItem.GetForeground())
+		require.Equal(t, row, colorToHex(s.Dialog.ListItem.InfoFocused.GetForeground()), name)
+		require.Equal(t, row, colorToHex(s.Dialog.Sessions.InfoFocused.GetForeground()), name)
+	}
+}
+
 func TestPaletteFromOpts_RoundTrip(t *testing.T) {
 	t.Parallel()
 	opts := charmtoneOpts()

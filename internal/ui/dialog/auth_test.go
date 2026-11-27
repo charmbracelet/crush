@@ -10,9 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAuthNoInstructionsDuplicatingHelp verifies the auth dialogs leave
-// "press enter" instructions to the help bar, and that MCP shows its
-// queue progress in the title.
+// TestAuthNoInstructionsDuplicatingHelp verifies AWS SSO and MCP leave
+// "press enter" instructions to the help bar, that MCP shows its queue
+// progress in the title, and that OAuth keeps its fuller hint, which says
+// what enter does with the code.
 func TestAuthNoInstructionsDuplicatingHelp(t *testing.T) {
 	t.Parallel()
 
@@ -30,10 +31,12 @@ func TestAuthNoInstructionsDuplicatingHelp(t *testing.T) {
 		{Name: "notion", URL: "https://mcp.notion.com"},
 	}, nil)
 
-	for name, d := range map[string]Dialog{"oauth browser": browser, "oauth device": device, "aws sso": sso, "mcp": mcp} {
+	for name, d := range map[string]Dialog{"aws sso": sso, "mcp": mcp} {
 		out := strings.Join(drawFits(t, d, 100, 30), "\n")
 		require.NotContains(t, out, "Press enter", name)
 	}
+	require.Contains(t, strings.Join(drawFits(t, browser, 100, 30), "\n"), "Press enter to open the browser")
+	require.Contains(t, strings.Join(drawFits(t, device, 100, 30), "\n"), "Press enter to copy the code below")
 	out := strings.Join(drawFits(t, mcp, 100, 30), "\n")
 	require.Contains(t, out, "Authenticate with linear (1/2)")
 }

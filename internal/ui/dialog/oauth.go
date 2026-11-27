@@ -393,7 +393,21 @@ func (m *OAuth) innerDialogContent() string {
 		return lipgloss.JoinVertical(lipgloss.Left, "", status, "")
 
 	case OAuthStateDisplay:
-		elements := []string{""}
+		// Render each text segment with its own style. Wrapping the
+		// whole concatenation in a single style would lose the text
+		// color after the enter key's reset code.
+		action := " to open the browser and authenticate."
+		if m.userCode != "" {
+			action = " to copy the code below and open the browser."
+		}
+		instructions := lipgloss.NewStyle().
+			Width(innerWidth).
+			Padding(0, 1).
+			Render(t.Dialog.OAuth.Instructions.Render("Press ") +
+				t.Dialog.OAuth.Enter.Render("enter") +
+				t.Dialog.OAuth.Instructions.Render(action))
+
+		elements := []string{"", instructions, ""}
 		if m.userCode != "" {
 			codeBox := lipgloss.NewStyle().
 				Width(innerWidth).

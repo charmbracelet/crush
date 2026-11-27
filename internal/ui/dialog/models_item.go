@@ -45,6 +45,9 @@ func (m *ModelGroup) Render(width int) string {
 		configured = configuredIcon + " " + configuredText
 	}
 
+	// Leave the same right padding as the item rows so the rule does not
+	// touch the dialog border.
+	width = max(0, width-m.t.Dialog.NormalItem.GetPaddingRight())
 	title := " " + m.Title + " "
 	// Keep the "Configured" badge only when the full title fits beside it
 	// (plus a separator). Otherwise drop it and let the title use the whole

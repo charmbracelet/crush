@@ -69,7 +69,9 @@ type ThemeSectionHeader struct {
 
 func (h *ThemeSectionHeader) Filter() string { return "" }
 func (h *ThemeSectionHeader) Render(width int) string {
-	return common.Section(h.t, " "+h.title+" ", width)
+	// Leave the same right padding as the item rows so the rule does not
+	// touch the dialog border.
+	return common.Section(h.t, " "+h.title+" ", max(0, width-h.t.Dialog.NormalItem.GetPaddingRight()))
 }
 
 // themeSpacer is a filterable spacer that adds vertical space between

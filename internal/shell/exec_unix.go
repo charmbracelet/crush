@@ -4,19 +4,13 @@ package shell
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"syscall"
 	"time"
 
 	"mvdan.cc/sh/v3/interp"
 )
-
-// defaultKillTimeout matches mvdan's DefaultExecHandler default. Extracted
-// so the coupling to upstream is explicit rather than a buried literal.
-const defaultKillTimeout = 2 * time.Second
 
 // isolateProcess sets SysProcAttr so the child runs in its own session,
 // fully detached from Crush's controlling terminal. This prevents shells
@@ -29,22 +23,6 @@ func isolateProcess(cmd *exec.Cmd) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.Setsid = true
-}
-
-// killGroupOnCancel replaces os/exec's default cancellation (which signals
-// only the direct child) with a SIGKILL to the child's whole process group,
-// so descendants like a script's background children die with it. The
-// WaitDelay bounds cmd.Wait when a detached descendant still holds a stdio
-// pipe open after the process exits. Requires isolateProcess so the child
-// leads its own group (pgid == pid).
-func killGroupOnCancel(cmd *exec.Cmd) {
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = defaultKillTimeout + time.Second
 }
 
 // processGroupExecHandler returns an ExecHandlerFunc that replaces
@@ -80,7 +58,9 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 
 		// Bound how long Wait blocks after the process exits: a detached
 		// descendant holding a stdio pipe open would otherwise hang us
-		// forever. Matches mvdan's DefaultExecHandler.
+		// forever. It is killTimeout + 1s rather than mvdan's bare
+		// killTimeout, so on cancel the SIGKILL escalation below normally
+		// closes the pipes before it expires.
 		cmd.WaitDelay = killTimeout + time.Second
 
 		err = cmd.Start()
@@ -121,33 +101,5 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 		}
 
 		return exitStatusFromError(ctx, hc.Stderr, err)
-	}
-}
-
-// exitStatusFromError translates an exec error into an interp exit status,
-// matching the conventions of interp.DefaultExecHandler. Extracted so the
-// platform-specific exec handler stays focused on isolation mechanics.
-func exitStatusFromError(ctx context.Context, stderr io.Writer, err error) error {
-	if err == nil {
-		return nil
-	}
-	switch err := err.(type) {
-	case *exec.ExitError:
-		if status, ok := err.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return interp.ExitStatus(128 + uint8(status.Signal()))
-		}
-		return interp.ExitStatus(uint8(err.ExitCode()))
-	case *exec.Error:
-		fmt.Fprintf(stderr, "%v\n", err)
-		return interp.ExitStatus(127)
-	default:
-		if errors.Is(err, exec.ErrWaitDelay) {
-			// Wait returns ErrWaitDelay only after a clean exit.
-			return ctx.Err()
-		}
-		return err
 	}
 }

@@ -35,10 +35,10 @@ func TestCoreutilsHandlerModes(t *testing.T) {
 func TestStandardHandlersSkipsCoreutilsWhenOff(t *testing.T) {
 	t.Parallel()
 
-	if got := len(standardHandlers(nil, CoreutilsOff)); got != 4 {
+	if got := len(standardHandlers(nil, nil, CoreutilsOff)); got != 4 {
 		t.Errorf("got %d handlers with coreutils off, want 4", got)
 	}
-	if got := len(standardHandlers(nil, CoreutilsTurtle)); got != 5 {
+	if got := len(standardHandlers(nil, nil, CoreutilsTurtle)); got != 5 {
 		t.Errorf("got %d handlers with coreutils on, want 5", got)
 	}
 }

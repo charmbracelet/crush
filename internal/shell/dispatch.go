@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -30,8 +29,9 @@ const probeWindow = 128
 // path-prefixed argv[0] (e.g. ./foo.sh, /opt/bin/tool, C:\foo\bar.exe) and
 // dispatches based on the file's contents:
 //
-//  1. Shebang line (#!...) → exec the named interpreter via os/exec. The
-//     interpreter is resolved literally first, then via PATH on the
+//  1. Shebang line (#!...) → run the named interpreter through base, the
+//     exec handler every other external command ends in. The interpreter
+//     is resolved literally first, then via the runner's PATH on the
 //     basename as a permissive fallback (so #!/bin/bash works on Windows
 //     boxes where Git for Windows puts bash.exe on PATH).
 //  2. Known binary magic (MZ, ELF, Mach-O) or a NUL byte in the probe
@@ -50,7 +50,10 @@ const probeWindow = 128
 // a child process: once a shebang script is handed to an external
 // interpreter, whatever that interpreter goes on to run is beyond this
 // handler's view.
-func scriptDispatchHandler(blockFuncs []BlockFunc, coreutils CoreutilsMode) execMiddleware {
+//
+// base is called directly for shebang interpreters, not through the chain,
+// so no middleware can intercept the interpreter.
+func scriptDispatchHandler(base interp.ExecHandlerFunc, blockFuncs []BlockFunc, coreutils CoreutilsMode) execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 || !isPathPrefixed(args[0]) {
@@ -68,7 +71,7 @@ func scriptDispatchHandler(blockFuncs []BlockFunc, coreutils CoreutilsMode) exec
 
 			switch {
 			case hasShebang(probe):
-				return dispatchShebang(ctx, scriptPath, probe, args, blockFuncs)
+				return dispatchShebang(ctx, base, scriptPath, probe, args, blockFuncs)
 			case isBinary(probe):
 				return next(ctx, args)
 			default:
@@ -172,21 +175,25 @@ func isBinary(probe []byte) bool {
 	return false
 }
 
-// dispatchShebang parses probe's shebang line and execs the resolved
-// interpreter via os/exec, inheriting the parent runner's cwd, env, and
-// stdio. Returns interp.ExitStatus on non-zero interpreter exit so the
-// parent interpreter sees it as a normal non-zero status.
-func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args []string, blockFuncs []BlockFunc) error {
+// dispatchShebang parses probe's shebang line and runs the resolved
+// interpreter through base, the same handler every other external command
+// ends in, so it inherits the runner's cwd, env, stdio, process isolation,
+// cancellation, and exit-status mapping.
+func dispatchShebang(ctx context.Context, base interp.ExecHandlerFunc, scriptPath string, probe []byte, args []string, blockFuncs []BlockFunc) error {
+	hc := interp.HandlerCtx(ctx)
 	sb, err := parseShebang(probe)
 	if err != nil {
-		hc := interp.HandlerCtx(ctx)
 		fmt.Fprintf(hc.Stderr, "crush: %s: %s\n", scriptPath, err)
 		return interp.ExitStatus(126)
 	}
 
-	interpreter, err := resolveInterpreter(sb.interpreter)
+	interpreter, err := resolveInterpreter(hc.Dir, hc.Env, sb.interpreter)
+	if errors.Is(err, fs.ErrPermission) {
+		// Bash reports an interpreter it cannot execute the same way.
+		fmt.Fprintf(hc.Stderr, "crush: %s: bad interpreter: Permission denied\n", scriptPath)
+		return interp.ExitStatus(126)
+	}
 	if err != nil {
-		hc := interp.HandlerCtx(ctx)
 		fmt.Fprintf(hc.Stderr, "crush: %s: %s\n", scriptPath, err)
 		return interp.ExitStatus(127)
 	}
@@ -209,66 +216,46 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, interpreter, cmdArgs...)
-	hc := interp.HandlerCtx(ctx)
-	cmd.Dir = hc.Dir
-	cmd.Env = execEnvList(hc.Env)
-	cmd.Stdin = hc.Stdin
-	cmd.Stdout = hc.Stdout
-	cmd.Stderr = hc.Stderr
-	isolateProcess(cmd)
-	// Cancellation must take out the interpreter's whole process group
-	// (a script's own children included), and Wait must not be held open
-	// forever by a descendant still sitting on the stdio pipes.
-	killGroupOnCancel(cmd)
-
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrWaitDelay) {
-			// Wait returns ErrWaitDelay only after a clean exit.
-			return ctx.Err()
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code := exitErr.ExitCode()
-			if code < 0 {
-				code = 1
-			}
-			return interp.ExitStatus(uint8(code))
-		}
-		return err
-	}
-	return nil
+	return base(ctx, append([]string{interpreter}, cmdArgs...))
 }
 
-// resolveInterpreter tries the literal shebang path first, then falls back
-// to PATH-lookup on its basename — but only when the literal path is
-// genuinely missing. A file that exists but fails stat for another reason
-// (EACCES, ELOOP, etc.) surfaces the real error: silently resolving a
-// different binary off PATH in that case would hide a real problem and
-// produce surprising behavior for the user.
+// resolveInterpreter resolves a shebang interpreter as the runner sees it:
+// relative paths against dir, and PATH lookups against env. It tries the
+// literal shebang path first, then falls back to a PATH lookup on its
+// basename, but only when the literal path is genuinely missing. A file
+// that exists but fails stat for another reason (EACCES, ELOOP, etc.)
+// surfaces the real error: silently resolving a different binary off PATH
+// in that case would hide a real problem and produce surprising behavior
+// for the user. An interpreter that exists but is not executable returns
+// an error wrapping fs.ErrPermission.
 //
 // The permissive fallback is what makes #!/bin/bash portable to Windows
 // boxes where Git for Windows puts bash.exe on PATH but there is no
 // /bin/bash on disk.
-func resolveInterpreter(path string) (string, error) {
-	_, statErr := os.Stat(path)
+func resolveInterpreter(dir string, env expand.Environ, path string) (string, error) {
+	if !strings.ContainsAny(path, `/\`) {
+		// Already a bare name, so just do a PATH lookup.
+		resolved, err := interp.LookPathDir(dir, env, path)
+		if err != nil {
+			return "", fmt.Errorf("interpreter %q not found in PATH", path)
+		}
+		return resolved, nil
+	}
+
+	literal := filepathext.SmartJoin(dir, path)
+	fi, statErr := os.Stat(literal)
 	if statErr == nil {
-		return path, nil
+		if runtime.GOOS != "windows" && (fi.IsDir() || fi.Mode()&0o111 == 0) {
+			return "", fmt.Errorf("interpreter %q: %w", path, fs.ErrPermission)
+		}
+		return literal, nil
 	}
 	if !errors.Is(statErr, fs.ErrNotExist) {
 		return "", statErr
 	}
 
 	base := filepath.Base(path)
-	if base == "" || base == path && !strings.ContainsAny(path, `/\`) {
-		// Already a bare name — just do a PATH lookup.
-		resolved, err := exec.LookPath(path)
-		if err != nil {
-			return "", fmt.Errorf("interpreter %q not found in PATH", path)
-		}
-		return resolved, nil
-	}
-	resolved, err := exec.LookPath(base)
+	resolved, err := interp.LookPathDir(dir, env, base)
 	if err != nil {
 		return "", fmt.Errorf("interpreter %q not found and %q not in PATH", path, base)
 	}
@@ -437,18 +424,4 @@ func runShellSource(ctx context.Context, path string, args []string, blockFuncs 
 		return fmt.Errorf("could not build runner for %s: %w", path, err)
 	}
 	return runner.Run(ctx, file)
-}
-
-// execEnvList converts an expand.Environ to the []string form that
-// os/exec.Cmd.Env expects. Only exported string variables are included,
-// matching what a real shell would pass to a child process.
-func execEnvList(env expand.Environ) []string {
-	var out []string
-	env.Each(func(name string, vr expand.Variable) bool {
-		if vr.Exported && vr.Kind == expand.String {
-			out = append(out, name+"="+vr.Str)
-		}
-		return true
-	})
-	return out
 }

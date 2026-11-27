@@ -5,9 +5,13 @@ package shell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -135,18 +139,38 @@ func TestRun_NonZeroExitKeptWhenBackgroundedChildHoldsPipe(t *testing.T) {
 
 // The shebang dispatch path must kill the interpreter's whole process group,
 // not just the interpreter PID, or the script's child keeps the pipes open
-// and cmd.Wait blocks forever.
+// and cmd.Wait blocks forever. The child ignores SIGINT as a background job
+// of a non-interactive shell, so this also covers the SIGKILL escalation.
 func TestKill_ShebangScriptChild(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hang.sh")
-	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nsleep 15 &\nwait\n"), 0o755))
+	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nsleep 15 &\necho $! > child.pid\nwait\n"), 0o755))
 	reapSleep(t, "15")
 	manager := newBackgroundShellManager()
 
 	bgShell, err := manager.Start(context.Background(), nil, dir, nil, CoreutilsTurtle, "./hang.sh", "", testMaxJobs)
 	require.NoError(t, err)
-	requireDescendant(t, "sleep 15")
 
-	killWithin(t, manager, bgShell.ID, 6*time.Second)
+	var pid int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(filepath.Join(dir, "child.pid"))
+		if err != nil {
+			return false
+		}
+		pid, err = strconv.Atoi(strings.TrimSpace(string(data)))
+		return err == nil && pid > 1
+	}, 5*time.Second, 10*time.Millisecond, "script never recorded its child PID")
+
+	// The child survives SIGINT, so Kill must wait out the grace period
+	// before the SIGKILL escalation takes it down.
+	start := time.Now()
+	killWithin(t, manager, bgShell.ID, defaultKillTimeout+4*time.Second)
+	require.GreaterOrEqual(t, time.Since(start), defaultKillTimeout)
 	require.True(t, bgShell.IsDone())
+
+	// Poll until the child is gone; an orphaned zombie lingers briefly
+	// until init reaps it.
+	require.Eventually(t, func() bool {
+		return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+	}, 5*time.Second, 20*time.Millisecond, "script child %d survived cancel", pid)
 }

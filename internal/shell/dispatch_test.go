@@ -11,6 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"mvdan.cc/sh/v3/expand"
 )
 
 // writeScript is a small helper that drops a file with the given contents
@@ -321,6 +324,7 @@ func TestDispatch_BashShebang(t *testing.T) {
 	err = Run(t.Context(), RunOptions{
 		Command: script,
 		Cwd:     dir,
+		Env:     os.Environ(),
 		Stdout:  &stdout,
 		Stderr:  &stderr,
 	})
@@ -344,6 +348,7 @@ func TestDispatch_ShebangPassesExitCode(t *testing.T) {
 	err := Run(t.Context(), RunOptions{
 		Command: script,
 		Cwd:     dir,
+		Env:     os.Environ(),
 	})
 	if err == nil {
 		t.Fatal("expected non-nil error from exit 5")
@@ -543,12 +548,12 @@ func TestResolveInterpreter_PermissiveFallback(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake bash: %v", err)
 	}
-	t.Setenv("PATH", dir)
+	env := expand.ListEnviron("PATH=" + dir)
 
 	// Basename must match the fake we planted on PATH; the directory
 	// prefix must not exist so the literal stat fails.
 	missingDir := filepath.Join(dir, "definitely-not-here-"+randSuffix())
-	resolved, err := resolveInterpreter(filepath.Join(missingDir, "bash"))
+	resolved, err := resolveInterpreter(dir, env, filepath.Join(missingDir, "bash"))
 	if err != nil {
 		t.Fatalf("expected fallback to succeed, got: %v", err)
 	}
@@ -586,7 +591,7 @@ func TestResolveInterpreter_NonENOENTErrorsSurface(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(inner, 0o755) })
 
-	_, err := resolveInterpreter(interp)
+	_, err := resolveInterpreter(dir, expand.ListEnviron(), interp)
 	if err == nil {
 		t.Fatal("expected error for unreadable interpreter, got nil")
 	}
@@ -595,4 +600,55 @@ func TestResolveInterpreter_NonENOENTErrorsSurface(t *testing.T) {
 	if !strings.Contains(err.Error(), "permission") {
 		t.Fatalf("expected permission-denied error to surface, got: %v", err)
 	}
+}
+
+// TestDispatch_ShebangFallbackUsesRunnerPath resolves a missing literal
+// interpreter's basename on the PATH the script sees, not Crush's own.
+func TestDispatch_ShebangFallbackUsesRunnerPath(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shebang interpreter")
+	}
+	dir := t.TempDir()
+	tools := filepath.Join(dir, "tools")
+	require.NoError(t, os.Mkdir(tools, 0o755))
+	writeScript(t, tools, "mytool", "#!/bin/sh\necho mytool ran\n")
+	writeScript(t, dir, "s", "#!/nonexistent-"+randSuffix()+"/mytool\n")
+
+	var stdout, stderr bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: `PATH="` + tools + `:$PATH" ./s`,
+		Cwd:     dir,
+		Env:     os.Environ(),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	require.NoError(t, err, "stderr=%q", stderr.String())
+	require.Equal(t, "mytool ran\n", stdout.String())
+}
+
+// TestDispatch_NonExecutableInterpreter reports an interpreter that exists
+// but cannot be executed the way bash does, with status 126.
+func TestDispatch_NonExecutableInterpreter(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission model")
+	}
+	dir := t.TempDir()
+	interpreter := filepath.Join(dir, "notexec")
+	require.NoError(t, os.WriteFile(interpreter, []byte("#!/bin/sh\necho ran\n"), 0o644))
+	script := writeScript(t, dir, "s", "#!"+interpreter+"\n")
+
+	var stdout, stderr bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: "./s",
+		Cwd:     dir,
+		Env:     os.Environ(),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	require.Error(t, err)
+	require.Equal(t, 126, ExitCode(err))
+	require.Empty(t, stdout.String())
+	require.Equal(t, "crush: "+script+": bad interpreter: Permission denied\n", stderr.String())
 }

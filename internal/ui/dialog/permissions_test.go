@@ -278,3 +278,23 @@ func TestPermissions_EscapeHelpSaysDeny(t *testing.T) {
 	}
 	t.Fatal("esc missing from help")
 }
+
+// TestPermissions_TypicalContentFitsWithoutScrolling verifies that on a
+// 30-row screen a short MCP params blob is shown whole. Previously the
+// dialog was capped at half the screen, leaving a three-row viewport that
+// showed only the opening brace.
+func TestPermissions_TypicalContentFitsWithoutScrolling(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s, Workspace: permissionsTestWorkspace{}}
+	p := NewPermissions(com, permission.PermissionRequest{
+		ID:       "p",
+		ToolName: "mcp_github_create_issue",
+		Path:     "/tmp",
+		Params:   `{"owner":"charmbracelet","repo":"crush","title":"Bug","body":"text"}`,
+	})
+	text := strings.Join(drawFits(t, p, 100, 30), "\n")
+	require.Contains(t, text, `"title": "Bug"`)
+	require.Contains(t, text, "}")
+	require.False(t, p.canScroll(), "content should fit without scrolling:\n%s", text)
+}

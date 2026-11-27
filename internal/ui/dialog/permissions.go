@@ -43,8 +43,11 @@ const (
 	simpleMaxWidth = 100
 	// simpleSizeRatio is the size ratio for simple content dialogs.
 	simpleSizeRatio = 0.6
-	// simpleHeightRatio is the height ratio for simple content dialogs.
-	simpleHeightRatio = 0.5
+	// simpleHeightRatio caps the height of simple content dialogs. They
+	// shrink to fit their content, so the cap only matters for long
+	// content, which should still get enough rows to read without
+	// scrolling.
+	simpleHeightRatio = 0.8
 	// splitModeMinWidth is the minimum width to enable split diff mode.
 	splitModeMinWidth = 140
 	// layoutSpacingLines is the number of empty lines used for layout spacing.

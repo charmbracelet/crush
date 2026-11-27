@@ -143,3 +143,36 @@ func TestAuthMethodMouseDoubleClickConfirms(t *testing.T) {
 	require.True(t, ok)
 	require.False(t, selected.UseOAuth)
 }
+
+// TestAuthMethodStackedCardsFitShortScreen verifies that stacked cards
+// shrink to fit the screen and that the mouse hit areas line up with the
+// drawn cards. Previously each stacked card kept its full 13 rows, pushing
+// the API Key card off-screen at 40x24, and the hit areas assumed a
+// one-line prompt although it wraps to two lines at 40 columns.
+func TestAuthMethodStackedCardsFitShortScreen(t *testing.T) {
+	t.Parallel()
+
+	for _, sz := range [][2]int{{40, 24}, {40, 18}, {100, 30}} {
+		m := newTestAuthMethod()
+		drawFits(t, m, sz[0], sz[1])
+		for _, onboarding := range []bool{false, true} {
+			requireAuthCardAreasMatch(t, onboarding, sz[0], sz[1])
+		}
+	}
+}
+
+// requireAuthCardAreasMatch asserts both card hit areas sit exactly on the
+// drawn cards' corners.
+func requireAuthCardAreasMatch(t *testing.T, onboarding bool, w, h int) {
+	t.Helper()
+	m := newTestAuthMethod()
+	m.isOnboarding = onboarding
+	scr := uv.NewScreenBuffer(w, h)
+	m.Draw(scr, image.Rect(0, 0, w, h))
+	for name, r := range map[string]image.Rectangle{"oauth": m.oauthCardArea, "api key": m.apiKeyCardArea} {
+		require.False(t, r.Empty(), "%s card area at %dx%d", name, w, h)
+		require.LessOrEqual(t, r.Max.Y, h, "%s card off-screen at %dx%d", name, w, h)
+		require.Equal(t, "╭", scr.CellAt(r.Min.X, r.Min.Y).Content, "%s hit area top-left at %dx%d (onboarding=%v)", name, w, h, onboarding)
+		require.Equal(t, "╯", scr.CellAt(r.Max.X-1, r.Max.Y-1).Content, "%s hit area bottom-right at %dx%d (onboarding=%v)", name, w, h, onboarding)
+	}
+}

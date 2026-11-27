@@ -29,6 +29,10 @@ const (
 	// odd content height lets the one-line "API Key" label center exactly;
 	// the two-line OAuth label lands within half a row of center.
 	authMethodCardHeight = 13
+	// authMethodMinCardHeight is the smallest card height, border included,
+	// that still shows the two-line OAuth label; cards shrink toward it to
+	// fit short screens.
+	authMethodMinCardHeight = 4
 	// authMethodMinCardWidth is the smallest card width that keeps the
 	// two-line OAuth label legible; below it the cards stack vertically.
 	authMethodMinCardWidth = 20
@@ -172,16 +176,12 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultAuthMethodDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
-	rc := NewRenderContext(t, width)
-	rc.Title = "Let’s Auth " + cmp.Or(m.provider.Name, string(m.provider.ID))
-
 	prompt := t.Dialog.AuthMethod.Prompt.Width(innerWidth).Render("How would you like to authenticate?")
 	if !m.isOnboarding {
 		// Keep a single blank line under the title.
 		prompt = "\n" + prompt
 	}
 	prompt += "\n"
-	rc.AddPart(prompt)
 
 	cardWidth := max(0, (innerWidth-authMethodCardGap-2*authMethodCardMargin)/2)
 	sideBySide := cardWidth >= authMethodMinCardWidth
@@ -194,27 +194,44 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if m.provider.ID == catwalk.InferenceProviderXAI {
 		oauthCardLabel = "Grok Account\nwith Subscription"
 	}
-	oauthCard := m.renderCard(oauthCardLabel, m.selected == 0, cardWidth)
-	apiKeyCard := m.renderCard("API Key", m.selected == 1, cardWidth)
 
-	var cards string
-	if sideBySide {
-		row := lipgloss.JoinHorizontal(lipgloss.Top, oauthCard, strings.Repeat(" ", authMethodCardGap), apiKeyCard)
-		cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, row)
-	} else {
-		cards = lipgloss.JoinVertical(lipgloss.Left, oauthCard, "", apiKeyCard)
+	render := func(cardHeight int) string {
+		rc := NewRenderContext(t, width)
+		rc.Title = "Let’s Auth " + cmp.Or(m.provider.Name, string(m.provider.ID))
+		rc.AddPart(prompt)
+
+		oauthCard := m.renderCard(oauthCardLabel, m.selected == 0, cardWidth, cardHeight)
+		apiKeyCard := m.renderCard("API Key", m.selected == 1, cardWidth, cardHeight)
+		var cards string
+		if sideBySide {
+			row := lipgloss.JoinHorizontal(lipgloss.Top, oauthCard, strings.Repeat(" ", authMethodCardGap), apiKeyCard)
+			cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, row)
+		} else {
+			cards = lipgloss.JoinVertical(lipgloss.Left, oauthCard, "", apiKeyCard)
+		}
+		rc.AddPart(cards)
+
+		rc.Help = "\n" + renderDialogHelp(t, &m.help, m, innerWidth)
+
+		if m.isOnboarding {
+			rc.Title = ""
+			rc.IsOnboarding = true
+		}
+		return rc.Render()
 	}
-	rc.AddPart(cards)
 
-	rc.Help = "\n" + renderDialogHelp(t, &m.help, m, innerWidth)
-
-	view := rc.Render()
-	if m.isOnboarding {
-		rc.Title = ""
-		rc.IsOnboarding = true
-		view = rc.Render()
+	// Shrink the cards to fit a short screen; stacked cards share the cut.
+	cardHeight := authMethodCardHeight
+	view := render(cardHeight)
+	if over := lipgloss.Height(view) - area.Dy(); over > 0 {
+		cards := 1
+		if !sideBySide {
+			cards = 2
+		}
+		cardHeight = max(authMethodMinCardHeight, cardHeight-(over+cards-1)/cards)
+		view = render(cardHeight)
 	}
-	m.updateCardAreas(area, view, sideBySide, cardWidth, innerWidth)
+	m.updateCardAreas(area, view, sideBySide, cardWidth, innerWidth, cardHeight, lipgloss.Height(prompt))
 	if m.isOnboarding {
 		DrawOnboardingCursor(scr, area, view, nil)
 	} else {
@@ -225,7 +242,7 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // updateCardAreas records where each card lands on screen so mouse clicks
 // can be mapped back to a choice.
-func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide bool, cardWidth, innerWidth int) {
+func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide bool, cardWidth, innerWidth, cardHeight, promptHeight int) {
 	m.oauthCardArea = image.Rectangle{}
 	m.apiKeyCardArea = image.Rectangle{}
 
@@ -243,11 +260,12 @@ func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide 
 	contentLeft := origin.X + frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
 	contentTop := origin.Y + frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
 
-	// Lines above the cards: the prompt, plus the title and its blank line
+	// Lines above the cards: the prompt block (which wraps on narrow
+	// screens and carries its surrounding blank lines), plus the title
 	// outside onboarding.
-	cardsTop := contentTop + 1
+	cardsTop := contentTop + promptHeight
 	if !m.isOnboarding {
-		cardsTop += 2
+		cardsTop++
 	}
 
 	groupWidth := cardWidth
@@ -256,19 +274,19 @@ func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide 
 	}
 	cardsLeft := contentLeft + max(0, (innerWidth-groupWidth)/2)
 
-	m.oauthCardArea = image.Rect(cardsLeft, cardsTop, cardsLeft+cardWidth, cardsTop+authMethodCardHeight)
+	m.oauthCardArea = image.Rect(cardsLeft, cardsTop, cardsLeft+cardWidth, cardsTop+cardHeight)
 	if sideBySide {
 		left := cardsLeft + cardWidth + authMethodCardGap
-		m.apiKeyCardArea = image.Rect(left, cardsTop, left+cardWidth, cardsTop+authMethodCardHeight)
+		m.apiKeyCardArea = image.Rect(left, cardsTop, left+cardWidth, cardsTop+cardHeight)
 	} else {
-		top := cardsTop + authMethodCardHeight + 1
-		m.apiKeyCardArea = image.Rect(cardsLeft, top, cardsLeft+cardWidth, top+authMethodCardHeight)
+		top := cardsTop + cardHeight + 1
+		m.apiKeyCardArea = image.Rect(cardsLeft, top, cardsLeft+cardWidth, top+cardHeight)
 	}
 }
 
 // renderCard renders one auth option as a bordered card with its label
 // centered both ways. The selected card gets the focused frame.
-func (m *AuthMethod) renderCard(label string, focused bool, width int) string {
+func (m *AuthMethod) renderCard(label string, focused bool, width, height int) string {
 	t := m.com.Styles
 	style := t.Dialog.AuthMethod.CardBlurred
 	if focused {
@@ -276,7 +294,7 @@ func (m *AuthMethod) renderCard(label string, focused bool, width int) string {
 	}
 	return style.
 		Width(width).
-		Height(authMethodCardHeight).
+		Height(height).
 		Align(lipgloss.Center, lipgloss.Center).
 		Render(label)
 }

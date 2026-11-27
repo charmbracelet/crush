@@ -9,7 +9,7 @@ import (
 
 // ValidateHooks normalizes event names and checks that every configured
 // hook names a known event, has a command, and only uses a matcher on
-// events that carry a tool call. Matcher compilation used at run time is
+// events with a match target. Matcher compilation used at run time is
 // owned by hooks.Runner; this only surfaces config errors at load time
 // rather than on the first tool call.
 func (c *Config) ValidateHooks() error {
@@ -32,8 +32,8 @@ func (c *Config) ValidateHooks() error {
 			if h.Matcher == "" {
 				continue
 			}
-			if !hooks.EventHasTool(event) {
-				return fmt.Errorf("hook %s[%d]: matcher is only supported on tool events", event, i)
+			if !hooks.EventHasTool(event) && event != hooks.EventPreModelUse {
+				return fmt.Errorf("hook %s[%d]: matcher is only supported on tool events and PreModelUse", event, i)
 			}
 			if _, err := regexp.Compile(h.Matcher); err != nil {
 				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)

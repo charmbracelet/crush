@@ -179,7 +179,7 @@
         },
         "matcher": {
           "type": "string",
-          "description": "Regex pattern tested against the tool name. Empty means match all tools."
+          "description": "Regex pattern tested against the tool name or provider/model. Empty matches all."
         },
         "command": {
           "type": "string",

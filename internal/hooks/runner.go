@@ -3,6 +3,7 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -81,9 +82,8 @@ func NewRunner(source Source, cwd, projectDir string, opts ...RunnerOption) *Run
 }
 
 // Run executes every configured hook for the event in parallel and
-// returns their aggregated result. Hooks with a matcher only run when
-// it matches the event's tool name. Execution failures are logged and
-// treated as "no opinion", so the result is always usable.
+// returns their aggregated result. PreModelUse failures deny the request;
+// other events retain their usual exit-code handling.
 func (r *Runner) Run(ctx context.Context, ev Event) AggregateResult {
 	if r == nil {
 		return AggregateResult{}
@@ -100,7 +100,7 @@ func (r *Runner) Run(ctx context.Context, ev Event) AggregateResult {
 	var wg sync.WaitGroup
 	for i, h := range hooks {
 		wg.Go(func() {
-			results[i] = r.runOne(ctx, h, envVars, payload)
+			results[i] = r.runOne(ctx, h, envVars, payload, ev.Name == EventPreModelUse)
 		})
 	}
 	wg.Wait()
@@ -134,18 +134,21 @@ func (r *Runner) Run(ctx context.Context, ev Event) AggregateResult {
 }
 
 // matchingHooks returns the hooks configured for the event, deduplicated
-// by command, keeping only those whose matcher accepts the tool name. A
-// matcher on an event without a tool name is ignored.
+// by command, keeping only those whose matcher accepts the event target.
 func (r *Runner) matchingHooks(ev Event) []HookConfig {
 	seen := make(map[string]bool)
 	var matched []HookConfig
+	target := ev.toolName()
+	if ev.Name == EventPreModelUse {
+		target = ev.Provider + "/" + ev.Model
+	}
 	for _, h := range r.source()[ev.Name] {
 		if seen[h.Command] {
 			continue
 		}
-		if h.Matcher != "" && ev.Tool != nil {
+		if h.Matcher != "" && (ev.Tool != nil || ev.Name == EventPreModelUse) {
 			re := r.matcher(h)
-			if re == nil || !re.MatchString(ev.Tool.Name) {
+			if re == nil || !re.MatchString(target) {
 				continue
 			}
 		}
@@ -193,7 +196,7 @@ func (r *Runner) matcher(h HookConfig) *regexp.Regexp {
 //     outer frame reads them;
 //   - on the abandon path, the goroutine may still be writing and the
 //     outer frame must not touch them again.
-func (r *Runner) runOne(parentCtx context.Context, hook HookConfig, envVars []string, payload []byte) HookResult {
+func (r *Runner) runOne(parentCtx context.Context, hook HookConfig, envVars []string, payload []byte, required bool) HookResult {
 	timeout := hook.TimeoutDuration()
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
@@ -231,12 +234,27 @@ func (r *Runner) runOne(parentCtx context.Context, hook HookConfig, envVars []st
 				"command", hook.Command,
 				"timeout", timeout,
 			)
+			if required {
+				return modelHookFailure(hook, ctx.Err().Error())
+			}
 			// The goroutine may still be writing to stdout/stderr; do
 			// not read either buffer below this point.
 			return HookResult{Decision: DecisionNone}
 		}
 	}
 
+	if required {
+		if ctx.Err() != nil {
+			return modelHookFailure(hook, ctx.Err().Error())
+		}
+		if err != nil {
+			reason := strings.TrimSpace(stderr.String())
+			if reason == "" {
+				reason = err.Error()
+			}
+			return modelHookFailure(hook, reason)
+		}
+	}
 	if shell.IsInterrupt(err) {
 		// Distinguish timeout from parent cancellation.
 		if parentCtx.Err() != nil {
@@ -286,4 +304,11 @@ func (r *Runner) runOne(parentCtx context.Context, hook HookConfig, envVars []st
 		"error", err,
 	)
 	return HookResult{Decision: DecisionNone}
+}
+
+func modelHookFailure(hook HookConfig, reason string) HookResult {
+	return HookResult{
+		Decision: DecisionDeny,
+		Reason:   fmt.Sprintf("%q: %s", hook.DisplayName(), reason),
+	}
 }

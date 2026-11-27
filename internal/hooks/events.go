@@ -4,6 +4,8 @@ import "strings"
 
 // Hook event names.
 const (
+	// EventPreModelUse fires before generating or streaming a model response.
+	EventPreModelUse = "PreModelUse"
 	// EventPreToolUse fires before a tool runs. Hooks can allow, deny,
 	// halt, rewrite the input, or add context.
 	EventPreToolUse = "PreToolUse"
@@ -36,9 +38,9 @@ const (
 	EventPostCompact = "PostCompact"
 )
 
-// events maps each event name to whether it carries a tool call that a
-// matcher can be tested against.
+// events maps each event name to whether it carries a tool call.
 var events = map[string]bool{
+	EventPreModelUse:        false,
 	EventPreToolUse:         true,
 	EventPostToolUse:        true,
 	EventPostToolUseFailure: true,
@@ -77,8 +79,7 @@ func NormalizeEvent(name string) (string, bool) {
 	return canonical, ok
 }
 
-// EventHasTool reports whether the event carries a tool call, and so
-// whether its hooks can use a matcher.
+// EventHasTool reports whether the event carries a tool call.
 func EventHasTool(name string) bool {
 	return events[name]
 }
@@ -92,6 +93,10 @@ type Event struct {
 
 	// Tool is the call a tool event is about; nil for lifecycle events.
 	Tool *ToolCall
+
+	// Provider and Model identify the selected model (PreModelUse).
+	Provider string
+	Model    string
 
 	// ToolResponse is the tool's output (PostToolUse).
 	ToolResponse *string

@@ -9,8 +9,8 @@ import "time"
 type HookConfig struct {
 	// Friendly display name shown in the TUI. Falls back to Command when empty.
 	Name string `json:"name,omitempty" jsonschema:"description=Friendly display name shown in the TUI for this hook"`
-	// Regex pattern tested against the tool name. Empty means match all.
-	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name. Empty means match all tools."`
+	// Regex pattern tested against the tool name or provider/model. Empty matches all.
+	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name or provider/model. Empty matches all."`
 	// Shell command to execute.
 	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
 	// Timeout in seconds. Default 30.

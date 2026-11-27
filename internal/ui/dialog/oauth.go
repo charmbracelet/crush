@@ -390,7 +390,6 @@ func (m *OAuth) innerDialogContent() string {
 		t               = m.com.Styles
 		successStyle    = t.Dialog.OAuth.Success
 		linkStyle       = t.Dialog.OAuth.Link
-		errorStyle      = t.Dialog.OAuth.ErrorText
 		statusTextStyle = t.Dialog.OAuth.StatusText
 	)
 
@@ -480,18 +479,7 @@ func (m *OAuth) innerDialogContent() string {
 		return lipgloss.JoinVertical(lipgloss.Left, "", status)
 
 	case OAuthStateError:
-		header := errorStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render("Authentication failed.")
-		if m.errMsg == "" {
-			return lipgloss.JoinVertical(lipgloss.Left, "", header, "")
-		}
-		detail := statusTextStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(m.errMsg)
-		return lipgloss.JoinVertical(lipgloss.Left, "", header, "", detail, "")
+		return authErrorBlock(t, innerWidth, m.errMsg)
 
 	default:
 		return ""

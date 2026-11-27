@@ -269,7 +269,6 @@ func (m *MCPAuth) innerContent() string {
 	t := m.com.Styles
 	successStyle := t.Dialog.OAuth.Success
 	linkStyle := t.Dialog.OAuth.Link
-	errorStyle := t.Dialog.OAuth.ErrorText
 	statusStyle := t.Dialog.OAuth.StatusText
 
 	// innerWidth is the dialog's content area: total width minus the
@@ -320,15 +319,7 @@ func (m *MCPAuth) innerContent() string {
 			Render("Authentication successful!")
 
 	case MCPAuthStateError:
-		header := errorStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render("Authentication failed.")
-		if m.err == nil {
-			return lipgloss.JoinVertical(lipgloss.Left, "", header, "")
-		}
-		flattened := strings.Join(strings.Fields(m.err.Error()), " ")
-		return lipgloss.JoinVertical(lipgloss.Left, "", header, "", block(statusStyle.Render(flattened)), "")
+		return authErrorBlock(t, innerWidth, errText(m.err))
 
 	default:
 		return ""

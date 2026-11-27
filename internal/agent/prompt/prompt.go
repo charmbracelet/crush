@@ -228,11 +228,12 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		builtinNames[s.Name] = true
 	}
 
-	// Discover user skills from configured paths.
+	// Discover user skills from configured paths. Relative paths resolve
+	// against the working directory, matching how context paths behave.
 	if len(cfg.Options.SkillsPaths) > 0 {
 		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
 		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, ExpandPath(pth, store))
+			expandedPaths = append(expandedPaths, filepathext.SmartJoin(workingDir, ExpandPath(pth, store)))
 		}
 		for _, userSkill := range skills.Discover(expandedPaths) {
 			if builtinNames[userSkill.Name] {

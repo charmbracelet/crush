@@ -73,6 +73,9 @@ var _ CollapsibleInlineEditor = (*QuestionForm)(nil)
 func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 	comps := make([]questionResponder, len(batch.Questions))
 	labels := make([]string, len(batch.Questions))
+	// The confirm summary has room to wrap, so it names each question
+	// in full rather than by its shortened tab label.
+	summaryLabels := make([]string, len(batch.Questions))
 	ids := make([]string, len(batch.Questions))
 	for i, req := range batch.Questions {
 		switch req.Type {
@@ -87,8 +90,10 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 		}
 		if req.Label != "" {
 			labels[i] = req.Label
+			summaryLabels[i] = req.Label
 		} else {
 			labels[i] = shortLabel(req.Text)
+			summaryLabels[i] = strings.Join(strings.Fields(req.Text), " ")
 		}
 		ids[i] = req.ID
 	}
@@ -109,7 +114,7 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 			sty,
 			confirmTitle,
 			batch.ConfirmDescription,
-			labels,
+			summaryLabels,
 			batch.Questions,
 			answers,
 		)
@@ -159,15 +164,14 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 	return f
 }
 
-// shortLabel truncates a question to at most three words for use
-// as a tab header.
+// tabLabelMaxWidth caps the width of a tab header derived from the
+// question text.
+const tabLabelMaxWidth = 24
+
+// shortLabel shortens a question to fit a tab header, cutting by
+// width with an ellipsis so a clipped label reads as clipped.
 func shortLabel(q string) string {
-	q = strings.ReplaceAll(q, "\n", " ")
-	words := strings.Fields(q)
-	if len(words) > 3 {
-		words = words[:3]
-	}
-	return strings.Join(words, " ")
+	return ansi.Truncate(strings.Join(strings.Fields(q), " "), tabLabelMaxWidth, "…")
 }
 
 // isConfirmTab reports whether the active tab is the confirm tab.

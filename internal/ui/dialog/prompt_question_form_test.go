@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -111,4 +112,25 @@ func TestNewlineHintMatchesAcrossEditors(t *testing.T) {
 	p.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	require.Equal(t, "newline", helpFor(ft.ShortHelp(), "ctrl+j"))
 	require.Equal(t, "newline", helpFor(p.ShortHelp(), "ctrl+j"))
+}
+
+// TestQuestionLabelsTruncateByWidth verifies auto tab labels are cut by
+// width with an ellipsis, and the confirm summary names the full
+// question instead of the clipped tab label.
+func TestQuestionLabelsTruncateByWidth(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "Use Postgres", shortLabel("Use Postgres"))
+	long := shortLabel("Use Postgres for the analytics store?")
+	require.True(t, strings.HasSuffix(long, "…"), long)
+	require.Greater(t, len(long), len("Use Postgres for"))
+
+	s := styles.CharmtonePantera()
+	form := NewQuestionForm(&s, question.Request{
+		ID: "b",
+		Questions: []question.Question{
+			{ID: "q1", Type: question.TypeYesNo, Text: "Use Postgres for the analytics store?"},
+			{ID: "q2", Type: question.TypeYesNo, Text: "Deploy now?"},
+		},
+	})
+	require.Equal(t, "Use Postgres for the analytics store?", form.confirmComp.QuestionLabels[0])
 }

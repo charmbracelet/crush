@@ -282,6 +282,10 @@ type UI struct {
 	frameDirty       bool
 	frameSkipPut     bool
 	frameGCArmed     bool
+	// dialogMotionOnly marks an update that only moved the pointer over
+	// the dialogs, so View redraws just them over the kept backdrop.
+	dialogMotionOnly bool
+	renderer         frameRenderer
 	// planReadySessionID holds the session whose plan run emitted the
 	// plan-ready marker but has not been confirmed for execution yet. It
 	// lets the user reopen the handoff prompt after dismissing it.
@@ -960,7 +964,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastActivation = activatedBy(msg)
 			}
 			return m, m.handleDialogAction(action)
-		case tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		case tea.MouseMotionMsg:
+			// Moving the pointer over the dialogs changes only the dialogs,
+			// unless it ends a gesture begun beneath them.
+			m.dialogMotionOnly = !m.chat.mouseDown && !m.textareaMouseSelecting
+			m.releasePointerBeneathDialog()
+			m.dialog.Update(msg)
+			return m, nil
+		case tea.MouseReleaseMsg:
 			m.releasePointerBeneathDialog()
 			m.dialog.Update(msg)
 			return m, nil
@@ -3876,8 +3887,9 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 	)
 }
 
-// Draw implements [uv.Drawable] and draws the UI model.
-func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+// drawBackdrop draws everything beneath the dialogs and returns the cursor
+// to show when no dialog is open.
+func (m *UI) drawBackdrop(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
 
 	if m.layout != layout {
@@ -4004,13 +4016,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		})
 	}
 
-	// This needs to come last to overlay on top of everything. We always pass
-	// the full screen bounds because the dialogs will position themselves
-	// accordingly.
-	if m.dialog.HasDialogs() {
-		return m.dialog.Draw(scr, scr.Bounds())
-	}
-
 	switch m.focus {
 	case uiFocusEditor:
 		if m.layout.editor.Dy() <= 0 {
@@ -4080,19 +4085,13 @@ func (m *UI) View() tea.View {
 		}
 	}
 
-	canvas := uv.NewScreenBuffer(m.width, m.height)
-	v.Cursor = m.Draw(canvas, canvas.Bounds())
-
-	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
-	contentLines := strings.Split(content, "\n")
-	for i, line := range contentLines {
-		// Trim trailing spaces for concise rendering
-		contentLines[i] = strings.TrimRight(line, " ")
+	var dialogs func(uv.Screen, uv.Rectangle) *tea.Cursor
+	if m.dialog.HasDialogs() {
+		dialogs = m.dialog.Draw
 	}
-
-	content = strings.Join(contentLines, "\n")
-
-	v.Content = content
+	content, cursor := m.renderer.frame(m.width, m.height, m.dialogMotionOnly, m.drawBackdrop, dialogs)
+	m.dialogMotionOnly = false
+	v.Content, v.Cursor = content, cursor
 	if cacheable {
 		m.storeFrame(key, content, v.Cursor)
 	}

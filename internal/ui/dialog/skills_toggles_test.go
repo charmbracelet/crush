@@ -88,6 +88,11 @@ func TestSkillsToggles_ScrollsToCursor(t *testing.T) {
 		items[i] = SkillToggleItem{Name: fmt.Sprintf("skill-%02d", i)}
 	}
 	m := newSkillsTogglesForTest(items)
+	// top returns the first visible row of the window.
+	top := func() int {
+		first, _ := m.span(len(m.items))
+		return first
+	}
 
 	// The window shows at most maxVisibleToggleRows items.
 	rendered := lipgloss.Height(m.innerContent())
@@ -98,35 +103,35 @@ func TestSkillsToggles_ScrollsToCursor(t *testing.T) {
 		m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	require.Equal(t, 25, m.cursor)
-	require.Equal(t, 25-maxVisibleToggleRows+1, m.visibleOffset(maxVisibleToggleRows))
-	require.LessOrEqual(t, m.cursor-m.visibleOffset(maxVisibleToggleRows), maxVisibleToggleRows-1)
+	require.Equal(t, 25-maxVisibleToggleRows+1, top())
+	require.LessOrEqual(t, m.cursor-top(), maxVisibleToggleRows-1)
 
 	// Scrolling back up must move the selected row visually up inside a
 	// stationary window until it reaches the window top; only then does
 	// the window scroll, one row per press.
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyUp})
 	require.Equal(t, 24, m.cursor)
-	require.Equal(t, 14, m.visibleOffset(maxVisibleToggleRows), "one up-press inside the window must not scroll")
-	require.Equal(t, 24-m.visibleOffset(maxVisibleToggleRows), 10, "the selected row moved up within the window")
+	require.Equal(t, 14, top(), "one up-press inside the window must not scroll")
+	require.Equal(t, 24-top(), 10, "the selected row moved up within the window")
 
 	// Walk the cursor to the window's top row.
-	for m.cursor > m.visibleOffset(maxVisibleToggleRows) {
+	for m.cursor > top() {
 		m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 	require.Equal(t, 14, m.cursor)
-	require.Equal(t, 14, m.visibleOffset(maxVisibleToggleRows))
+	require.Equal(t, 14, top())
 
 	// The next up-press scrolls the window and the cursor together.
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyUp})
 	require.Equal(t, 13, m.cursor)
-	require.Equal(t, 13, m.visibleOffset(maxVisibleToggleRows))
+	require.Equal(t, 13, top())
 
 	// Back to the top scrolls the window back.
 	for range 30 {
 		m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 	require.Equal(t, 0, m.cursor)
-	require.Equal(t, 0, m.visibleOffset(maxVisibleToggleRows))
+	require.Equal(t, 0, top())
 }
 
 func TestSkillsToggles_ErroredSkill(t *testing.T) {

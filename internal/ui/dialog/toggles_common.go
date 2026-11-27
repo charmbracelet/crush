@@ -66,6 +66,61 @@ func toggleVisibleOffset(cursor, offset, count, visible int) int {
 	return max(0, offset)
 }
 
+// toggleWindow is the scrolling window shared by the toggles dialogs: the
+// cursor row, the first visible row, and the visible row cap fitted to the
+// screen.
+type toggleWindow struct {
+	cursor int
+	// offset is the first visible row; the window follows the cursor.
+	offset int
+	// maxRows is the visible row cap fitted to the screen in fit; zero
+	// means maxVisibleToggleRows.
+	maxRows int
+}
+
+// visibleRows returns the cap on visible rows.
+func (w *toggleWindow) visibleRows() int {
+	if w.maxRows > 0 {
+		return w.maxRows
+	}
+	return maxVisibleToggleRows
+}
+
+// cursorUp moves the cursor up one of count rows, scrolling the window to
+// keep it in view.
+func (w *toggleWindow) cursorUp(count int) {
+	w.cursor = max(0, w.cursor-1)
+	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.visibleRows())
+}
+
+// cursorDown moves the cursor down one of count rows, scrolling the window
+// to keep it in view.
+func (w *toggleWindow) cursorDown(count int) {
+	w.cursor = min(count-1, w.cursor+1)
+	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.visibleRows())
+}
+
+// span returns the first visible row and the number of visible rows of a
+// window over count rows.
+func (w *toggleWindow) span(count int) (first, visible int) {
+	visible = min(w.visibleRows(), count)
+	return max(0, min(w.offset, count-visible)), visible
+}
+
+// fit renders the dialog with render and, when it is taller than
+// areaHeight, shrinks the visible rows to fit the screen, keeping the
+// cursor in the window, and renders it again.
+func (w *toggleWindow) fit(count, areaHeight int, render func() string) string {
+	w.maxRows = maxVisibleToggleRows
+	content := render()
+	if rows := fitToggleRows(lipgloss.Height(content), min(w.maxRows, count), areaHeight); count > 0 && rows < min(w.maxRows, count) {
+		w.maxRows = rows
+		w.offset = toggleVisibleOffset(w.cursor, w.offset, count, rows)
+		content = render()
+	}
+	return content
+}
+
 // joinToggleRows stacks the rendered rows and, when the content overflows
 // the viewport, appends a scrollbar column like the sessions and models
 // pickers.

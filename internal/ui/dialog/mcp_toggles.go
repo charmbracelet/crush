@@ -70,18 +70,13 @@ func (s MCPToggleScope) String() string {
 // MCPToggles lets the user enable and disable MCP servers, either for
 // the current repository (Local, the default) or in the config (Global).
 type MCPToggles struct {
+	toggleWindow
 	com    *common.Common
 	width  int
 	items  []MCPToggleItem
-	cursor int
-	// offset is the first visible row; the window follows the cursor.
-	offset int
-	// maxRows is the visible row cap fitted to the screen in Draw; zero
-	// means maxVisibleToggleRows.
-	maxRows int
-	scope   MCPToggleScope
-	help    help.Model
-	keyMap  struct {
+	scope  MCPToggleScope
+	help   help.Model
+	keyMap struct {
 		UpDown key.Binding
 		Up     key.Binding
 		Down   key.Binding
@@ -151,11 +146,9 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.Up):
-			m.cursor = max(0, m.cursor-1)
-			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), m.visibleRows())
+			m.cursorUp(len(m.items))
 		case key.Matches(msg, m.keyMap.Down):
-			m.cursor = min(len(m.items)-1, m.cursor+1)
-			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), m.visibleRows())
+			m.cursorDown(len(m.items))
 		case key.Matches(msg, m.keyMap.Scope):
 			if m.scope == MCPToggleScopeLocal {
 				m.scope = MCPToggleScopeGlobal
@@ -205,23 +198,8 @@ func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.width = max(0, min(m.requiredWidth(t), area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	// Fit the visible rows to the screen height, keeping the cursor in
 	// the window.
-	m.maxRows = maxVisibleToggleRows
-	content := m.dialogContent()
-	if rows := fitToggleRows(lipgloss.Height(content), min(m.maxRows, len(m.items)), area.Dy()); len(m.items) > 0 && rows < min(m.maxRows, len(m.items)) {
-		m.maxRows = rows
-		m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), rows)
-		content = m.dialogContent()
-	}
-	DrawCenter(scr, area, content)
+	DrawCenter(scr, area, m.fit(len(m.items), area.Dy(), m.dialogContent))
 	return nil
-}
-
-// visibleRows returns the cap on visible rows.
-func (m *MCPToggles) visibleRows() int {
-	if m.maxRows > 0 {
-		return m.maxRows
-	}
-	return maxVisibleToggleRows
 }
 
 // requiredWidth returns the width needed to fit the widest row (status
@@ -271,8 +249,7 @@ func (m *MCPToggles) innerContent() string {
 
 	// Cap the visible rows so a long server list cannot make the dialog
 	// grow past the screen; the window follows the cursor.
-	visible := min(m.visibleRows(), len(m.items))
-	first := max(0, min(m.offset, len(m.items)-visible))
+	first, visible := m.span(len(m.items))
 	last := min(len(m.items), first+visible)
 
 	// The row style adds Padding(0, 1), so the text area is two columns

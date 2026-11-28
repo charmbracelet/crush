@@ -15,22 +15,19 @@ type credentialLayout struct {
 	header  string
 	message string
 	keyRows []string
-	body    string
-	help    string
+	// body is the input row; confirm prompts have none.
+	body string
+	help string
+	// confirm marks a confirmation, which has no input and gets a blank
+	// row above the help instead.
+	confirm bool
 }
 
-// fit returns the dialog content for an inner height of height rows and
-// how many rows sit between the header and the body, for placing the
-// input cursor. The header, input and help always keep their rows. Of
-// the rest, the key rows go first: on a host key prompt they hold the
-// fingerprint, which is the whole point of asking. The message gets what
-// remains. Blank rows come last, in order of how much they help reading:
-// the one between the message and the keys, then the one under the
-// header, then (for confirmations, which have no input) the one above
-// the help.
+// fit lays the parts out in height rows, shedding blank rows, then message
+// lines, then key rows, and returns how many rows sit above the input.
 func (l credentialLayout) fit(height int) (string, int) {
 	avail := height - lipgloss.Height(l.header) - lipgloss.Height(l.help)
-	if l.body != "" {
+	if !l.confirm {
 		avail -= lipgloss.Height(l.body)
 	}
 
@@ -51,28 +48,24 @@ func (l credentialLayout) fit(height int) (string, int) {
 	}
 	gap := take()
 	spacer := 0
-	if l.body == "" {
+	if l.confirm {
 		spacer = take()
 	}
 
 	lines := []string{l.header}
-	lines = append(lines, blankRows(gap)...)
+	lines = append(lines, make([]string, gap)...)
 	if message != "" {
 		lines = append(lines, message)
 	}
-	lines = append(lines, blankRows(sep)...)
+	lines = append(lines, make([]string, sep)...)
 	if keys != "" {
 		lines = append(lines, keys)
 	}
-	if l.body != "" {
+	if !l.confirm {
 		lines = append(lines, l.body)
 	}
-	lines = append(lines, blankRows(spacer)...)
+	lines = append(lines, make([]string, spacer)...)
 	lines = append(lines, l.help)
 	above := gap + blockHeight(message) + sep + blockHeight(keys)
 	return strings.Join(lines, "\n"), above
-}
-
-func blankRows(n int) []string {
-	return make([]string, n)
 }

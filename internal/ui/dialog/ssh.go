@@ -142,7 +142,7 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// What OpenSSH is asking for comes before the input; confirmations
 	// have no input, just a blank row before the help.
-	body := ""
+	var body string
 	if !m.confirm {
 		body = t.Dialog.InputPrompt.Render(m.input.View())
 	}
@@ -152,6 +152,7 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		keyRows: m.keyRows(contentWidth),
 		body:    body,
 		help:    renderDialogHelp(t, &m.help, m, contentWidth),
+		confirm: m.confirm,
 	}.fit(area.Dy() - t.Dialog.View.GetVerticalFrameSize())
 
 	view := t.Dialog.View.Width(m.width).Render(content)

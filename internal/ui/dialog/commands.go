@@ -17,6 +17,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
+// commandInfoMaxPercent is the most of a row shortcuts may take before they are hidden; less than timestamps get.
+const commandInfoMaxPercent = 25
+
 // CommandsID is the identifier for the commands dialog.
 const CommandsID = "commands"
 

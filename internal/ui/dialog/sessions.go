@@ -21,6 +21,9 @@ import (
 // SessionsID is the identifier for the session selector dialog.
 const SessionsID = "session"
 
+// sessionInfoMaxPercent is the most of a row a timestamp may take before timestamps are hidden.
+const sessionInfoMaxPercent = 35
+
 const sessionDoubleClickThreshold = 400 * time.Millisecond
 
 type sessionsMode uint8

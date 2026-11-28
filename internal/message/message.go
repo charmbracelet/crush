@@ -107,10 +107,11 @@ type pendingState struct {
 }
 
 // flushBaseline is the compact projection of a flushed [Message] that
-// [shouldFlushNow] compares against. Pending state lives for as long
-// as the process does, so it retains this instead of the whole
-// Message: a finished stream would otherwise pin its parts — reasoning
-// text, tool inputs, tool results — on the heap forever.
+// [shouldFlushNow] compares against. Pending state is only dropped
+// once its message finishes, so an abandoned stream keeps it for as
+// long as the process lives. It retains this instead of the whole
+// Message so such a stream does not pin its parts — reasoning text,
+// tool inputs, tool results — on the heap forever.
 type flushBaseline struct {
 	toolCallsFinished   []bool
 	reasoningFinishedAt int64
@@ -408,11 +409,21 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		// caller, the user expects that delta to land too.
 		wasDirty := p.dirty
 		if !wasDirty {
-			// Nothing left to write, so drop the snapshot. Pending
-			// entries outlive the streams that created them; holding
-			// latest here would pin every finished message's parts
-			// for the life of the process.
+			// Nothing left to write, so drop the snapshot. An entry
+			// for an unfinished message can outlive its stream;
+			// holding latest here would pin that message's parts
+			// until the entry is removed.
 			p.latest = Message{}
+
+			// A finished message needs no baseline: any later update
+			// for it is terminal and flushes synchronously against a
+			// fresh entry. Drop the entry so the map does not grow
+			// with every message ever streamed. The identity check
+			// guards against an entry that Delete removed and Update
+			// recreated while this write was running.
+			if err == nil && p.timer == nil && snap.IsFinished() && s.pending[id] == p {
+				delete(s.pending, id)
+			}
 		}
 		s.mu.Unlock()
 

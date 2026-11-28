@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
@@ -25,7 +26,10 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/gateway"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/jq"
+	"github.com/charmbracelet/crush/internal/plugins"
 	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
@@ -266,7 +270,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	}
 
 	// Load workspace config last so it has highest priority.
-	if wsData, err := readFile(store.workspacePath); err == nil && len(wsData) > 0 {
+	if wsData, err := fsext.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
 		if !json.Valid(wsData) {
 			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
 		}
@@ -360,22 +364,16 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	cfg.Models[SelectedModelTypeLarge] = resolved.Large
 	cfg.Models[SelectedModelTypeSmall] = resolved.Small
 
-	// Persist any fallback corrections while we still hold writeMu.
-	if resolved.LargeFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
-		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred large model: %w", err)
+	// A selection that resolved to nothing usable (signed out, catalog down)
+	// must not overwrite the user's saved choice.
+	if cfg.HasUsableSelection() {
+		if err := store.persistFallbacks(resolved); err != nil {
+			return nil, err
 		}
+		store.SetupAgents()
+	} else {
+		slog.Warn("No signed-in provider yet, sign in to one of the configured providers")
 	}
-	if resolved.SmallFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
-		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
-		}
-	}
-	store.SetupAgents()
 
 	// Capture initial staleness snapshot. Track every discovered config path,
 	// not just the ones that loaded, so a config file created after startup
@@ -383,6 +381,29 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 
 	return store, nil
+}
+
+// persistFallbacks saves selections that fell back from the configured model.
+// The caller holds writeMu.
+func (s *ConfigStore) persistFallbacks(resolved resolvedModels) error {
+	for _, f := range []struct {
+		fell bool
+		typ  SelectedModelType
+		sel  SelectedModel
+	}{
+		{resolved.LargeFallback, SelectedModelTypeLarge, resolved.Large},
+		{resolved.SmallFallback, SelectedModelTypeSmall, resolved.Small},
+	} {
+		if !f.fell {
+			continue
+		}
+		if err := s.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+			return s.updatePreferredModelFields(c, f.typ, f.sel)
+		}); err != nil {
+			return fmt.Errorf("failed to update preferred %s model: %w", f.typ, err)
+		}
+	}
+	return nil
 }
 
 // mustMarshalConfig marshals the config to JSON bytes, returning empty JSON on
@@ -595,8 +616,64 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				continue
 			}
 		}
+		if err := prepareGateway(string(p.ID), &prepared); err != nil {
+			return err
+		}
 		c.Providers.Set(string(p.ID), prepared)
 	}
+
+	// A declared catalog is discovery in its own right: the provider publishes
+	// a listing whose shape only the plugin understands. Its program is
+	// compiled before any fetching starts, so a jq typo is a load error naming
+	// the provider rather than a provider quietly left without models.
+	for id, pc := range c.Providers.Seq2() {
+		if pc.Catalog == nil {
+			continue
+		}
+		if !pc.Catalog.Usable() {
+			return fmt.Errorf("invalid catalog for provider %s: a catalog needs both a url and a program", id)
+		}
+		if _, err := jq.Compile(pc.Catalog.Program); err != nil {
+			return fmt.Errorf("invalid catalog for provider %s: %w", id, err)
+		}
+	}
+
+	// A provider with a declared catalog reads its models from there; the
+	// standard listing is OpenAI-shaped and would report ids alone, so
+	// discoveryJobs leaves these providers out.
+	type catalogResult struct {
+		models []catwalk.Model
+		err    error
+	}
+	catalogResults := make(map[string]catalogResult)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	catalogCtx, catalogCancel := context.WithTimeout(ctx, 3*time.Second)
+	for id, pc := range c.Providers.Seq2() {
+		if knownProviderNames[id] || pc.Disable || pc.BaseURL == "" || pc.Catalog == nil {
+			continue
+		}
+		bearer := pc.APIKey
+		if pc.OAuthToken != nil && pc.OAuthToken.AccessToken != "" {
+			bearer = pc.OAuthToken.AccessToken
+		}
+		cfg := discover.CatalogConfig{
+			ID:       cmp.Or(pc.ID, id),
+			Spec:     pc.Catalog,
+			BaseURL:  pc.BaseURL,
+			Bearer:   bearer,
+			Headers:  pc.ExtraHeaders,
+			Existing: pc.Models,
+		}
+		wg.Go(func() {
+			models, err := discover.Catalog(catalogCtx, cfg, resolver)
+			mu.Lock()
+			catalogResults[id] = catalogResult{models: models, err: err}
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	catalogCancel()
 
 	discovered := store.resolveDiscoveredModels(ctx, discoveryJobs(c, knownProviderNames), resolver)
 
@@ -626,8 +703,17 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			c.Providers.Del(id)
 			continue
 		}
+		if providerConfig.UsesOAuth() && !providerConfig.Auth.Usable() {
+			slog.Warn(
+				"Skipping custom provider whose OAuth configuration names no authorization server",
+				"provider", id,
+				"hint", "set auth.issuer, or auth.token_url together with auth.authorize_url or auth.device_auth_url",
+			)
+			c.Providers.Del(id)
+			continue
+		}
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
-		if apiKey == "" || err != nil {
+		if (apiKey == "" || err != nil) && !providerConfig.UsesOAuth() {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
@@ -640,11 +726,32 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		if models, ok := discovered[id]; ok {
 			providerConfig.Models = mergeModels(providerConfig.Models, models)
 		}
+		if result, ok := catalogResults[id]; ok {
+			if result.err != nil {
+				// The provider is kept even with no models to show for it: a
+				// catalog is usually behind the credential, so a failure here
+				// is often "not signed in yet", and dropping the provider
+				// would drop the sign-in that would fix it. The branch below
+				// keeps an OAuth provider that has yet to list models.
+				slog.Warn("Model discovery failed", "provider", id, "error", result.err)
+			} else if len(result.models) > 0 {
+				providerConfig.Models = result.models
+				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
+			}
+		}
 
 		if len(providerConfig.Models) == 0 {
-			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
-			c.Providers.Del(id)
-			continue
+			if providerConfig.UsesOAuth() {
+				// An unsigned-in provider cannot list its models: the
+				// catalog is behind the credential. Keeping it is what
+				// makes the sign-in reachable, and the reload after a
+				// successful login discovers the models.
+				slog.Info("Keeping OAuth provider with no models until it is signed in", "provider", id)
+			} else {
+				slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
+				c.Providers.Del(id)
+				continue
+			}
 		}
 
 		// Custom-provider headers share the MCP error contract; see
@@ -661,6 +768,10 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			providerConfig.ExtraHeaders[k] = resolved
 		}
 
+		if err := prepareDeclaredSpecs(id, &providerConfig, resolver); err != nil {
+			return err
+		}
+
 		c.Providers.Set(id, providerConfig)
 	}
 
@@ -668,6 +779,78 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
 	}
 
+	return nil
+}
+
+// prepareDeclaredSpecs expands OAuth and usage values and validates the gateway.
+func prepareDeclaredSpecs(id string, pc *ProviderConfig, resolver VariableResolver) error {
+	resolve := func(spec string, fields ...*string) error {
+		for _, field := range fields {
+			if *field == "" {
+				continue
+			}
+			value, err := resolver.ResolveValue(*field)
+			if err != nil {
+				return fmt.Errorf("resolving provider %s %s value: %w", id, spec, err)
+			}
+			*field = value
+		}
+		return nil
+	}
+
+	// Resolve OAuth references without requiring plugins to embed secrets.
+	if auth := pc.Auth; auth != nil {
+		if err := resolve("OAuth", &auth.Issuer, &auth.ClientID, &auth.ClientSecret,
+			&auth.AuthorizeURL, &auth.TokenURL, &auth.DeviceAuthURL, &auth.RedirectURI); err != nil {
+			return err
+		}
+		for _, values := range []map[string]string{auth.ExtraParams, auth.TokenHeaders} {
+			for k, v := range values {
+				resolved, err := resolver.ResolveValue(v)
+				if err != nil {
+					return fmt.Errorf("resolving provider %s OAuth value %q: %w", id, k, err)
+				}
+				values[k] = resolved
+			}
+		}
+	}
+
+	if err := prepareGateway(id, pc); err != nil {
+		return err
+	}
+
+	if usage := pc.Usage; usage != nil {
+		if err := resolve("usage", &usage.URL, &usage.Body); err != nil {
+			return err
+		}
+		if usage.URL == "" {
+			slog.Warn("Skipping provider usage report with no endpoint", "provider", id,
+				"hint", "set usage.url to the endpoint that reports remaining quota")
+			pc.Usage = nil
+		}
+	}
+	return nil
+}
+
+// prepareGateway reports invalid jq at load time rather than during a request.
+func prepareGateway(id string, pc *ProviderConfig) error {
+	switch {
+	case pc.Gateway == nil:
+		return nil
+	case !pc.Gateway.Usable():
+		slog.Warn("Skipping provider gateway adapter with incomplete programs",
+			"provider", id,
+			"hint", "a gateway needs both a request and a response jq program")
+		pc.Gateway = nil
+		return nil
+	case id != string(catwalk.InferenceProviderGemini) && pc.Type != catwalk.TypeMessages:
+		// Only google and anthropic SDKs take the adapter's client.
+		slog.Warn("Gateway adapter is only applied to google- and anthropic-type providers",
+			"provider", id, "type", string(pc.Type))
+	}
+	if _, err := gateway.New(pc.Gateway, "", nil); err != nil {
+		return fmt.Errorf("invalid gateway adapter for provider %s: %w", id, err)
+	}
 	return nil
 }
 
@@ -877,7 +1060,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	// if no provider found that is known use the first provider configured
 	for _, p := range knownProviders {
 		providerConfig, ok := c.Providers.Get(string(p.ID))
-		if !ok || providerConfig.Disable {
+		if !ok || providerConfig.Disable || providerConfig.NeedsSignIn() {
 			continue
 		}
 		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
@@ -912,12 +1095,18 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		return largeModel, smallModel, err
 	}
 
-	enabledProviders := c.EnabledProviders()
+	enabledProviders := c.UsableProviders()
 	slices.SortFunc(enabledProviders, func(a, b ProviderConfig) int {
 		return strings.Compare(a.ID, b.ID)
 	})
 
 	if len(enabledProviders) == 0 {
+		if c.Providers.Len() > 0 {
+			// Every provider declared is one that still needs a sign-in.
+			// There is no default to pick yet, which is not an error: the
+			// picker lists the models and signing in resolves it.
+			return largeModel, smallModel, nil
+		}
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err
 	}
@@ -1076,7 +1265,25 @@ func lookupConfigs(cwd string) []string {
 	// reverse order so last config has more priority
 	slices.Reverse(foundConfigs)
 
-	return append(configPaths, foundConfigs...)
+	// Plugins come before the project configs so a project's own crushrc can
+	// still override anything a plugin declares, while a plugin can still
+	// override the user's global config.
+	return append(append(configPaths, lookupPlugins(cwd)...), foundConfigs...)
+}
+
+// lookupPlugins returns plugin scripts in load order: global first, then the
+// working directory's.
+func lookupPlugins(cwd string) []string {
+	return plugins.Scripts(plugins.GlobalRoot(GlobalConfig()), plugins.ProjectRoot(cwd))
+}
+
+// isShellConfig reports whether a config path is executed as Bash rather
+// than parsed as JSON: a crushrc, the hidden .crushrc, or a plugin script.
+func isShellConfig(path string) bool {
+	base := filepath.Base(path)
+	return base == appName+"rc" ||
+		base == "."+appName+"rc" ||
+		strings.HasSuffix(base, ".sh")
 }
 
 func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []string, error) {
@@ -1093,7 +1300,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 		if path == "" {
 			continue
 		}
-		data, err := readFile(path)
+		data, err := fsext.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -1272,7 +1479,7 @@ func migrateDisableNotifications() {
 	filesToClean := []string{}
 
 	for _, path := range []string{globalConfig, dataConfig} {
-		data, err := readFile(path)
+		data, err := fsext.ReadFile(path)
 		if err != nil {
 			continue
 		}
@@ -1306,7 +1513,7 @@ func migrateDisableNotifications() {
 	}
 
 	if migratedValue != "" {
-		data, err := readFile(dataConfig)
+		data, err := fsext.ReadFile(dataConfig)
 		if err == nil {
 			if !gjson.Get(string(data), "options.notifications").Exists() {
 				updated, err := sjson.Set(string(data), "options.notifications", migratedValue)
@@ -1323,7 +1530,7 @@ func migrateDisableNotifications() {
 
 	// Remove deprecated fields from all files that contain them.
 	for _, path := range filesToClean {
-		data, err := readFile(path)
+		data, err := fsext.ReadFile(path)
 		if err != nil {
 			continue
 		}
@@ -1352,13 +1559,6 @@ func GlobalConfig() string {
 // shell config, not just JSON.
 func shellConfigSibling(jsonPath string) string {
 	return filepath.Join(filepath.Dir(jsonPath), appName+"rc")
-}
-
-// isShellConfig reports whether a config path is a shell config (crushrc or
-// the hidden .crushrc), as opposed to a JSON config.
-func isShellConfig(path string) bool {
-	base := filepath.Base(path)
-	return base == appName+"rc" || base == "."+appName+"rc"
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the

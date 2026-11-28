@@ -1,6 +1,6 @@
 //go:build windows
 
-package config
+package fsext
 
 import (
 	"os"
@@ -34,7 +34,7 @@ func TestReadFile_RetriesWhileHandleOpen(t *testing.T) {
 		windows.CloseHandle(h)
 	}()
 
-	data, err := readFile(path)
+	data, err := ReadFile(path)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"v":1}`, string(data))
 }

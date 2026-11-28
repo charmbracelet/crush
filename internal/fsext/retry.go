@@ -1,4 +1,4 @@
-package config
+package fsext
 
 import (
 	"os"
@@ -8,10 +8,15 @@ import (
 // transientRetryBudget bounds how long a transient failure is retried.
 const transientRetryBudget = 2 * time.Second
 
-// readFile is os.ReadFile, retried while Windows briefly locks the file
-// (another writer's renameFile, antivirus, the search indexer). Read any
-// file written with atomicWriteFile through it.
-func readFile(path string) ([]byte, error) {
+// Rename is os.Rename, retried while Windows briefly locks the destination
+// (antivirus, the search indexer, a concurrent reader).
+func Rename(oldpath, newpath string) error {
+	return retryTransient(func() error { return os.Rename(oldpath, newpath) })
+}
+
+// ReadFile is os.ReadFile, retried while Windows briefly locks the file, such
+// as during another writer's Rename.
+func ReadFile(path string) ([]byte, error) {
 	var data []byte
 	err := retryTransient(func() (err error) {
 		data, err = os.ReadFile(path)
@@ -27,7 +32,7 @@ func retryTransient(op func() error) error {
 	delay := time.Millisecond
 	for {
 		err := op()
-		if err == nil || !isTransientFileError(err) || slept >= transientRetryBudget {
+		if err == nil || !isTransientError(err) || slept >= transientRetryBudget {
 			return err
 		}
 		time.Sleep(delay)

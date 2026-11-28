@@ -58,57 +58,54 @@ type CellSize struct {
 	Width, Height int
 }
 
+// maxCachedImages bounds how many previews are kept at once. Only one
+// preview is visible at a time, so a handful covers moving back and forth.
+const maxCachedImages = 16
+
+// cachedImage records an image that has been prepared for rendering. Decoded
+// pixels are not kept: blocks keep only their painted string, and kitty
+// images live on the terminal side.
 type cachedImage struct {
-	img        image.Image
-	cols, rows int
+	blocks string
 }
 
 var (
 	cachedImages = map[imageKey]cachedImage{}
+	cachedOrder  []imageKey
 	cachedMutex  sync.RWMutex
 )
 
-// ResetCache clears the image cache, freeing all cached decoded images.
+// ResetCache clears the image cache, freeing all cached renderings.
 func ResetCache() {
 	cachedMutex.Lock()
 	clear(cachedImages)
+	cachedOrder = nil
 	cachedMutex.Unlock()
+}
+
+// storeCached records an image in the cache, evicting the oldest entries
+// beyond [maxCachedImages].
+func storeCached(key imageKey, entry cachedImage) {
+	cachedMutex.Lock()
+	defer cachedMutex.Unlock()
+	if _, ok := cachedImages[key]; !ok {
+		cachedOrder = append(cachedOrder, key)
+	}
+	cachedImages[key] = entry
+	for len(cachedOrder) > maxCachedImages {
+		delete(cachedImages, cachedOrder[0])
+		cachedOrder[0] = imageKey{}
+		cachedOrder = cachedOrder[1:]
+	}
 }
 
 // fitImage resizes the image to fit within the specified dimensions in
 // terminal cells, maintaining the aspect ratio.
-func fitImage(id string, img image.Image, cs CellSize, cols, rows int) image.Image {
-	if img == nil {
-		return nil
-	}
-
-	key := imageKey{id: id, cols: cols, rows: rows}
-
-	cachedMutex.RLock()
-	cached, ok := cachedImages[key]
-	cachedMutex.RUnlock()
-	if ok {
-		return cached.img
-	}
-
-	if cs.Width == 0 || cs.Height == 0 {
+func fitImage(img image.Image, cs CellSize, cols, rows int) image.Image {
+	if img == nil || cs.Width == 0 || cs.Height == 0 {
 		return img
 	}
-
-	maxWidth := cols * cs.Width
-	maxHeight := rows * cs.Height
-
-	img = imaging.Fit(img, maxWidth, maxHeight, imaging.Lanczos)
-
-	cachedMutex.Lock()
-	cachedImages[key] = cachedImage{
-		img:  img,
-		cols: cols,
-		rows: rows,
-	}
-	cachedMutex.Unlock()
-
-	return img
+	return imaging.Fit(img, cols*cs.Width, rows*cs.Height, imaging.Lanczos)
 }
 
 // HasTransmitted checks if the image with the given ID has already been
@@ -123,35 +120,27 @@ func HasTransmitted(id string, cols, rows int) bool {
 }
 
 // Transmit transmits the image data to the terminal if needed. This is used to
-// cache the image on the terminal for later rendering.
+// cache the image on the terminal for later rendering. For blocks, the image
+// is painted once here, off the UI goroutine, so [Encoding.Render] only
+// returns the cached result.
 func (e Encoding) Transmit(id string, img image.Image, cs CellSize, cols, rows int, tmux bool) tea.Cmd {
 	if img == nil {
 		return nil
 	}
 
 	key := imageKey{id: id, cols: cols, rows: rows}
-
-	cachedMutex.RLock()
-	_, ok := cachedImages[key]
-	cachedMutex.RUnlock()
-	if ok {
+	if HasTransmitted(id, cols, rows) {
 		return nil
 	}
 
 	cmd := func() tea.Msg {
 		if e != EncodingKitty {
-			cachedMutex.Lock()
-			cachedImages[key] = cachedImage{
-				img:  img,
-				cols: cols,
-				rows: rows,
-			}
-			cachedMutex.Unlock()
+			storeCached(key, cachedImage{blocks: paintBlocksFunc(img, cols, rows)})
 			return TransmittedMsg{ID: key.ID()}
 		}
 
 		var buf bytes.Buffer
-		img := fitImage(id, img, cs, cols, rows)
+		img := fitImage(img, cs, cols, rows)
 		bounds := img.Bounds()
 		imgWidth := bounds.Dx()
 		imgHeight := bounds.Dy()
@@ -182,10 +171,61 @@ func (e Encoding) Transmit(id string, img image.Image, cs CellSize, cols, rows i
 			}
 		}
 
+		storeCached(key, cachedImage{})
 		return tea.RawMsg{Msg: buf.String()}
 	}
 
 	return cmd
+}
+
+// paintBlocksFunc paints images for the blocks encoding. Tests replace it to
+// count paints without running the rasterizer.
+var paintBlocksFunc = paintBlocks
+
+// paintBlocks renders the image as Unicode block characters filling the
+// given number of cells.
+//
+// Known risk: go-ansi-paintbrush's Paint waits for its workers but not for
+// the goroutine collecting their results, so it can occasionally read a
+// cell before it is filled in. Since the painted string is cached and reused
+// rather than redrawn each frame, such a garbled paint persists until the
+// cache entry is reset or evicted. This is accepted as rare and cosmetic;
+// removing it needs a patched copy of the library.
+func paintBlocks(img image.Image, cols, rows int) string {
+	canvas := paintbrush.New()
+	canvas.SetImage(img)
+	canvas.SetWidth(cols)
+	canvas.SetHeight(rows)
+	canvas.Weights = map[rune]float64{
+		'': .95,
+		'': .95,
+		'▁': .9,
+		'▂': .9,
+		'▃': .9,
+		'▄': .9,
+		'▅': .9,
+		'▆': .85,
+		'█': .85,
+		'▊': .95,
+		'▋': .95,
+		'▌': .95,
+		'▍': .95,
+		'▎': .95,
+		'▏': .95,
+		'●': .95,
+		'◀': .95,
+		'▲': .95,
+		'▶': .95,
+		'▼': .9,
+		'○': .8,
+		'◉': .95,
+		'◧': .9,
+		'◨': .9,
+		'◩': .9,
+		'◪': .9,
+	}
+	canvas.Paint()
+	return strings.TrimSpace(canvas.GetResult())
 }
 
 // Render renders the given image within the specified dimensions using the
@@ -199,44 +239,9 @@ func (e Encoding) Render(id string, cols, rows int) string {
 		return ""
 	}
 
-	img := cached.img
-
 	switch e {
 	case EncodingBlocks:
-		canvas := paintbrush.New()
-		canvas.SetImage(img)
-		canvas.SetWidth(cols)
-		canvas.SetHeight(rows)
-		canvas.Weights = map[rune]float64{
-			'': .95,
-			'': .95,
-			'▁': .9,
-			'▂': .9,
-			'▃': .9,
-			'▄': .9,
-			'▅': .9,
-			'▆': .85,
-			'█': .85,
-			'▊': .95,
-			'▋': .95,
-			'▌': .95,
-			'▍': .95,
-			'▎': .95,
-			'▏': .95,
-			'●': .95,
-			'◀': .95,
-			'▲': .95,
-			'▶': .95,
-			'▼': .9,
-			'○': .8,
-			'◉': .95,
-			'◧': .9,
-			'◨': .9,
-			'◩': .9,
-			'◪': .9,
-		}
-		canvas.Paint()
-		return strings.TrimSpace(canvas.GetResult())
+		return cached.blocks
 	case EncodingKitty:
 		// Build Kitty graphics unicode place holders
 		var fg color.Color

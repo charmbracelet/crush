@@ -68,8 +68,12 @@ type ClientSession struct {
 }
 
 // recentHealthWindow is how long after a successful request a remote
-// session is trusted without pinging it again.
-const recentHealthWindow = 15 * time.Second
+// session is trusted without pinging it again. A session that dies inside
+// the window (server restart, expired session, revoked token) is not
+// renewed before the next request, which then fails and is reported to
+// the agent; only the request after that pings and renews. The window is
+// kept short so this only covers bursts of calls within a single turn.
+const recentHealthWindow = 3 * time.Second
 
 // markOK records that a request on the session just succeeded.
 func (s *ClientSession) markOK() { s.lastOK.Store(time.Now().UnixNano()) }

@@ -59,7 +59,6 @@ const (
 	// Constants for auto-summarization thresholds
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
-	smallContextWindowRatio     = 0.2
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -1256,21 +1255,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
+			func(steps []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
 				// to avoid immediately truncating custom/local models.
 				if cw == 0 {
 					return false
 				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+				tokens := currentSession.CompletionTokens + currentSession.PromptTokens + pendingToolResultTokens(steps)
 				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
-				}
+				threshold := contextReserve(cw)
 				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true
 					return true
@@ -1596,8 +1590,22 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
+	// Bound the summary as well as the normal request. A tool batch can
+	// exceed the entire window before a stop condition gets to run.
+	window := int64(largeModel.CatwalkCfg.ContextWindow)
+	var summaryOutputTokens *int64
+	if window > 0 {
+		reserved := max(int64(1), contextReserve(window))
+		output := int64(largeModel.CatwalkCfg.DefaultMaxTokens)
+		if output <= 0 || output > reserved {
+			output = reserved
+		}
+		summaryOutputTokens = &output
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
+		MaxOutputTokens: summaryOutputTokens,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: opts,
@@ -1609,6 +1617,12 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
+			}
+			if summaryOutputTokens != nil {
+				prepared.Messages, err = fitSummaryToolResults(prepared.Messages, window-*summaryOutputTokens)
+				if err != nil {
+					return callContext, prepared, err
+				}
 			}
 			return callContext, prepared, nil
 		},

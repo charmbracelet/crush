@@ -10,23 +10,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// repeatedCompactionModel overflows the context on the first limit turns
+// that offer tools, then finishes. Summary requests offer no tools.
 type repeatedCompactionModel struct {
 	finishStreamModel
-	streams int
+	limit     int
+	overflows int
 }
 
 func (m *repeatedCompactionModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	m.streams++
-	step := m.streams
-	// The first two turns hit the context limit with a tool call. The
-	// intervening requests generate summaries, and the last turn finishes.
-	if step != 1 && step != 3 {
+	if len(call.Tools) == 0 || m.overflows == m.limit {
 		return m.finishStreamModel.Stream(ctx, call)
 	}
+	m.overflows++
+	id := fmt.Sprintf("call-%d", m.overflows)
 	return func(yield func(fantasy.StreamPart) bool) {
 		if !yield(fantasy.StreamPart{
 			Type:          fantasy.StreamPartTypeToolCall,
-			ID:            fmt.Sprintf("call-%d", step),
+			ID:            id,
 			ToolCallName:  "probe",
 			ToolCallInput: "{}",
 		}) {
@@ -44,7 +45,7 @@ func TestAutoCompactionContinuationKeepsOriginalPrompt(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	large := &repeatedCompactionModel{finishStreamModel: finishStreamModel{text: "done"}}
+	large := &repeatedCompactionModel{finishStreamModel: finishStreamModel{text: "done"}, limit: 2}
 	small := &finishStreamModel{text: "title"}
 	probe := fantasy.NewAgentTool("probe", "Return a test result.", func(_ context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		return fantasy.NewTextResponse("ok"), nil
@@ -53,9 +54,8 @@ func TestAutoCompactionContinuationKeepsOriginalPrompt(t *testing.T) {
 
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
-	const prompt = "Inspect the workspace."
-	const note = "The previous session was interrupted because it got too long, the initial user request was: `Inspect the workspace.`"
-	_, err = agent.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: prompt})
+	call := SessionAgentCall{SessionID: sess.ID, Prompt: "Inspect the workspace."}
+	_, err = agent.Run(t.Context(), call)
 	require.NoError(t, err)
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
@@ -70,9 +70,8 @@ func TestAutoCompactionContinuationKeepsOriginalPrompt(t *testing.T) {
 			summaries++
 		}
 	}
+	call.resumed = true
+	note := call.modelPrompt()
 	require.Equal(t, 2, summaries)
-	require.Len(t, prompts, 3)
-	require.Equal(t, prompt, prompts[0])
-	require.Equal(t, note, prompts[1], "first compaction")
-	require.Equal(t, note, prompts[2], "second compaction")
+	require.Equal(t, []string{"Inspect the workspace.", note, note}, prompts)
 }

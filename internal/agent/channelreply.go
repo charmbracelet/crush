@@ -301,11 +301,12 @@ func (a *sessionAgent) sendChannelReply(ctx context.Context, call SessionAgentCa
 	if text == "" {
 		return
 	}
-	if call.channelMeta == nil {
+	meta, _ := parseChannelMeta(call.Prompt)
+	if meta == nil {
 		slog.Warn("Channel reply skipped: prompt has no channel metadata", "channel", call.Channel)
 		return
 	}
-	tool, args, ok := resolveChannelReply(reply, call.channelMeta, text)
+	tool, args, ok := resolveChannelReply(reply, meta, text)
 	if !ok {
 		slog.Warn("Channel reply skipped: no reply route matches the push metadata", "channel", call.Channel)
 		return

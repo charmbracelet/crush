@@ -71,7 +71,9 @@ func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authUR
 		key.WithHelp("s", "skip"),
 	)
 
-	return m, m.spinner.Tick
+	// The prompt draws no spinner, so it does not tick until startAuth
+	// begins authenticating.
+	return m, nil
 }
 
 // ID implements Dialog.
@@ -92,7 +94,9 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		switch m.state {
-		case MCPAuthStatePrompt, MCPAuthStateAuthenticating:
+		case MCPAuthStateAuthenticating:
+			// Only this state draws the spinner; ticking elsewhere would
+			// redraw the screen for nothing.
 			return m.tickSpinner(msg)
 		}
 

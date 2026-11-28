@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -20,6 +21,27 @@ func newTestMCPAuth(servers ...string) *MCPAuth {
 	}
 	m, _ := NewMCPAuth(&common.Common{Styles: &s}, pending, nil)
 	return m
+}
+
+// TestMCPAuthSpinnerTicksOnlyWhileAuthenticating verifies the prompt, which
+// draws no spinner, keeps no tick chain running, while authenticating does.
+func TestMCPAuthSpinnerTicksOnlyWhileAuthenticating(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	m, cmd := NewMCPAuth(&common.Common{Styles: &s}, []mcptools.PendingAuthServer{
+		{Name: "linear", URL: "https://linear.example.com/mcp"},
+	}, nil)
+	require.Nil(t, cmd)
+	require.Equal(t, MCPAuthStatePrompt, m.state)
+
+	tick := m.spinner.Tick().(spinner.TickMsg)
+	require.Nil(t, m.HandleMsg(tick))
+
+	m.state = MCPAuthStateAuthenticating
+	action, ok := m.HandleMsg(tick).(ActionCmd)
+	require.True(t, ok)
+	require.NotNil(t, action.Cmd)
 }
 
 // TestMCPAuthErrorCanSkipToNextServer verifies a failed server can be

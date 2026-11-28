@@ -166,10 +166,7 @@ func dialogEmptyState(t *styles.Styles, msg string, width int) string {
 	return st.Render(ansi.Truncate(msg, textWidth, "…"))
 }
 
-// joinScrollbar appends a vertical scrollbar to the right of view when the
-// content overflows its viewport, and returns view unchanged otherwise.
-// contentSize is the total content height, viewportSize the visible height,
-// and offset the current scroll position.
+// joinScrollbar appends a scrollbar right of view when contentSize overflows viewportSize.
 func joinScrollbar(t *styles.Styles, view string, height, contentSize, viewportSize, offset int) string {
 	if sb := common.Scrollbar(t, height, contentSize, viewportSize, offset); sb != "" {
 		return lipgloss.JoinHorizontal(lipgloss.Top, view, sb)
@@ -177,17 +174,13 @@ func joinScrollbar(t *styles.Styles, view string, height, contentSize, viewportS
 	return view
 }
 
-// Maximum share of a list row width the secondary info column may take
-// before it is hidden entirely, so it never crowds out the item name.
-// Command shortcuts are small and non-essential, so they yield sooner
-// than the larger, more useful session timestamps.
+// Maximum share of a row the info column may take before it is hidden; shortcuts yield sooner than timestamps.
 const (
 	sessionInfoMaxPercent = 35
 	commandInfoMaxPercent = 25
 )
 
-// infoColumnItem is a list item with a secondary info column (a session
-// timestamp, a command shortcut) that can be hidden when space is tight.
+// infoColumnItem is a list item with a hideable info column, such as a timestamp or shortcut.
 type infoColumnItem interface {
 	// InfoText returns the raw info string, or "" when there is none.
 	InfoText() string
@@ -195,10 +188,7 @@ type infoColumnItem interface {
 	SetHideInfo(bool)
 }
 
-// applyInfoColumnVisibility hides the secondary info column across every
-// item uniformly when its widest entry would take more than maxPercent of
-// rowWidth, so item names keep their room. It returns once rowWidth grows
-// enough for the widest entry to fit within the budget again.
+// applyInfoColumnVisibility hides every item's info column when the widest would exceed maxPercent of rowWidth.
 func applyInfoColumnVisibility(items []list.Item, rowWidth, maxPercent int) {
 	widest := 0
 	for _, it := range items {
@@ -235,19 +225,13 @@ func clampDialogLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderDialogHelp renders keybind hints as a single padded footer line at
-// contentWidth (the dialog's inner width: total minus the View border). The
-// hints are packed greedily and truncated with an ellipsis so the line never
-// wraps or overflows the border, and never ends on a dangling separator.
+// renderDialogHelp renders km's short help as one padded line that fits contentWidth, the dialog's inner width.
 func renderDialogHelp(t *styles.Styles, h *help.Model, km help.KeyMap, contentWidth int) string {
 	textWidth := max(0, contentWidth-t.Dialog.HelpView.GetHorizontalFrameSize())
 	return t.Dialog.HelpView.Render(shortHelpLine(h, km.ShortHelp(), textWidth))
 }
 
-// shortHelpLine builds a single-line short help view truncated to width.
-// It reimplements the bubbles help packing to avoid a component bug where
-// items are kept even when they overflow (when the ellipsis itself does not
-// fit), and to guarantee the line ends cleanly rather than on a separator.
+// shortHelpLine packs enabled bindings into width, ending in an ellipsis rather than overflowing or on a separator.
 func shortHelpLine(h *help.Model, bindings []key.Binding, width int) string {
 	if width <= 0 {
 		return ""
@@ -269,12 +253,7 @@ func shortHelpLine(h *help.Model, bindings []key.Binding, width int) string {
 			h.Styles.ShortDesc.Inline(true).Render(kb.Help().Desc)
 		w := lipgloss.Width(seg)
 		if total+w > width {
-			// The next item doesn't fit, so end with an ellipsis to show
-			// hints were dropped, dropping earlier hints too if needed to
-			// make room for it. The separator belongs to each dropped
-			// item, so what's left ends on a real hint, not a dangling
-			// dot. A leading space joins the ellipsis to prior hints, but
-			// only when there are prior hints.
+			// End with an ellipsis, dropping earlier hints (with their separators) until it fits.
 			for {
 				tail := ellipsis
 				if len(segs) > 0 {

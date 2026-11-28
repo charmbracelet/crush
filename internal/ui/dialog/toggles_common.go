@@ -20,10 +20,7 @@ const minToggleDialogWidth = 68
 // row area: one space before the track glyph.
 const scrollbarColumnWidth = 2
 
-// fitToggleRow shares a row's text width between a name and its status
-// after the 2-column mark and a 1-column gap. Both keep their full width
-// when they fit; otherwise the status gives way first, but never below
-// half the row, so a long error cannot push the name out entirely.
+// fitToggleRow fits name and status beside the mark, truncating status first but never below half the row.
 func fitToggleRow(name, status string, rowWidth int) (string, string) {
 	avail := max(0, rowWidth-2-1)
 	nameWidth, statusWidth := ansi.StringWidth(name), ansi.StringWidth(status)
@@ -42,9 +39,7 @@ func shrinkRowsToFit(dialogHeight, visible, areaHeight int) int {
 	return visible
 }
 
-// toggleVisibleOffset returns the first visible row index for a window of
-// visible rows over count items, scrolling so the cursor always stays in
-// view.
+// toggleVisibleOffset returns the first visible row of a window that keeps the cursor in view.
 func toggleVisibleOffset(cursor, offset, count, visible int) int {
 	offset = min(offset, max(0, count-visible))
 	if cursor < offset {
@@ -56,9 +51,7 @@ func toggleVisibleOffset(cursor, offset, count, visible int) int {
 	return max(0, offset)
 }
 
-// toggleWindow is the scrolling window shared by the toggles dialogs: the
-// cursor row, the first visible row, and the visible row cap fitted to the
-// screen.
+// toggleWindow is a toggles dialog's cursor and scrolling window.
 type toggleWindow struct {
 	cursor int
 	// offset is the first visible row; the window follows the cursor.
@@ -67,30 +60,25 @@ type toggleWindow struct {
 	maxRows int
 }
 
-// cursorUp moves the cursor up one of count rows, scrolling the window to
-// keep it in view.
+// cursorUp moves the cursor up one of count rows, keeping it in view.
 func (w *toggleWindow) cursorUp(count int) {
 	w.cursor = max(0, w.cursor-1)
 	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.maxRows)
 }
 
-// cursorDown moves the cursor down one of count rows, scrolling the window
-// to keep it in view.
+// cursorDown moves the cursor down one of count rows, keeping it in view.
 func (w *toggleWindow) cursorDown(count int) {
 	w.cursor = min(count-1, w.cursor+1)
 	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.maxRows)
 }
 
-// span returns the first visible row and the number of visible rows of a
-// window over count rows.
+// span returns the first visible row and the visible row count over count rows.
 func (w *toggleWindow) span(count int) (first, visible int) {
 	visible = min(w.maxRows, count)
 	return max(0, min(w.offset, count-visible)), visible
 }
 
-// fit renders the dialog with render and, when it is taller than
-// areaHeight, shrinks the visible rows to fit the screen, keeping the
-// cursor in the window, and renders it again.
+// fit renders with render, re-rendering with fewer rows when it is taller than areaHeight.
 func (w *toggleWindow) fit(count, areaHeight int, render func() string) string {
 	w.maxRows = maxVisibleToggleRows
 	content := render()
@@ -102,16 +90,12 @@ func (w *toggleWindow) fit(count, areaHeight int, render func() string) string {
 	return content
 }
 
-// joinToggleRows stacks the rendered rows and, when the content overflows
-// the viewport, appends a scrollbar column like the sessions and models
-// pickers.
+// joinToggleRows stacks rows between blank lines, with a scrollbar column when they overflow.
 func joinToggleRows(t *styles.Styles, rows []string, contentSize, visible, offset int) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	// Compose line by line instead of a block-level JoinHorizontal: the
-	// scrollbar string splits into exactly len(rows) lines, so pairing
-	// them keeps every row's track glyph on the same line.
+	// Pair lines one by one so each track glyph stays on its row.
 	scrollLines := strings.Split(common.Scrollbar(t, len(rows), contentSize, visible, offset), "\n")
 	var b strings.Builder
 	for i, row := range rows {
@@ -128,9 +112,7 @@ func joinToggleRows(t *styles.Styles, rows []string, contentSize, visible, offse
 	return lipgloss.JoinVertical(lipgloss.Left, "", b.String(), "")
 }
 
-// toggleEmptyState renders a toggles dialog's empty message with the same
-// blank spacer lines above and below as a populated list, so it does not
-// crowd the title or the help line.
+// toggleEmptyState renders msg between the same blank lines as a populated list.
 func toggleEmptyState(t *styles.Styles, msg string, innerWidth int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, "", dialogEmptyState(t, msg, innerWidth), "")
 }

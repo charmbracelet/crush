@@ -165,12 +165,7 @@ func statusTextStyle(t *styles.Styles, status string) lipgloss.Style {
 	}
 }
 
-// itemStatus returns the right-hand status label for an item. The live
-// connection state speaks for itself: a config-disabled server that was
-// runtime-enabled shows "starting"/"connected", an untouched one shows
-// "disabled" via its connection state. Only a repository override (local
-// scope) or the config flag (global scope) forces the "disabled" label
-// over a live connection.
+// itemStatus is the live status, unless the scope's own setting disables the server.
 func (m *MCPToggles) itemStatus(item MCPToggleItem) string {
 	if m.scope == MCPToggleScopeGlobal {
 		if item.ConfigDisabled {
@@ -189,9 +184,7 @@ func (m *MCPToggles) itemStatus(item MCPToggleItem) string {
 	return item.Status
 }
 
-// SetItemStatus refreshes one item's live connection status without
-// touching its Disabled override, so an open dialog updates as servers
-// finish connecting.
+// SetItemStatus updates one server's live status, leaving its overrides alone.
 func (m *MCPToggles) SetItemStatus(name, status string) {
 	for i, item := range m.items {
 		if item.Name == name {

@@ -229,9 +229,7 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	avail := max(0, area.Dy()-rc.ChromeHeight())
 	height := min(filePickerMinHeight, avail)
 
-	// Show the image preview in whatever height is left, capped to its
-	// normal size. Hide it entirely when there is nothing to preview or
-	// the dialog is too short for a useful preview.
+	// Preview in the height left, hidden when there is nothing or too little room.
 	imgPrevHeight := 0
 	if f.fp.HighlightedPath() != "" {
 		imgPrevHeight = min(

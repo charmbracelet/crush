@@ -209,7 +209,7 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			row := lipgloss.JoinHorizontal(lipgloss.Top, oauthCard, strings.Repeat(" ", cardGap), apiKeyCard)
 			cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, row)
 		} else {
-			stack := lipgloss.JoinVertical(lipgloss.Left, oauthCard, "", apiKeyCard)
+			stack := lipgloss.JoinVertical(lipgloss.Left, oauthCard, apiKeyCard)
 			cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, stack)
 		}
 		rc.AddPart(cards)
@@ -282,7 +282,7 @@ func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide 
 		left := cardsLeft + cardWidth + cardGap
 		m.apiKeyCardArea = image.Rect(left, cardsTop, left+cardWidth, cardsTop+cardHeight)
 	} else {
-		top := cardsTop + cardHeight + 1
+		top := cardsTop + cardHeight
 		m.apiKeyCardArea = image.Rect(cardsLeft, top, cardsLeft+cardWidth, top+cardHeight)
 	}
 }

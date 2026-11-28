@@ -140,6 +140,8 @@ type Anim struct {
 	suffix           func() string
 	suffixColor      color.Color
 	settings         Settings
+	// drawn records that Render ran since the last TakeDrawn call.
+	drawn atomic.Bool
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -448,8 +450,17 @@ func (a *Anim) Advance() bool {
 	return true
 }
 
+// TakeDrawn reports whether Render ran since the previous TakeDrawn call
+// and resets the record. Owners use it to learn whether a render of theirs
+// showed the animation, so frames that cannot change what they draw can
+// skip re-rendering.
+func (a *Anim) TakeDrawn() bool {
+	return a.drawn.Swap(false)
+}
+
 // Render renders the current state of the animation.
 func (a *Anim) Render() string {
+	a.drawn.Store(true)
 	var b strings.Builder
 	step := int(a.step.Load())
 	frames := int(a.framesSinceStart.Load())

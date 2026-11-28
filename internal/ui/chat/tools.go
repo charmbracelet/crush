@@ -178,6 +178,15 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+
+	// rendered, animDrawn and renderedTimer describe the last render:
+	// whether it drew the spinner, and the timer text it was based on.
+	// Once a running tool's input is complete most renderers stop
+	// drawing the spinner, and only the timer can change what they
+	// draw, so animation frames re-render the item only when it does.
+	rendered      bool
+	animDrawn     bool
+	renderedTimer string
 }
 
 // LiveOutputItem is implemented by tool items that can show output while
@@ -363,12 +372,33 @@ func (t *baseToolMessageItem) restyleAnim() {
 // the rendered output but is invisible to the per-item caches. Without
 // the bump the list cache would serve the previously rendered frame
 // indefinitely and the spinner would appear frozen.
+//
+// When the last render did not draw the spinner, a frame cannot change
+// the output, so the item only bumps once the timer text it showed is
+// out of date. The anim still advances, so it keeps its phase for when
+// it is drawn again.
 func (t *baseToolMessageItem) Advance() bool {
 	if !t.isSpinning() || !t.anim.Advance() {
 		return false
 	}
+	if !t.renderStale() {
+		return false
+	}
 	t.Bump()
 	return true
+}
+
+// timerKey returns the time-dependent text a running tool can draw
+// without its spinner: its own elapsed time and the turn's.
+func (t *baseToolMessageItem) timerKey() string {
+	return common.FormatDuration(t.elapsed()) + "|" + common.CurrentElapsed()
+}
+
+// renderStale reports whether a running tool's last render may no longer
+// match what a render now would draw: there was none, it drew the
+// spinner, or the timer has moved on since.
+func (t *baseToolMessageItem) renderStale() bool {
+	return !t.rendered || t.animDrawn || t.renderedTimer != t.timerKey()
 }
 
 // RawRender implements [MessageItem].
@@ -379,9 +409,17 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	}
 
 	content, height, ok := t.getCachedRender(toolItemWidth)
-	// if we are spinning or there is no cache rerender
-	if !ok || t.isSpinning() {
+	// Rerender when there is no cache, or while running when the cached
+	// render may be out of date. Every other change clears the cache.
+	if !ok || (t.isSpinning() && t.renderStale()) {
+		// Take the timer before rendering, so a second that ticks over
+		// mid-render makes the next frame render again.
+		timer := t.timerKey()
+		t.anim.TakeDrawn()
 		content = t.renderTool(toolItemWidth)
+		t.rendered = true
+		t.animDrawn = t.anim.TakeDrawn()
+		t.renderedTimer = timer
 
 		// Prepend hook indicator if hooks ran for this tool call.
 		if t.result != nil {

@@ -95,7 +95,7 @@ func TestSkillsToggles_ScrollsToCursor(t *testing.T) {
 	}
 
 	// The window shows at most maxVisibleToggleRows items.
-	rendered := lipgloss.Height(m.innerContent())
+	rendered := lipgloss.Height(m.innerContent(m.toggleRows(m.scope)))
 	require.LessOrEqual(t, rendered, maxVisibleToggleRows+2 /* blank padding lines */)
 
 	// Moving past the bottom scrolls the window with the cursor.

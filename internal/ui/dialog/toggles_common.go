@@ -20,13 +20,6 @@ const minToggleDialogWidth = 68
 // row area: one space before the track glyph.
 const scrollbarColumnWidth = 2
 
-// truncateToggleName truncates a row's name so the 2-column mark, the
-// name, at least one space and a status of statusWidth fit rowWidth on one
-// line; an untruncated long name wraps inside the dialog frame.
-func truncateToggleName(name string, rowWidth, statusWidth int) string {
-	return ansi.Truncate(name, max(0, rowWidth-2-1-statusWidth), "…")
-}
-
 // fitToggleRow shares a row's text width between a name and its status
 // after the 2-column mark and a 1-column gap. Both keep their full width
 // when they fit; otherwise the status gives way first, but never below
@@ -41,11 +34,8 @@ func fitToggleRow(name, status string, rowWidth int) (string, string) {
 	return ansi.Truncate(name, avail-ansi.StringWidth(status), "…"), status
 }
 
-// fitToggleRows returns how many rows of a toggles dialog can show in an
-// area of areaHeight, given the dialog's height when it shows visible rows.
-// The dialog never grows past maxVisibleToggleRows, and always keeps one
-// row so the cursor stays visible.
-func fitToggleRows(dialogHeight, visible, areaHeight int) int {
+// shrinkRowsToFit returns how many of visible rows fit areaHeight given the dialog's dialogHeight, keeping at least one.
+func shrinkRowsToFit(dialogHeight, visible, areaHeight int) int {
 	if over := dialogHeight - areaHeight; over > 0 {
 		return max(1, visible-over)
 	}
@@ -73,37 +63,28 @@ type toggleWindow struct {
 	cursor int
 	// offset is the first visible row; the window follows the cursor.
 	offset int
-	// maxRows is the visible row cap fitted to the screen in fit; zero
-	// means maxVisibleToggleRows.
+	// maxRows is the visible row cap fitted to the screen in fit.
 	maxRows int
-}
-
-// visibleRows returns the cap on visible rows.
-func (w *toggleWindow) visibleRows() int {
-	if w.maxRows > 0 {
-		return w.maxRows
-	}
-	return maxVisibleToggleRows
 }
 
 // cursorUp moves the cursor up one of count rows, scrolling the window to
 // keep it in view.
 func (w *toggleWindow) cursorUp(count int) {
 	w.cursor = max(0, w.cursor-1)
-	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.visibleRows())
+	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.maxRows)
 }
 
 // cursorDown moves the cursor down one of count rows, scrolling the window
 // to keep it in view.
 func (w *toggleWindow) cursorDown(count int) {
 	w.cursor = min(count-1, w.cursor+1)
-	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.visibleRows())
+	w.offset = toggleVisibleOffset(w.cursor, w.offset, count, w.maxRows)
 }
 
 // span returns the first visible row and the number of visible rows of a
 // window over count rows.
 func (w *toggleWindow) span(count int) (first, visible int) {
-	visible = min(w.visibleRows(), count)
+	visible = min(w.maxRows, count)
 	return max(0, min(w.offset, count-visible)), visible
 }
 
@@ -113,7 +94,7 @@ func (w *toggleWindow) span(count int) (first, visible int) {
 func (w *toggleWindow) fit(count, areaHeight int, render func() string) string {
 	w.maxRows = maxVisibleToggleRows
 	content := render()
-	if rows := fitToggleRows(lipgloss.Height(content), min(w.maxRows, count), areaHeight); count > 0 && rows < min(w.maxRows, count) {
+	if rows := shrinkRowsToFit(lipgloss.Height(content), min(w.maxRows, count), areaHeight); count > 0 && rows < min(w.maxRows, count) {
 		w.maxRows = rows
 		w.offset = toggleVisibleOffset(w.cursor, w.offset, count, rows)
 		content = render()

@@ -3,13 +3,9 @@ package dialog
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/help"
-	"charm.land/bubbles/v2/key"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // MCPTogglesID is the identifier for the MCP toggles dialog.
@@ -70,55 +66,16 @@ func (s MCPToggleScope) String() string {
 // MCPToggles lets the user enable and disable MCP servers, either for
 // the current repository (Local, the default) or in the config (Global).
 type MCPToggles struct {
-	toggleWindow
-	com    *common.Common
-	width  int
-	items  []MCPToggleItem
-	scope  MCPToggleScope
-	help   help.Model
-	keyMap struct {
-		UpDown key.Binding
-		Up     key.Binding
-		Down   key.Binding
-		Toggle key.Binding
-		Scope  key.Binding
-		Close  key.Binding
-	}
+	toggleDialog
+	items []MCPToggleItem
 }
 
 var _ Dialog = (*MCPToggles)(nil)
 
 // NewMCPToggles creates a new MCP toggles dialog.
 func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
-	t := com.Styles
-	m := &MCPToggles{
-		com:   com,
-		width: 0, // Set dynamically in Draw().
-		items: items,
-	}
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
-
-	m.keyMap.UpDown = upDownKey("choose")
-	m.keyMap.Up = key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("↑/k", "up"),
-	)
-	m.keyMap.Down = key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("↓/j", "down"),
-	)
-	m.keyMap.Toggle = key.NewBinding(
-		key.WithKeys("enter", " ", "space"),
-		key.WithHelp("enter", "toggle"),
-	)
-	m.keyMap.Scope = key.NewBinding(
-		key.WithKeys("tab"),
-		key.WithHelp("tab", "switch scope"),
-	)
-	m.keyMap.Close = CloseKey
-
+	m := &MCPToggles{items: items}
+	m.toggleDialog = newToggleDialog(com, m, "Toggle MCPs", "No MCP servers configured.")
 	return m
 }
 
@@ -132,168 +89,46 @@ func (m *MCPToggles) Items() []MCPToggleItem {
 	return m.items
 }
 
-// Scope returns the selected toggle scope.
-func (m *MCPToggles) Scope() MCPToggleScope {
-	return m.scope
-}
-
-// HandleMsg implements Dialog.
-func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, m.keyMap.Up):
-			m.cursorUp(len(m.items))
-		case key.Matches(msg, m.keyMap.Down):
-			m.cursorDown(len(m.items))
-		case key.Matches(msg, m.keyMap.Scope):
-			if m.scope == MCPToggleScopeLocal {
-				m.scope = MCPToggleScopeGlobal
-			} else {
-				m.scope = MCPToggleScopeLocal
-			}
-		case key.Matches(msg, m.keyMap.Toggle):
-			if m.cursor < 0 || m.cursor >= len(m.items) {
-				return nil
-			}
-			item := m.items[m.cursor]
-			// Toggle based on the effective state for the active scope:
-			// local considers the repository overrides, global reads the
-			// config's raw disabled flag.
-			currentlyDisabled := item.localDisabled()
-			if m.scope == MCPToggleScopeGlobal {
-				currentlyDisabled = item.ConfigDisabled
-			}
-			newState := !currentlyDisabled
-			if m.scope == MCPToggleScopeGlobal {
-				m.items[m.cursor].ConfigDisabled = newState
-			} else {
-				m.items[m.cursor].Disabled = newState
-				// A server enabled locally is started at runtime; surface
-				// that immediately instead of waiting for the connection
-				// state event.
-				if !newState {
-					m.items[m.cursor].EnabledOverride = true
-					m.items[m.cursor].Status = "starting"
-				}
-			}
-			return ActionToggleMCP{
-				Name:     item.Name,
-				Disabled: newState,
-				Global:   m.scope == MCPToggleScopeGlobal,
-			}
-		case key.Matches(msg, m.keyMap.Close):
-			return ActionClose{}
-		}
-	}
-	return nil
-}
-
-// Draw implements Dialog.
-func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+func (m *MCPToggles) toggleRows(scope MCPToggleScope) []toggleRow {
 	t := m.com.Styles
-	m.width = max(0, min(m.requiredWidth(t), area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	// Fit the visible rows to the screen height, keeping the cursor in
-	// the window.
-	DrawCenter(scr, area, m.fit(len(m.items), area.Dy(), m.dialogContent))
-	return nil
-}
-
-// requiredWidth returns the width needed to fit the widest row (status
-// dot, name, at least one space, and status) on a single line, plus row
-// padding and the dialog frame. A fixed 64-column cap word-wraps long
-// server names onto a second line.
-func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
-	widest := minToggleDialogWidth
-	for _, item := range m.items {
-		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
-		widest = max(widest, row)
-	}
-	return widest + 2 /* row padding */ + t.Dialog.View.GetHorizontalFrameSize()
-}
-
-func (m *MCPToggles) dialogContent() string {
-	t := m.com.Styles
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-	rc := NewRenderContext(t, m.width)
-	rc.Title = "Toggle MCPs"
-	rc.TitleInfo = m.scopeRadioView(t)
-	rc.AddPart(m.innerContent())
-	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
-	return rc.Render()
-}
-
-// scopeRadioView renders the Local/Global radio selector, mirroring the
-// command palette's System/User switch on the title line.
-func (m *MCPToggles) scopeRadioView(t *styles.Styles) string {
-	radio := func(s MCPToggleScope) string {
-		bullet := t.Radio.Off
-		if s == m.scope {
-			bullet = t.Radio.On
-		}
-		return bullet.Render() + t.Radio.Label.Padding(0, 1).Render(s.String())
-	}
-	return " " + radio(MCPToggleScopeLocal) + " " + radio(MCPToggleScopeGlobal)
-}
-
-func (m *MCPToggles) innerContent() string {
-	t := m.com.Styles
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-
-	if len(m.items) == 0 {
-		return toggleEmptyState(t, "No MCP servers configured.", innerWidth)
-	}
-
-	// Cap the visible rows so a long server list cannot make the dialog
-	// grow past the screen; the window follows the cursor.
-	first, visible := m.span(len(m.items))
-	last := min(len(m.items), first+visible)
-
-	// The row style adds Padding(0, 1), so the text area is two columns
-	// narrower than the dialog's inner width. When the list scrolls,
-	// reserve the scrollbar column so row lines do not wrap and knock
-	// the track out of alignment.
-	rowWidth := max(0, innerWidth-2)
-	if len(m.items) > visible {
-		rowWidth = max(0, rowWidth-scrollbarColumnWidth)
-	}
-
-	rows := make([]string, 0, visible)
-	for i := first; i < last; i++ {
-		item := m.items[i]
+	rows := make([]toggleRow, len(m.items))
+	for i, item := range m.items {
 		status := m.itemStatus(item)
-		// The status dot mirrors the sidebar: green connected, yellow
-		// starting, red error, gray disabled/offline. Icon styles carry
-		// their own "●" via SetString, so Render() yields just the dot.
-		// It sits left of the name, like the sidebar rows.
-		dot := statusDot(t, status)
-		name, status := fitToggleRow(item.Name, status, rowWidth)
-		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(name)-lipgloss.Width(status))
-
-		if i == m.cursor {
-			// The full row goes through the selection style in plain
-			// text: a styled dot or status inside the content would emit
-			// ANSI resets that clear the selection background for the
-			// rest of the line, leaving the status unhighlighted.
-			rows = append(rows, t.Dialog.SelectedItem.Render(
-				"● "+name+strings.Repeat(" ", gap)+status,
-			))
-			continue
+		// The dot mirrors the sidebar's status icons.
+		rows[i] = toggleRow{
+			mark:        statusDot(t, status).Render(),
+			plainMark:   "●",
+			name:        item.Name,
+			status:      status,
+			statusStyle: statusTextStyle(t, status),
 		}
-
-		// OnlineText (not OnlineIcon) is the text style; the dot is
-		// rendered separately so no "●" prefix sneaks into the text
-		// and pushes the row over the dialog width.
-		statusStyle := statusTextStyle(t, status)
-		row := dot.Render() + " " +
-			t.Dialog.NormalItem.UnsetPadding().Render(name) +
-			strings.Repeat(" ", gap) +
-			statusStyle.Render(status)
-		// A single Padding(0, 1) around the row.
-		rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 	}
+	return rows
+}
 
-	return joinToggleRows(t, rows, len(m.items), visible, first)
+func (m *MCPToggles) toggleAt(i int, scope MCPToggleScope) Action {
+	item := m.items[i]
+	// Local reads the repository overrides, global the config flag.
+	currentlyDisabled := item.localDisabled()
+	if scope == MCPToggleScopeGlobal {
+		currentlyDisabled = item.ConfigDisabled
+	}
+	newState := !currentlyDisabled
+	if scope == MCPToggleScopeGlobal {
+		m.items[i].ConfigDisabled = newState
+	} else {
+		m.items[i].Disabled = newState
+		// A server enabled locally starts at runtime; show it right away.
+		if !newState {
+			m.items[i].EnabledOverride = true
+			m.items[i].Status = "starting"
+		}
+	}
+	return ActionToggleMCP{
+		Name:     item.Name,
+		Disabled: newState,
+		Global:   scope == MCPToggleScopeGlobal,
+	}
 }
 
 // statusDot maps a status label to the sidebar's status icon style.
@@ -364,18 +199,4 @@ func (m *MCPToggles) SetItemStatus(name, status string) {
 			return
 		}
 	}
-}
-
-// FullHelp implements help.KeyMap.
-func (m *MCPToggles) FullHelp() [][]key.Binding {
-	return [][]key.Binding{m.ShortHelp()}
-}
-
-// ShortHelp implements help.KeyMap.
-func (m *MCPToggles) ShortHelp() []key.Binding {
-	if len(m.items) == 0 {
-		// Nothing to move between or toggle: only closing does anything.
-		return []key.Binding{m.keyMap.Close}
-	}
-	return dialogHelp(m.keyMap.Toggle, m.keyMap.Close, m.keyMap.UpDown, m.keyMap.Scope)
 }

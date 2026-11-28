@@ -6,6 +6,7 @@ import (
 	_ "image/png"  // register PNG format
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -34,6 +35,12 @@ type FilePicker struct {
 	help            help.Model
 	previewingImage bool // indicates if an image is being previewed
 	isTmux          bool
+
+	// previewKey is the preview last requested; a load is scheduled only
+	// when it changes. previewGen is bumped with it so loads for previews
+	// the user has already moved past skip decoding.
+	previewKey filePickerPreviewKey
+	previewGen atomic.Uint64
 
 	km struct {
 		Select,
@@ -171,28 +178,12 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 
 	var cmd tea.Cmd
 	f.fp, cmd = f.fp.Update(msg)
-	if selFile := f.fp.HighlightedPath(); selFile != "" {
-		var allowed bool
-		for _, allowedExt := range f.fp.AllowedTypes {
-			if strings.HasSuffix(strings.ToLower(selFile), allowedExt) {
-				allowed = true
-				break
-			}
-		}
-
-		f.previewingImage = allowed
-		if allowed && !fimage.HasTransmitted(selFile, f.imgPrevWidth, f.imgPrevHeight) {
-			f.previewingImage = false
-			img, err := loadImage(selFile)
-			if err == nil {
-				cmds = append(cmds, tea.Sequence(
-					f.imgEnc.Transmit(selFile, img, f.CellSize(), f.imgPrevWidth, f.imgPrevHeight, f.isTmux),
-					func() tea.Msg {
-						f.previewingImage = true
-						return nil
-					},
-				))
-			}
+	// The UI drops the actions returned for mouse messages, so a load
+	// scheduled there would never run. The file list ignores the mouse, so
+	// nothing about the preview changes on those anyway.
+	if _, isMouse := msg.(tea.MouseMsg); !isMouse {
+		if loadCmd := f.updatePreview(); loadCmd != nil {
+			cmds = append(cmds, loadCmd)
 		}
 	}
 	if cmd != nil {
@@ -284,6 +275,84 @@ func (f *FilePicker) imagePreview(imgPrevWidth, imgPrevHeight int) string {
 	}
 
 	return ""
+}
+
+// filePickerPreviewKey identifies an image preview at a given size.
+type filePickerPreviewKey struct {
+	path          string
+	width, height int
+}
+
+// filePickerPreviewLoadedMsg is sent once a preview load has finished, so
+// the picker re-checks whether its preview is ready.
+type filePickerPreviewLoadedMsg struct{}
+
+// updatePreview refreshes the preview state for the highlighted file and
+// returns a command loading its image when it is not cached yet. Decoding
+// happens in the command, never on the UI goroutine.
+func (f *FilePicker) updatePreview() tea.Cmd {
+	selFile := f.fp.HighlightedPath()
+	allowed := selFile != "" && f.isAllowedImage(selFile)
+
+	var key filePickerPreviewKey
+	if allowed && f.imgPrevWidth > 0 && f.imgPrevHeight > 0 {
+		key = filePickerPreviewKey{path: selFile, width: f.imgPrevWidth, height: f.imgPrevHeight}
+	}
+
+	f.previewingImage = key != (filePickerPreviewKey{}) &&
+		fimage.HasTransmitted(key.path, key.width, key.height)
+
+	if key == f.previewKey {
+		return nil
+	}
+	f.previewKey = key
+	gen := f.previewGen.Add(1)
+	if key == (filePickerPreviewKey{}) || f.previewingImage {
+		return nil
+	}
+	return f.loadPreview(key, gen)
+}
+
+// isAllowedImage reports whether the path has an image extension the picker
+// can preview.
+func (f *FilePicker) isAllowedImage(path string) bool {
+	lower := strings.ToLower(path)
+	for _, allowedExt := range f.fp.AllowedTypes {
+		if strings.HasSuffix(lower, allowedExt) {
+			return true
+		}
+	}
+	return false
+}
+
+// loadPreview decodes and transmits the image for key, then reports back
+// with [filePickerPreviewLoadedMsg]. A load the user has already moved past
+// is dropped before it decodes anything.
+func (f *FilePicker) loadPreview(key filePickerPreviewKey, gen uint64) tea.Cmd {
+	return tea.Sequence(
+		f.previewLoader(key, gen),
+		func() tea.Msg { return filePickerPreviewLoadedMsg{} },
+	)
+}
+
+// previewLoader returns the command half of [FilePicker.loadPreview] that
+// decodes and transmits the image. It only reads state captured up front
+// and the atomic generation, so it is safe to run off the UI goroutine.
+func (f *FilePicker) previewLoader(key filePickerPreviewKey, gen uint64) tea.Cmd {
+	enc, cs, tmux := f.imgEnc, f.CellSize(), f.isTmux
+	return func() tea.Msg {
+		if f.previewGen.Load() != gen {
+			return nil
+		}
+		img, err := loadImage(key.path)
+		if err != nil {
+			return nil
+		}
+		if cmd := enc.Transmit(key.path, img, cs, key.width, key.height, tmux); cmd != nil {
+			return cmd()
+		}
+		return nil
+	}
 }
 
 func loadImage(path string) (img image.Image, err error) {

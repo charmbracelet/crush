@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -26,10 +27,12 @@ const (
 	// unavailableRetryDelay is how long a server whose command is missing,
 	// or could not be spawned, is skipped before Crush looks for it again.
 	unavailableRetryDelay = 30 * time.Second
-	// startFailureRetryDelay is how long a server that failed to initialize
-	// is skipped. It is longer than unavailableRetryDelay because each retry
-	// spawns a process and may block for the full init timeout.
-	startFailureRetryDelay = 5 * time.Minute
+	// maxStartFailureRetryDelay caps how long a server that keeps failing to
+	// initialize is skipped. The first failure waits unavailableRetryDelay,
+	// so a server that was only slow once comes back soon, and each further
+	// failure doubles the wait, because each retry spawns a process and may
+	// block for the full init timeout.
+	maxStartFailureRetryDelay = 5 * time.Minute
 )
 
 // Manager handles lazy initialization of LSP clients based on file types.
@@ -37,11 +40,13 @@ type Manager struct {
 	clients *csync.Map[string, *Client]
 	// unavailable maps server names to the time they may be retried.
 	unavailable *csync.Map[string, time.Time]
-	cfg         *config.ConfigStore
-	manager     *powernapconfig.Manager
-	callback    func(name string, client *Client)
-	now         func() time.Time
-	lookPath    func(string) (string, error)
+	// startFailures counts initialize failures in a row per server.
+	startFailures *csync.Map[string, *atomic.Int32]
+	cfg           *config.ConfigStore
+	manager       *powernapconfig.Manager
+	callback      func(name string, client *Client)
+	now           func() time.Time
+	lookPath      func(string) (string, error)
 }
 
 // NewManager creates a new LSP manager service.
@@ -72,13 +77,14 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	}
 
 	return &Manager{
-		clients:     csync.NewMap[string, *Client](),
-		unavailable: csync.NewMap[string, time.Time](),
-		cfg:         cfg,
-		manager:     manager,
-		callback:    func(string, *Client) {}, // default no-op callback
-		now:         time.Now,
-		lookPath:    exec.LookPath,
+		clients:       csync.NewMap[string, *Client](),
+		unavailable:   csync.NewMap[string, time.Time](),
+		startFailures: csync.NewMap[string, *atomic.Int32](),
+		cfg:           cfg,
+		manager:       manager,
+		callback:      func(string, *Client) {}, // default no-op callback
+		now:           time.Now,
+		lookPath:      exec.LookPath,
 	}
 }
 
@@ -268,10 +274,11 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		client.Shutdown()
 		s.clients.Del(name)
-		s.markUnavailableFor(name, startFailureRetryDelay)
+		s.markStartFailure(name)
 		return
 	}
 	s.clearUnavailable(name)
+	s.startFailures.Del(name)
 
 	if err := client.WaitForServerReady(initCtx); err != nil {
 		slog.Warn("LSP server not fully ready, continuing anyway", "name", name, "error", err)
@@ -339,6 +346,28 @@ func (s *Manager) markUnavailableFor(name string, delay time.Duration) {
 
 func (s *Manager) clearUnavailable(name string) {
 	s.unavailable.Del(name)
+}
+
+// markStartFailure skips a server that failed to initialize, doubling the
+// wait with each failure in a row.
+func (s *Manager) markStartFailure(name string) {
+	failures := s.startFailures.GetOrSet(name, func() *atomic.Int32 {
+		return new(atomic.Int32)
+	}).Add(1)
+	delay := unavailableRetryDelay << min(failures-1, 4)
+	s.markUnavailableFor(name, min(delay, maxStartFailureRetryDelay))
+}
+
+// ResetUnavailable lets a server that was skipped after failing to start be
+// tried again on its next use. An empty name resets every server.
+func (s *Manager) ResetUnavailable(name string) {
+	if name != "" {
+		s.unavailable.Del(name)
+		s.startFailures.Del(name)
+		return
+	}
+	s.unavailable.Reset(map[string]time.Time{})
+	s.startFailures.Reset(map[string]*atomic.Int32{})
 }
 
 func (s *Manager) buildConfig(name string, server *powernapconfig.ServerConfig) config.LSPConfig {

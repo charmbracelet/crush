@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,43 @@ func TestUnavailableBackoff(t *testing.T) {
 	manager.markUnavailable("gopls")
 	manager.clearUnavailable("gopls")
 	require.False(t, manager.recentlyUnavailable("gopls"))
+}
+
+func TestStartFailureBackoffDoublesAndResets(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC)
+	manager := &Manager{
+		unavailable:   csync.NewMap[string, time.Time](),
+		startFailures: csync.NewMap[string, *atomic.Int32](),
+		now:           func() time.Time { return now },
+	}
+
+	for _, want := range []time.Duration{
+		30 * time.Second,
+		time.Minute,
+		2 * time.Minute,
+		4 * time.Minute,
+		maxStartFailureRetryDelay,
+		maxStartFailureRetryDelay,
+	} {
+		manager.markStartFailure("gopls")
+		retryAt, _ := manager.unavailable.Get("gopls")
+		require.Equal(t, now.Add(want), retryAt)
+	}
+
+	manager.markStartFailure("rust-analyzer")
+	manager.ResetUnavailable("gopls")
+	require.False(t, manager.recentlyUnavailable("gopls"))
+	require.True(t, manager.recentlyUnavailable("rust-analyzer"))
+
+	manager.markStartFailure("gopls")
+	retryAt, _ := manager.unavailable.Get("gopls")
+	require.Equal(t, now.Add(unavailableRetryDelay), retryAt)
+
+	manager.ResetUnavailable("")
+	require.False(t, manager.recentlyUnavailable("gopls"))
+	require.False(t, manager.recentlyUnavailable("rust-analyzer"))
 }
 
 func TestCanAutoStartFiltersBeforeLookingUpCommand(t *testing.T) {
@@ -135,7 +173,7 @@ func TestStartServerBacksOffAfterStartFailure(t *testing.T) {
 		delay   time.Duration
 	}{
 		{name: "missing command", command: "crush-test-missing-lsp-command", delay: unavailableRetryDelay},
-		{name: "initialize failure", command: "false", delay: startFailureRetryDelay},
+		{name: "initialize failure", command: "false", delay: unavailableRetryDelay},
 	}
 
 	for _, tt := range tests {

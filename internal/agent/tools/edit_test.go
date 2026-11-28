@@ -85,3 +85,25 @@ func TestDeleteContentRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "alpha\nbeta\nalpha\n", string(content))
 }
+
+func TestDeleteContentModifiedSinceReadAsksToReread(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("alpha\n"), 0o644))
+
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: &mockEditFileTracker{lastRead: time.Now().Add(-time.Hour)},
+		workingDir:  dir,
+	}
+
+	resp, err := deleteContent(edit, filePath, "alpha\n", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "has been modified since it was last read")
+	require.Contains(t, resp.Content, "View tool")
+}

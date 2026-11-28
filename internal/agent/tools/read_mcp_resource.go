@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
@@ -77,27 +76,10 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 				return fantasy.NewTextResponse(""), nil
 			}
 
-			var textParts []string
-			for _, content := range contents {
-				if content == nil {
-					continue
-				}
-				if content.Text != "" {
-					textParts = append(textParts, content.Text)
-					continue
-				}
-				if len(content.Blob) > 0 {
-					textParts = append(textParts, string(content.Blob))
-					continue
-				}
-				slog.Debug("MCP resource content missing text/blob", "uri", content.URI)
-			}
-
-			if len(textParts) == 0 {
-				return fantasy.NewTextResponse(""), nil
-			}
-
-			return fantasy.NewTextResponse(strings.Join(textParts, "\n")), nil
+			// Resources are third-party output that rides along in every
+			// later request, so bound them like MCP tool results.
+			text := mcp.ResourceText(contents, cfg.Config().Options.DataDirectory)
+			return fantasy.NewTextResponse(text), nil
 		},
 	)
 }

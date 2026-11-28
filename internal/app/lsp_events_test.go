@@ -43,6 +43,14 @@ func TestHandleLSPClientUpdateIsIdempotent(t *testing.T) {
 	info, _ = lspStates.Get(name)
 	require.Equal(t, connectedAt, info.ConnectedAt)
 
+	// Stopping the client, as StopAll and KillAll do, drops the count.
+	updateLSPDiagnostics(name, 5)
+	client.SetServerState(lsp.StateStopped)
+	handleLSPClientUpdate(name, client)
+	info, _ = lspStates.Get(name)
+	require.Equal(t, lsp.StateStopped, info.State)
+	require.Zero(t, info.DiagnosticCount)
+
 	// A new client starts from scratch.
 	replacement := &lsp.Client{}
 	replacement.SetServerState(lsp.StateStarting)

@@ -86,7 +86,9 @@ func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.C
 // handleLSPClientUpdate is the LSP manager callback. The manager calls it
 // for every running server on every Start, so it only records and publishes
 // a state when the client or its state actually changed, keeping the
-// diagnostic count and connection time of an unchanged client.
+// diagnostic count and connection time of an unchanged client. A client
+// that is no longer running (stopped by StopAll or KillAll, for example)
+// drops its count, so stale diagnostics are not reported.
 func handleLSPClientUpdate(name string, client *lsp.Client) {
 	if client == nil {
 		updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
@@ -97,11 +99,27 @@ func handleLSPClientUpdate(name string, client *lsp.Client) {
 		if existing.State == state {
 			return
 		}
-		updateLSPState(name, state, nil, client, existing.DiagnosticCount)
+		count := 0
+		if lspStateKeepsDiagnostics(state) {
+			count = existing.DiagnosticCount
+		}
+		updateLSPState(name, state, nil, client, count)
 		return
 	}
 	client.SetDiagnosticsCallback(updateLSPDiagnostics)
 	updateLSPState(name, state, nil, client, 0)
+}
+
+// lspStateKeepsDiagnostics reports whether a client in the given state may
+// still hold live diagnostics. A client in the error state is included
+// because the manager keeps a server that did not become ready running.
+func lspStateKeepsDiagnostics(state lsp.ServerState) bool {
+	switch state {
+	case lsp.StateStarting, lsp.StateReady, lsp.StateError:
+		return true
+	default:
+		return false
+	}
 }
 
 // diagnosticsPublishInterval caps per-server diagnostics events; servers report file by file.

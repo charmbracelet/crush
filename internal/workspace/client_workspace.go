@@ -351,11 +351,7 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 	if err != nil {
 		return AgentModel{}
 	}
-	return AgentModel{
-		Agent:      info.MainAgent,
-		CatwalkCfg: info.Model,
-		ModelCfg:   info.ModelCfg,
-	}
+	return agentInfoModel(info)
 }
 
 func (w *ClientWorkspace) AgentIsReady() bool {
@@ -364,6 +360,23 @@ func (w *ClientWorkspace) AgentIsReady() bool {
 
 func (w *ClientWorkspace) AgentReadyErr() error {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	return agentInfoReadyErr(info, err)
+}
+
+// AgentStatus answers AgentReadyErr, AgentIsBusy and AgentModel from a
+// single agent info request, so a caller that needs all three makes one
+// round trip instead of three.
+func (w *ClientWorkspace) AgentStatus() AgentStatus {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err := agentInfoReadyErr(info, err); err != nil {
+		return AgentStatus{ReadyErr: err}
+	}
+	return AgentStatus{Busy: info.IsBusy, Model: agentInfoModel(info)}
+}
+
+// agentInfoReadyErr maps the result of an agent info request to the error
+// AgentReadyErr reports.
+func agentInfoReadyErr(info *proto.AgentInfo, err error) error {
 	if err != nil {
 		if errors.Is(err, client.ErrNotFound) {
 			// The server answered, it just does not know this workspace
@@ -380,6 +393,14 @@ func (w *ClientWorkspace) AgentReadyErr() error {
 		return ErrAgentNotInitialized
 	}
 	return nil
+}
+
+func agentInfoModel(info *proto.AgentInfo) AgentModel {
+	return AgentModel{
+		Agent:      info.MainAgent,
+		CatwalkCfg: info.Model,
+		ModelCfg:   info.ModelCfg,
+	}
 }
 
 func (w *ClientWorkspace) AgentQueuedPrompts(sessionID string) int {

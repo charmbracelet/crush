@@ -200,13 +200,34 @@ type SubAgentReport struct {
 	Failed bool   `json:"failed,omitempty"`
 	// Model is provider/model, for display.
 	Model string `json:"model,omitempty"`
+	// MidTurn marks a report folded into a running turn alongside tool
+	// results, where it needs a note telling the model to act on it.
+	// It is stored so the replayed history matches what the model saw.
+	MidTurn bool `json:"mid_turn,omitempty"`
 }
 
 func (SubAgentReport) isPart() {}
 
+// MidTurnUserNote leads a user prompt folded into a running turn. On
+// Anthropic it shares a user turn with the step's tool results, so without
+// it the prompt reads as more tool output and the model carries on with its
+// plan.
+const MidTurnUserNote = "<system_reminder>The user sent the following message while you were working. Read it before your next action, decide whether it changes your plan, and address it as you continue.</system_reminder>\n\n"
+
 // PromptText is the report as the model reads it.
 func (r SubAgentReport) PromptText() string {
-	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
+	text := fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
+	if r.MidTurn {
+		text += fmt.Sprintf("\n\n<system_reminder>The report above from subagent %q arrived while you were working. It is not a message from the user. Read it before your next action and decide whether it changes your plan.</system_reminder>", r.Label)
+	}
+	return text
+}
+
+// SameReport reports whether two parts carry the same report, ignoring how
+// it was delivered.
+func (r SubAgentReport) SameReport(other SubAgentReport) bool {
+	r.MidTurn, other.MidTurn = false, false
+	return r == other
 }
 
 // ParseSubAgentReportPrompt recovers a report from its PromptText, for

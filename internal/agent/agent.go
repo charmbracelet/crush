@@ -521,6 +521,23 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceled []Ses
 	return fold, canceled
 }
 
+// midTurnCall marks a queued call folded into a running turn and returns
+// the model-only note to store ahead of its prompt. Folded calls share a
+// user turn with the step's tool results, so each is framed as new input to
+// act on. Hidden prompts are harness scaffolding and stay as they are.
+func midTurnCall(call SessionAgentCall) (SessionAgentCall, string) {
+	if call.Report != nil {
+		report := *call.Report
+		report.MidTurn = true
+		call.Report = &report
+		return call, ""
+	}
+	if call.HiddenUserMessage {
+		return call, ""
+	}
+	return call, message.MidTurnUserNote
+}
+
 type foldedPromptInsertion struct {
 	index    int
 	messages []fantasy.Message
@@ -1046,7 +1063,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			a.settleDroppedCalls(canceled)
 			var foldedMessages []fantasy.Message
 			for _, queued := range fold {
-				userMessage, createErr := a.createUserMessage(callContext, queued, "")
+				queued, note := midTurnCall(queued)
+				userMessage, createErr := a.createUserMessage(callContext, queued, note)
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}

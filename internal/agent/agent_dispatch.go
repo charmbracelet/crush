@@ -646,7 +646,7 @@ func (c *coordinator) reportRecorded(ctx context.Context, parentSessionID string
 		return false
 	}
 	for _, msg := range slices.Backward(msgs) {
-		if slices.Contains(msg.SubAgentReports(), report) {
+		if slices.ContainsFunc(msg.SubAgentReports(), report.SameReport) {
 			return true
 		}
 	}

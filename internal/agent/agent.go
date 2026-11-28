@@ -149,12 +149,17 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
-	// channelMeta holds the attributes of the <channel> element a
-	// channel-originated turn was started with, parsed once at Run
-	// entry. It survives the auto-summarize continuation, whose Prompt
-	// is rewritten and no longer carries the element, so the reply
-	// target is not lost when a long channel turn is summarized.
-	channelMeta map[string]string
+	// resumed marks a call re-queued after auto-compaction cut its turn
+	// short. Prompt stays the user's request; modelPrompt adds the note.
+	resumed bool
+}
+
+// modelPrompt is the prompt text the model and the transcript see.
+func (c SessionAgentCall) modelPrompt() string {
+	if !c.resumed {
+		return c.Prompt
+	}
+	return fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", c.Prompt)
 }
 
 // filterToolsForChannel scopes the tool list for a turn. A channel-originated
@@ -757,10 +762,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		call.Model = a.models().Large
 	}
 
-	if call.Channel != "" && call.channelMeta == nil {
-		call.channelMeta, _ = parseChannelMeta(call.Prompt)
-	}
-
 	// genCtx/cancel are the run context and its cancel func, created under
 	// the per-session dispatch mutex below so a concurrent Cancel can observe
 	// the activeRequests entry before the assistant message exists.
@@ -1011,7 +1012,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		maxOutputTokens = &call.MaxOutputTokens
 	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           modelContext + message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+		Prompt:           modelContext + message.PromptWithTextAttachments(call.modelPrompt(), call.Attachments),
 		Files:            files,
 		Messages:         history,
 		Headers:          sessionHeaders(call.SessionID),
@@ -1397,8 +1398,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, summarizeErr
 		case len(currentAssistant.ToolCalls()) > 0:
 			existing, _ := a.messageQueue.Get(call.SessionID)
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			// The rewritten prompt is a new message, not the report.
+			call.resumed = true
+			// The continuation is a new message, not the report.
 			call.Report = nil
 			a.messageQueue.Set(call.SessionID, append(existing, call))
 			continued = true
@@ -1755,7 +1756,7 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 			Parts: []message.ContentPart{*call.Report},
 		})
 	}
-	parts := []message.ContentPart{message.TextContent{Text: call.Prompt, Hidden: call.HiddenUserMessage, Context: modelContext}}
+	parts := []message.ContentPart{message.TextContent{Text: call.modelPrompt(), Hidden: call.HiddenUserMessage, Context: modelContext}}
 	var attachmentParts []message.ContentPart
 	for _, attachment := range call.Attachments {
 		attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})

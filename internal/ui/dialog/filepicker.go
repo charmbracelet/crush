@@ -220,14 +220,13 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(filePickerMinWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
-	// The dialog is the title, a gap, an optional image preview and gap,
-	// the file list, a gap, and the help line, inside the border. Give
-	// the file list its rows first so it is never pushed off-screen.
 	const gap = 1
-	const helpContentHeight = 1
-	avail := max(0, area.Dy()-t.Dialog.View.GetVerticalFrameSize()-
-		t.Dialog.Title.GetVerticalFrameSize()-titleContentHeight-gap-
-		gap-t.Dialog.HelpView.GetVerticalFrameSize()-helpContentHeight)
+	rc := NewRenderContext(t, width)
+	rc.Gap = gap
+	rc.Title = "Add Image"
+	rc.Help = renderDialogHelp(t, &f.help, f, innerWidth)
+	// Give the file list its rows first so it is never pushed off-screen.
+	avail := max(0, area.Dy()-rc.ChromeHeight())
 	height := min(filePickerMinHeight, avail)
 
 	// Show the image preview in whatever height is left, capped to its
@@ -254,11 +253,6 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	styles.Selected = styles.Selected.PaddingLeft(1).Width(innerWidth)
 	styles.DisabledSelected = styles.DisabledSelected.PaddingLeft(1).Width(innerWidth)
 	f.fp.Styles = styles
-
-	rc := NewRenderContext(t, width)
-	rc.Gap = gap
-	rc.Title = "Add Image"
-	rc.Help = renderDialogHelp(t, &f.help, f, innerWidth)
 
 	if imgPrevHeight > 0 {
 		imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))

@@ -277,38 +277,23 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
-		// since some items in the list depend on width (e.g. toggle sidebar command),
-		// we need to reset the command items when width changes
+		// Some items depend on the window width (e.g. toggle sidebar).
 		c.rebuildCommandItems()
 	}
 
-	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
-	sizeDialogInput(t, &c.input, innerWidth)
-	listHeight, listTotalHeight, listWidth := sizeDialogList(t, c.list, innerWidth, height)
-
-	// Hide the shortcut hints uniformly when the widest would crowd names.
-	applyInfoColumnVisibility(c.list.FilteredItems(), listWidth, commandInfoMaxPercent)
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Commands"
-	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
-	inputView := t.Dialog.InputPrompt.Render(c.input.View())
-	rc.AddPart(inputView)
-	listBody := renderDialogListBody(t, c.list.Render(), len(c.list.FilteredItems()) == 0, emptyNoMatches, listWidth)
-	listView := t.Dialog.List.Height(c.list.Height()).Render(listBody)
-	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, c.list.Offset())
-	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
-
+	f := newPickerFrame(t, area, defaultDialogMaxWidth, defaultDialogHeight, &c.input, &c.help, c)
+	f.Title = "Commands"
+	f.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
 	if c.loading {
-		rc.Help = t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt...")
+		f.Help = t.Dialog.HelpView.Width(f.innerWidth).Render(c.spinner.View() + " Generating Prompt...")
 	}
-
-	view := rc.Render()
+	f.addInput()
+	f.addList(c.list, len(c.list.FilteredItems()) == 0, emptyNoMatches, func(listWidth int) {
+		applyInfoColumnVisibility(c.list.FilteredItems(), listWidth, commandInfoMaxPercent)
+	})
+	view := f.Render()
 
 	cur := c.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

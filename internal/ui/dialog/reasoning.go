@@ -156,42 +156,23 @@ func (r *Reasoning) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := r.com.Styles
-	width := max(0, min(reasoningDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-
-	sizeDialogInput(t, &r.input, innerWidth)
-
-	// Size the dialog to fit the list content, clamped to min/max bounds.
-	listTotalHeight := r.list.TotalHeight()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-	desiredHeight := heightOffset + listTotalHeight
-	maxAvailable := area.Dy() - t.Dialog.View.GetVerticalBorderSize()
-	height := max(reasoningDialogMinHeight, min(reasoningDialogMaxHeight, desiredHeight, maxAvailable))
-
-	listHeight, listTotalHeight, _ := sizeDialogList(t, r.list, innerWidth, height)
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Select Reasoning Effort"
-	inputView := t.Dialog.InputPrompt.Render(r.input.View())
-	rc.AddPart(inputView)
+	f := newPickerFrame(t, area, reasoningDialogMaxWidth, 0, &r.input, &r.help, r)
+	f.Title = "Select Reasoning Effort"
+	f.addInput()
+	// Fit the dialog to the list content, within the min/max bounds.
+	border := t.Dialog.View.GetVerticalBorderSize()
+	desired := f.ChromeHeight() + t.Dialog.List.GetVerticalFrameSize() + r.list.TotalHeight() - border
+	f.height = max(reasoningDialogMinHeight, min(reasoningDialogMaxHeight, desired, area.Dy()-border)) + border
 
 	visibleCount := len(r.list.FilteredItems())
-	if r.list.Height() >= visibleCount {
-		r.list.ScrollToTop()
-	} else {
-		r.list.ScrollToSelected()
-	}
-
-	listBody := renderDialogListBody(t, r.list.Render(), visibleCount == 0, emptyNoMatches, innerWidth)
-	listView := t.Dialog.List.Height(r.list.Height()).Render(listBody)
-	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, r.list.Offset())
-	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(t, &r.help, r, innerWidth)
-
-	view := rc.Render()
+	f.addList(r.list, visibleCount == 0, emptyNoMatches, func(int) {
+		if r.list.Height() >= visibleCount {
+			r.list.ScrollToTop()
+		} else {
+			r.list.ScrollToSelected()
+		}
+	})
+	view := f.Render()
 
 	cur := r.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

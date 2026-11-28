@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"cmp"
+	"image"
 	"image/color"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -31,38 +33,23 @@ func sizeDialogInput(t *styles.Styles, input *textinput.Model, contentWidth int)
 	return w
 }
 
-// sizer is satisfied by any list type that can report its total content
-// height and accept a viewport size. Both *list.List and *list.FilterableList
-// (and wrappers embedding them) implement this.
+// sizer is a list that reports its content height and accepts a viewport size.
 type sizer interface {
 	TotalHeight() int
 	SetSize(width, height int)
 }
 
-// sizeDialogList computes the list dimensions within a dialog and calls
-// l.SetSize. It accounts for the title, input, help, and view frame sizes
-// so callers don't have to repeat the arithmetic. The scrollbar column is
-// reserved only when content overflows the viewport.
-//
-// Returns listHeight, listTotalHeight, and listWidth for callers that need
-// them (e.g. to pass to joinScrollbar or applyInfoColumnVisibility).
-//
-// Parameters:
-//   - t: styles for frame/border measurements.
-//   - l: the list to size.
-//   - innerWidth: dialog content width (total minus View horizontal frame).
-//   - dialogHeight: total dialog content height (already clamped).
-func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+// pickerList is a list a picker dialog can size, render and scroll.
+type pickerList interface {
+	sizer
+	Render() string
+	Offset() int
+}
 
-	listHeight = max(0, dialogHeight-heightOffset)
+// sizeDialogList sizes l to bodyHeight less the list frame, reserving a scrollbar column only when it overflows.
+func sizeDialogList(t *styles.Styles, l sizer, innerWidth, bodyHeight int) (listHeight, listTotalHeight, listWidth int) {
+	listHeight = max(0, bodyHeight-t.Dialog.List.GetVerticalFrameSize())
 	listTotalHeight = l.TotalHeight()
-
-	// Reserve one column for the scrollbar only when it will actually
-	// show, so the list otherwise spans the full content width.
 	scrollbarWidth := 0
 	if listTotalHeight > listHeight {
 		scrollbarWidth = 1
@@ -72,27 +59,111 @@ func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (li
 	return listHeight, listTotalHeight, listWidth
 }
 
+// renderPickerList sizes l into bodyHeight and renders it with its scrollbar, or emptyMsg when empty; prepare runs once it is sized. It returns "" when there is no room for rows.
+func renderPickerList(t *styles.Styles, l pickerList, innerWidth, bodyHeight int, empty bool, emptyMsg string, prepare func(listWidth int)) (view string, listWidth, listHeight int) {
+	listHeight, listTotalHeight, listWidth := sizeDialogList(t, l, innerWidth, bodyHeight)
+	if prepare != nil {
+		prepare(listWidth)
+	}
+	if listHeight <= 0 {
+		return "", listWidth, listHeight
+	}
+	body := l.Render()
+	if empty {
+		body = dialogEmptyState(t, emptyMsg, listWidth)
+	}
+	view = t.Dialog.List.Height(listHeight).Render(body)
+	return joinScrollbar(t, view, listHeight, listTotalHeight, listHeight, l.Offset()), listWidth, listHeight
+}
+
+// pickerFrame lays out a picker dialog: title, filter input, list and help.
+type pickerFrame struct {
+	*RenderContext
+	input      *textinput.Model
+	inputWidth int
+	innerWidth int
+	// height is the total dialog height, border included.
+	height     int
+	listView   string
+	listHeight int
+}
+
+// newPickerFrame sizes a picker to area within maxWidth and maxHeight (border excluded), fitting input and rendering the help line.
+func newPickerFrame(t *styles.Styles, area uv.Rectangle, maxWidth, maxHeight int, input *textinput.Model, h *help.Model, km help.KeyMap) *pickerFrame {
+	width := max(0, min(maxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	f := &pickerFrame{
+		RenderContext: NewRenderContext(t, width),
+		input:         input,
+		innerWidth:    width - t.Dialog.View.GetHorizontalFrameSize(),
+	}
+	f.fitHeight(area, maxHeight)
+	f.inputWidth = sizeDialogInput(t, input, f.innerWidth)
+	f.Help = renderDialogHelp(t, h, km, f.innerWidth)
+	return f
+}
+
+// fitHeight sets the dialog height to maxHeight (border excluded), clamped to area.
+func (f *pickerFrame) fitHeight(area uv.Rectangle, maxHeight int) {
+	border := f.Styles.Dialog.View.GetVerticalBorderSize()
+	f.height = max(0, min(maxHeight, area.Dy()-border)) + border
+}
+
+// addInput adds the filter input.
+func (f *pickerFrame) addInput() {
+	f.AddPart(f.Styles.Dialog.InputPrompt.Render(f.input.View()))
+}
+
+// addList adds l in the height left below the parts so far; see renderPickerList.
+func (f *pickerFrame) addList(l pickerList, empty bool, emptyMsg string, prepare func(listWidth int)) {
+	f.listView, _, f.listHeight = renderPickerList(f.Styles, l, f.innerWidth, f.height-f.ChromeHeight(), empty, emptyMsg, prepare)
+	f.AddPart(f.listView)
+}
+
+// listArea returns the screen area of the list rows in view drawn into area, or an empty rectangle without a list.
+func (f *pickerFrame) listArea(area uv.Rectangle, view string) image.Rectangle {
+	if f.listView == "" {
+		return image.Rectangle{}
+	}
+	viewStyle, bodyStyle := f.ViewStyle, f.Styles.Dialog.List
+	viewWidth, viewHeight := lipgloss.Size(view)
+	dialogArea := common.CenterRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
+	if f.IsOnboarding {
+		dialogArea = common.BottomLeftRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
+		viewStyle = lipgloss.NewStyle()
+	}
+	top := dialogArea.Max.Y -
+		viewStyle.GetMarginBottom() -
+		viewStyle.GetBorderBottomSize() -
+		viewStyle.GetPaddingBottom() -
+		lipgloss.Height(f.Help) -
+		lipgloss.Height(f.listView)
+	minPt := image.Pt(
+		dialogArea.Min.X+
+			viewStyle.GetMarginLeft()+
+			viewStyle.GetBorderLeftSize()+
+			viewStyle.GetPaddingLeft()+
+			bodyStyle.GetMarginLeft()+
+			bodyStyle.GetBorderLeftSize()+
+			bodyStyle.GetPaddingLeft(),
+		top+
+			bodyStyle.GetMarginTop()+
+			bodyStyle.GetBorderTopSize()+
+			bodyStyle.GetPaddingTop(),
+	)
+	return image.Rect(minPt.X, minPt.Y, minPt.X+f.innerWidth, minPt.Y+f.listHeight).
+		Intersect(dialogArea).Intersect(area)
+}
+
 // Empty-state messages for picker lists.
 const (
 	emptyNoMatches = "No matches."
 )
 
-// dialogEmptyState renders msg as a single padded, subtle line for a
-// picker list with nothing to show, truncated with an ellipsis so it never
-// wraps past the border. width is the list width.
+// dialogEmptyState renders msg as one padded, subtle line truncated to width.
 func dialogEmptyState(t *styles.Styles, msg string, width int) string {
 	st := t.Dialog.SecondaryText
 	textWidth := max(0, width-st.GetHorizontalFrameSize())
 	return st.Render(ansi.Truncate(msg, textWidth, "…"))
-}
-
-// renderDialogListBody returns body, or a padded empty-state line with
-// msg when isEmpty, so an empty list does not leave a blank area.
-func renderDialogListBody(t *styles.Styles, body string, isEmpty bool, msg string, width int) string {
-	if isEmpty {
-		return dialogEmptyState(t, msg, width)
-	}
-	return body
 }
 
 // joinScrollbar appends a vertical scrollbar to the right of view when the

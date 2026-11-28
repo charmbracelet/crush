@@ -359,52 +359,32 @@ func (m *Models) basePlaceholder() string {
 // Draw implements [Dialog].
 func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	if m.isOnboarding {
-		height = max(0, area.Dy()-t.Dialog.View.GetVerticalBorderSize()-
-			onboardingLogoHeight-onboardingTopGap(area.Dy()))
-	}
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	inputWidth := sizeDialogInput(t, &m.input, innerWidth)
+	f := newPickerFrame(t, area, defaultModelsDialogMaxWidth, defaultDialogHeight, &m.input, &m.help, m)
 	// Ellipsize the placeholder instead of letting it cut off mid-word.
-	m.input.Placeholder = ansi.Truncate(m.basePlaceholder(), inputWidth, "…")
-
-	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Switch Model"
-	const titleGap = 1
-	rc.TitleInfo = m.modelTypeRadioView(innerWidth - t.Dialog.Title.GetHorizontalFrameSize() -
-		lipgloss.Width(rc.Title) - titleGap)
-
+	m.input.Placeholder = ansi.Truncate(m.basePlaceholder(), f.inputWidth, "…")
 	if m.isOnboarding {
-		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
-		rc.AddPart(titleText)
+		// Onboarding has no title or frame and sits below the logo.
+		f.IsOnboarding = true
+		f.height = max(0, area.Dy()-t.Dialog.View.GetVerticalBorderSize()-
+			onboardingLogoHeight-onboardingTopGap(area.Dy()))
+		f.AddPart(t.Dialog.PrimaryText.Render("To start, let's choose a provider and model."))
+	} else {
+		f.Title = "Switch Model"
+		const titleGap = 1
+		f.TitleInfo = m.modelTypeRadioView(f.innerWidth - t.Dialog.Title.GetHorizontalFrameSize() -
+			lipgloss.Width(f.Title) - titleGap)
 	}
-
-	inputView := t.Dialog.InputPrompt.Render(m.input.View())
-	rc.AddPart(inputView)
+	f.addInput()
 
 	msg := emptyNoMatches
 	if m.list.Len() == 0 {
 		msg = "No models available."
 	}
-	listBody := renderDialogListBody(t, m.list.Render(), m.list.List.Len() == 0, msg, innerWidth)
-	listView := t.Dialog.List.Height(m.list.Height()).Render(listBody)
-	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, m.list.Offset())
-	rc.AddPart(listView)
-
-	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
-	if m.isOnboarding {
-		rc.Title = ""
-		rc.TitleInfo = ""
-		rc.IsOnboarding = true
-	}
+	f.addList(m.list, m.list.List.Len() == 0, msg, nil)
 
 	cur := m.Cursor()
-	view := rc.Render()
-	m.updateListArea(area, view, listView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
+	view := f.Render()
+	m.listArea = f.listArea(area, view)
 
 	if m.isOnboarding {
 		cur = adjustOnboardingInputCursor(t, cur)
@@ -413,51 +393,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		DrawCenterCursor(scr, area, view, cur)
 	}
 	return cur
-}
-
-func (m *Models) updateListArea(
-	area uv.Rectangle,
-	view string,
-	bodyView string,
-	helpView string,
-	viewStyle lipgloss.Style,
-	bodyStyle lipgloss.Style,
-	bodyWidth int,
-	bodyHeight int,
-) {
-	viewWidth, viewHeight := lipgloss.Size(view)
-	dialogArea := common.CenterRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
-	if m.isOnboarding {
-		dialogArea = common.BottomLeftRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
-		// IsOnboarding bypasses the view frame entirely; remove its
-		// border, padding, and margins from hit-testing.
-		viewStyle = lipgloss.NewStyle()
-	}
-	bodyViewTop := dialogArea.Max.Y -
-		viewStyle.GetMarginBottom() -
-		viewStyle.GetBorderBottomSize() -
-		viewStyle.GetPaddingBottom() -
-		lipgloss.Height(helpView) -
-		lipgloss.Height(bodyView)
-	bodyMin := image.Pt(
-		dialogArea.Min.X+
-			viewStyle.GetMarginLeft()+
-			viewStyle.GetBorderLeftSize()+
-			viewStyle.GetPaddingLeft()+
-			bodyStyle.GetMarginLeft()+
-			bodyStyle.GetBorderLeftSize()+
-			bodyStyle.GetPaddingLeft(),
-		bodyViewTop+
-			bodyStyle.GetMarginTop()+
-			bodyStyle.GetBorderTopSize()+
-			bodyStyle.GetPaddingTop(),
-	)
-	m.listArea = image.Rect(
-		bodyMin.X,
-		bodyMin.Y,
-		bodyMin.X+bodyWidth,
-		bodyMin.Y+bodyHeight,
-	).Intersect(dialogArea).Intersect(area)
 }
 
 // ShortHelp returns the short help view.

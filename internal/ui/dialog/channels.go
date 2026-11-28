@@ -238,31 +238,15 @@ func (d *Channels) Cursor() *tea.Cursor {
 
 // Draw implements Dialog.
 func (d *Channels) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	t := d.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	sizeDialogInput(t, &d.input, innerWidth)
-	listHeight, listTotalHeight, _ := sizeDialogList(t, d.list, innerWidth, height)
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Channels"
-	inputView := t.Dialog.InputPrompt.Render(d.input.View())
-	rc.AddPart(inputView)
-	// With no room for list rows, skip the body: an empty list still
-	// renders a line plus its margin, pushing the dialog past the area.
-	if listHeight > 0 {
-		msg := emptyNoMatches
-		if len(d.list.Items()) == 0 {
-			msg = "No channels."
-		}
-		listBody := renderDialogListBody(t, d.list.Render(), len(d.list.FilteredItems()) == 0, msg, innerWidth)
-		listView := t.Dialog.List.Height(d.list.Height()).Render(listBody)
-		rc.AddPart(joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, d.list.Offset()))
+	f := newPickerFrame(d.com.Styles, area, defaultDialogMaxWidth, defaultDialogHeight, &d.input, &d.help, d)
+	f.Title = "Channels"
+	f.addInput()
+	msg := emptyNoMatches
+	if len(d.list.Items()) == 0 {
+		msg = "No channels."
 	}
-	rc.Help = renderDialogHelp(t, &d.help, d, innerWidth)
-
-	view := rc.Render()
+	f.addList(d.list, len(d.list.FilteredItems()) == 0, msg, nil)
+	view := f.Render()
 	cur := d.Cursor()
 	DrawCenterCursor(scr, area, view, cur)
 	return cur

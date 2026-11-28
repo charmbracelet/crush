@@ -277,111 +277,56 @@ func (s *Session) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := s.com.Styles
-	s.bodyArea = image.Rectangle{}
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	sizeDialogInput(t, &s.input, innerWidth)
-	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height)
-
-	// Hide the timestamps uniformly when the widest would crowd the title.
-	applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)
-
-	if !s.scrolledToSelection {
-		s.scrolledToSelection = true
-		s.list.ScrollToSelected()
-	}
-
+	f := newPickerFrame(t, area, defaultDialogMaxWidth, defaultDialogHeight, &s.input, &s.help, s)
+	f.Title = "Sessions"
 	var cur *tea.Cursor
-	rc := NewRenderContext(t, width)
-	rc.Title = "Sessions"
+	var renaming *SessionItem
+	messageHeight := 0
 	switch s.sessionsMode {
 	case sessionsModeDeleting:
-		rc.TitleStyle = t.Dialog.Sessions.DeletingTitle
-		rc.TitleGradientFromColor = t.Dialog.Sessions.DeletingTitleGradientFromColor
-		rc.TitleGradientToColor = t.Dialog.Sessions.DeletingTitleGradientToColor
-		rc.ViewStyle = t.Dialog.Sessions.DeletingView
-		rc.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this session?"))
+		f.TitleStyle = t.Dialog.Sessions.DeletingTitle
+		f.TitleGradientFromColor = t.Dialog.Sessions.DeletingTitleGradientFromColor
+		f.TitleGradientToColor = t.Dialog.Sessions.DeletingTitleGradientToColor
+		f.ViewStyle = t.Dialog.Sessions.DeletingView
+		f.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this session?"))
 	case sessionsModeUpdating:
-		rc.TitleStyle = t.Dialog.Sessions.RenamingingTitle
-		rc.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
-		rc.TitleGradientToColor = t.Dialog.Sessions.RenamingTitleGradientToColor
-		rc.ViewStyle = t.Dialog.Sessions.RenamingView
+		f.TitleStyle = t.Dialog.Sessions.RenamingingTitle
+		f.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
+		f.TitleGradientToColor = t.Dialog.Sessions.RenamingTitleGradientToColor
+		f.ViewStyle = t.Dialog.Sessions.RenamingView
 		message := t.Dialog.Sessions.RenamingingMessage.Render("Rename this session?")
-		rc.AddPart(message)
-		item := s.selectedSessionItem()
-		if item == nil {
+		f.AddPart(message)
+		renaming = s.selectedSessionItem()
+		if renaming == nil {
+			s.bodyArea = image.Rectangle{}
 			return nil
 		}
-		cur = item.Cursor()
-		start, end := s.list.VisibleItemIndices()
-		cur = renameCursorOffset(t, cur, lipgloss.Height(message), start, end, s.list.Selected())
+		cur = renaming.Cursor()
+		messageHeight = lipgloss.Height(message)
 	default:
-		inputView := t.Dialog.InputPrompt.Render(s.input.View())
+		f.addInput()
 		cur = s.Cursor()
-		rc.AddPart(inputView)
 	}
-	// With no room for list rows, skip the body entirely: an empty list
-	// still renders a line plus its margin, pushing the dialog past the area.
-	var bodyView string
-	if listHeight > 0 {
-		msg := emptyNoMatches
-		if len(s.sessions) == 0 {
-			msg = "No sessions yet."
+	msg := emptyNoMatches
+	if len(s.sessions) == 0 {
+		msg = "No sessions yet."
+	}
+	f.addList(s.list, len(s.list.FilteredItems()) == 0, msg, func(listWidth int) {
+		applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)
+		if !s.scrolledToSelection {
+			s.scrolledToSelection = true
+			s.list.ScrollToSelected()
 		}
-		listBody := renderDialogListBody(t, s.list.Render(), len(s.list.FilteredItems()) == 0, msg, listWidth)
-		bodyView = t.Dialog.List.Height(s.list.Height()).Render(listBody)
-		bodyView = joinScrollbar(t, bodyView, listHeight, listTotalHeight, listHeight, s.list.Offset())
-		rc.AddPart(bodyView)
-	}
-	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
+		if renaming != nil {
+			start, end := s.list.VisibleItemIndices()
+			cur = renameCursorOffset(t, cur, messageHeight, start, end, s.list.Selected())
+		}
+	})
 
-	view := rc.Render()
-	if listHeight > 0 {
-		s.updateSessionListArea(area, view, bodyView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
-	}
-
+	view := f.Render()
+	s.bodyArea = f.listArea(area, view)
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
-}
-
-func (s *Session) updateSessionListArea(
-	area uv.Rectangle,
-	view string,
-	bodyView string,
-	helpView string,
-	viewStyle lipgloss.Style,
-	bodyStyle lipgloss.Style,
-	bodyWidth int,
-	bodyHeight int,
-) {
-	viewWidth, viewHeight := lipgloss.Size(view)
-	dialogArea := common.CenterRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
-	bodyViewTop := dialogArea.Max.Y -
-		viewStyle.GetMarginBottom() -
-		viewStyle.GetBorderBottomSize() -
-		viewStyle.GetPaddingBottom() -
-		lipgloss.Height(helpView) -
-		lipgloss.Height(bodyView)
-	bodyMin := image.Pt(
-		dialogArea.Min.X+
-			viewStyle.GetMarginLeft()+
-			viewStyle.GetBorderLeftSize()+
-			viewStyle.GetPaddingLeft()+
-			bodyStyle.GetMarginLeft()+
-			bodyStyle.GetBorderLeftSize()+
-			bodyStyle.GetPaddingLeft(),
-		bodyViewTop+
-			bodyStyle.GetMarginTop()+
-			bodyStyle.GetBorderTopSize()+
-			bodyStyle.GetPaddingTop(),
-	)
-	s.bodyArea = image.Rect(
-		bodyMin.X,
-		bodyMin.Y,
-		bodyMin.X+bodyWidth,
-		bodyMin.Y+bodyHeight,
-	).Intersect(dialogArea).Intersect(area)
 }
 
 func (s *Session) sessionListArea() image.Rectangle {

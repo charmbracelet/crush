@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
@@ -95,4 +96,20 @@ func TestRenderContextChromeHeight(t *testing.T) {
 			require.Equal(t, chrome+3, lipgloss.Height(rc.Render()), "gap=%d part=%v", gap, withPart)
 		}
 	}
+}
+
+// TestRenderPickerListNoRoom verifies a picker list with no room for rows
+// renders nothing, and that the empty state spans the list width.
+func TestRenderPickerListNoRoom(t *testing.T) {
+	t.Parallel()
+	com := newPickerTestCommon()
+	l := list.NewFilterableList()
+	view, _, h := renderPickerList(com.Styles, l, 40, 1, true, "Nothing.", nil)
+	require.Empty(t, view)
+	require.Zero(t, h)
+
+	view, w, h := renderPickerList(com.Styles, l, 40, 5, true, "Nothing.", nil)
+	require.Equal(t, 40, w)
+	require.Equal(t, 4, h)
+	require.Contains(t, view, "Nothing.")
 }

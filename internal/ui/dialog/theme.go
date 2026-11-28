@@ -449,57 +449,49 @@ func (th *Theme) currentThemeName() string {
 
 func (th *Theme) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := th.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-
-	sizeDialogInput(t, &th.input, innerWidth)
-	listHeight, listTotalHeight, _ := sizeDialogList(t, th.list, innerWidth, height)
-
+	f := newPickerFrame(t, area, defaultDialogMaxWidth, defaultDialogHeight, &th.input, &th.help, th)
+	f.Title = "Themes"
 	var cur *tea.Cursor
-	rc := NewRenderContext(t, width)
-	rc.Title = "Themes"
+	var renaming *ThemeItem
+	messageHeight := 0
 	switch th.mode {
 	case themesModeDeleting:
-		rc.TitleStyle = t.Dialog.Sessions.DeletingTitle
-		rc.TitleGradientFromColor = t.Dialog.Sessions.DeletingTitleGradientFromColor
-		rc.TitleGradientToColor = t.Dialog.Sessions.DeletingTitleGradientToColor
-		rc.ViewStyle = t.Dialog.Sessions.DeletingView
-		rc.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this theme?"))
+		f.TitleStyle = t.Dialog.Sessions.DeletingTitle
+		f.TitleGradientFromColor = t.Dialog.Sessions.DeletingTitleGradientFromColor
+		f.TitleGradientToColor = t.Dialog.Sessions.DeletingTitleGradientToColor
+		f.ViewStyle = t.Dialog.Sessions.DeletingView
+		f.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this theme?"))
 	case themesModeRenaming:
-		rc.TitleStyle = t.Dialog.Sessions.RenamingingTitle
-		rc.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
-		rc.TitleGradientToColor = t.Dialog.Sessions.RenamingTitleGradientToColor
-		rc.ViewStyle = t.Dialog.Sessions.RenamingView
+		f.TitleStyle = t.Dialog.Sessions.RenamingingTitle
+		f.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
+		f.TitleGradientToColor = t.Dialog.Sessions.RenamingTitleGradientToColor
+		f.ViewStyle = t.Dialog.Sessions.RenamingView
 		message := t.Dialog.Sessions.RenamingingMessage.Render("Rename this theme?")
-		rc.AddPart(message)
-		item := th.selectedThemeItem()
-		if item == nil {
+		f.AddPart(message)
+		renaming = th.selectedThemeItem()
+		if renaming == nil {
 			return nil
 		}
-		cur = item.Cursor()
-		start, end := th.list.VisibleItemIndices()
-		cur = renameCursorOffset(t, cur, lipgloss.Height(message), start, end, th.list.Selected())
+		cur = renaming.Cursor()
+		messageHeight = lipgloss.Height(message)
 	default:
-		inputView := t.Dialog.InputPrompt.Render(th.input.View())
-		rc.AddPart(inputView)
+		f.addInput()
 		cur = InputCursor(t, th.input.Cursor())
 	}
 
 	visibleCount := len(th.list.FilteredItems())
-	if th.list.Height() >= visibleCount {
-		th.list.ScrollToTop()
-	} else {
-		th.list.ScrollToSelected()
-	}
-
-	listBody := renderDialogListBody(t, th.list.Render(), !th.hasSelectableTheme(), emptyNoMatches, innerWidth)
-	listView := t.Dialog.List.Height(th.list.Height()).Render(listBody)
-	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, th.list.Offset())
-	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(t, &th.help, th, innerWidth)
-
-	view := rc.Render()
+	f.addList(th.list, !th.hasSelectableTheme(), emptyNoMatches, func(int) {
+		if renaming != nil {
+			start, end := th.list.VisibleItemIndices()
+			cur = renameCursorOffset(t, cur, messageHeight, start, end, th.list.Selected())
+		}
+		if th.list.Height() >= visibleCount {
+			th.list.ScrollToTop()
+		} else {
+			th.list.ScrollToSelected()
+		}
+	})
+	view := f.Render()
 
 	DrawCenterCursor(scr, area, view, cur)
 	return cur

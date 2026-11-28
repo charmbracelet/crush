@@ -18,8 +18,6 @@ const (
 	defaultDialogHeight = 20
 	// titleContentHeight is the height of the title content line.
 	titleContentHeight = 1
-	// inputContentHeight is the height of the input content line.
-	inputContentHeight = 1
 )
 
 // dialogHelp orders a dialog's short help the same way everywhere: the

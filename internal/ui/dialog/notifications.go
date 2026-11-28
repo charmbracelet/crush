@@ -166,26 +166,21 @@ func (n *Notifications) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := n.com.Styles
-	width := max(0, min(notificationsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	// Reserve room for the tallest description so moving between
-	// options doesn't resize the dialog.
-	descHeight := n.descriptionHeight(innerWidth)
-	height := max(0, min(notificationsDialogMaxHeight+descHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize() + descHeight
+	f := newPickerFrame(t, area, notificationsDialogMaxWidth, notificationsDialogMaxHeight, &n.input, &n.help, n)
+	// Reserve the tallest description so moving between options doesn't resize the dialog.
+	descHeight := n.descriptionHeight(f.innerWidth)
+	f.fitHeight(area, notificationsDialogMaxHeight+descHeight)
+	f.Title = "Notification Style"
+	f.addInput()
 
-	sizeDialogInput(t, &n.input, innerWidth)
-	// Size the list to its options so no blank rows pile up between
-	// the last one and the help line.
-	n.list.SetSize(innerWidth, min(max(0, height-heightOffset), len(n.list.Items())))
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Notification Style"
-	inputView := t.Dialog.InputPrompt.Render(n.input.View())
-	rc.AddPart(inputView)
+	var descView string
+	bodyHeight := f.height - f.ChromeHeight() - t.Dialog.List.GetVerticalFrameSize()
+	if descHeight > 0 {
+		descView = n.descriptionStyle(f.innerWidth).Height(descHeight).MarginBottom(1).Render(n.selectedDescription())
+		bodyHeight -= lipgloss.Height(descView)
+	}
+	// Size the list to its options so no blank rows pile up before the help line.
+	n.list.SetSize(f.innerWidth, min(max(0, bodyHeight), len(n.list.Items())))
 
 	visibleCount := len(n.list.FilteredItems())
 	if n.list.Height() >= visibleCount {
@@ -193,15 +188,9 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	} else {
 		n.list.ScrollToSelected()
 	}
-
-	listView := t.Dialog.List.Height(n.list.Height()).Render(n.list.Render())
-	rc.AddPart(listView)
-	if descHeight > 0 {
-		rc.AddPart(n.descriptionStyle(innerWidth).Height(descHeight).MarginBottom(1).Render(n.selectedDescription()))
-	}
-	rc.Help = renderDialogHelp(t, &n.help, n, innerWidth)
-
-	view := rc.Render()
+	f.AddPart(t.Dialog.List.Height(n.list.Height()).Render(n.list.Render()))
+	f.AddPart(descView)
+	view := f.Render()
 
 	cur := n.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

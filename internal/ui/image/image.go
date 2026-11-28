@@ -184,6 +184,13 @@ var paintBlocksFunc = paintBlocks
 
 // paintBlocks renders the image as Unicode block characters filling the
 // given number of cells.
+//
+// Known risk: go-ansi-paintbrush's Paint waits for its workers but not for
+// the goroutine collecting their results, so it can occasionally read a
+// cell before it is filled in. Since the painted string is cached and reused
+// rather than redrawn each frame, such a garbled paint persists until the
+// cache entry is reset or evicted. This is accepted as rare and cosmetic;
+// removing it needs a patched copy of the library.
 func paintBlocks(img image.Image, cols, rows int) string {
 	canvas := paintbrush.New()
 	canvas.SetImage(img)

@@ -12,7 +12,8 @@ import (
 // Usage:
 //
 //	provider add <id> [--name NAME] [--type TYPE] [--api-key KEY]
-//	    [--base-url URL] [--disable true|false] [--flat-rate true|false]
+//	    [--base-url URL] [--request-encoding none|gzip|brotli]
+//	    [--disable true|false] [--flat-rate true|false]
 //	    [--discover-models true|false] [--system-prompt-prefix TEXT]
 //	    [--extra-header KEY VALUE] [--extra-body JSON]
 //	    [--provider-options JSON] [--aws-auth-refresh CMD]
@@ -45,6 +46,7 @@ var providerAddFlags = []flagSpec{
 	{name: "--type", jsonKey: "type", kind: flagString, op: opSet},
 	{name: "--api-key", jsonKey: "api_key", kind: flagString, op: opSet, template: true},
 	{name: "--base-url", jsonKey: "base_url", kind: flagString, op: opSet, template: true},
+	{name: "--request-encoding", jsonKey: "request_encoding", kind: flagString, op: opSet},
 	{name: "--disable", jsonKey: "disable", kind: flagBool, op: opSet},
 	{name: "--flat-rate", jsonKey: "flat_rate", kind: flagBool, op: opSet},
 	{name: "--discover-models", jsonKey: "discover_models", kind: flagBool, op: opSet},
@@ -57,7 +59,7 @@ var providerAddFlags = []flagSpec{
 
 func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON] [--aws-auth-refresh CMD]")
+		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--request-encoding none|gzip|brotli] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON] [--aws-auth-refresh CMD]")
 	}
 	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)

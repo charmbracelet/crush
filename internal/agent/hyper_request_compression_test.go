@@ -2,8 +2,9 @@ package agent
 
 // Hyper accepts brotli and gzip request bodies, and every turn re-uploads
 // the whole conversation, so the Hyper provider compresses what it sends,
-// brotli first. Other openai-compat providers must not, because nothing
-// tells us they can read it.
+// brotli first. Other openai-compat providers compress only when their
+// configured request encoding says they can read it; unset means plain
+// JSON, because a compressed body is a contract with the server.
 
 import (
 	"bytes"
@@ -105,9 +106,9 @@ func testCoordinator(t *testing.T) *coordinator {
 	return &coordinator{cfg: cfg}
 }
 
-func generateAgainst(t *testing.T, coord *coordinator, baseURL, providerID string, prompt fantasy.Prompt) error {
+func generateAgainst(t *testing.T, coord *coordinator, baseURL, providerID string, requestEncoding catwalk.RequestEncoding, prompt fantasy.Prompt) error {
 	t.Helper()
-	provider, err := coord.buildOpenaiCompatProvider(baseURL, "test-key", nil, nil, providerID, false, catwalk.TypeCompletions)
+	provider, err := coord.buildOpenaiCompatProvider(baseURL, "test-key", nil, nil, providerID, requestEncoding, false, catwalk.TypeCompletions)
 	require.NoError(t, err)
 	lm, err := provider.LanguageModel(t.Context(), "test-model")
 	require.NoError(t, err)
@@ -122,7 +123,7 @@ func TestHyperProviderCompressesRequests(t *testing.T) {
 		t.Parallel()
 		rec := newEncodingRecorder(t, false)
 
-		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, longPrompt()))
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, "", longPrompt()))
 
 		encodings, bodies := rec.received()
 		require.Equal(t, []string{"br"}, encodings, "one compressed request, no retry")
@@ -136,7 +137,41 @@ func TestHyperProviderCompressesRequests(t *testing.T) {
 		t.Parallel()
 		rec := newEncodingRecorder(t, false)
 
-		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", "some-other-provider", longPrompt()))
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", "some-other-provider", "", longPrompt()))
+
+		encodings, _ := rec.received()
+		require.Equal(t, []string{""}, encodings)
+	})
+
+	t.Run("a custom provider with gzip encoding uploads a gzip body", func(t *testing.T) {
+		t.Parallel()
+		rec := newEncodingRecorder(t, false)
+
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", "some-other-provider", catwalk.RequestEncodingGzip, longPrompt()))
+
+		encodings, bodies := rec.received()
+		require.Equal(t, []string{"gzip"}, encodings, "one compressed request, no retry")
+		require.Contains(t, bodies[0], `"model":"test-model"`,
+			"the server must be able to inflate what the provider was handed")
+	})
+
+	t.Run("a custom provider with brotli encoding uploads a brotli body", func(t *testing.T) {
+		t.Parallel()
+		rec := newEncodingRecorder(t, false)
+
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", "some-other-provider", catwalk.RequestEncodingBrotli, longPrompt()))
+
+		encodings, bodies := rec.received()
+		require.Equal(t, []string{"br"}, encodings, "one compressed request, no retry")
+		require.Contains(t, bodies[0], `"model":"test-model"`,
+			"the server must be able to inflate what the provider was handed")
+	})
+
+	t.Run("a custom provider with none encoding uploads plain JSON", func(t *testing.T) {
+		t.Parallel()
+		rec := newEncodingRecorder(t, false)
+
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", "some-other-provider", catwalk.RequestEncodingNone, longPrompt()))
 
 		encodings, _ := rec.received()
 		require.Equal(t, []string{""}, encodings)
@@ -146,7 +181,7 @@ func TestHyperProviderCompressesRequests(t *testing.T) {
 		t.Parallel()
 		rec := newEncodingRecorder(t, true)
 
-		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, longPrompt()))
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, "", longPrompt()))
 
 		encodings, bodies := rec.received()
 		require.Equal(t, []string{"br", "gzip"}, encodings,
@@ -162,7 +197,7 @@ func TestHyperProviderCompressesRequests(t *testing.T) {
 		prompt := fantasy.Prompt{
 			{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.TextPart{Text: "hi"}}},
 		}
-		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, prompt))
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, "", prompt))
 
 		encodings, _ := rec.received()
 		require.Equal(t, []string{""}, encodings)

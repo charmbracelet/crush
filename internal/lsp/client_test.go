@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"testing/synctest"
@@ -278,4 +279,72 @@ func TestEnsureFileOpenReportsAlreadyOpenFiles(t *testing.T) {
 	opened, err = c.EnsureFileOpen(t.Context(), filepath.Join(dir, "main.rs"))
 	require.NoError(t, err)
 	require.False(t, opened, "unhandled files are not opened")
+}
+
+// newFakeServerClient starts and initializes a client backed by the fake
+// LSP server in fakeserver_test.go, handling Go files in dir.
+func newFakeServerClient(t *testing.T, dir string) *Client {
+	t.Helper()
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	cfg := config.LSPConfig{
+		Command:   exe,
+		FileTypes: []string{"go"},
+		Env:       map[string]string{fakeServerEnv: "1"},
+	}
+	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+	c, err := New("fake", cfg, resolver, dir, false)
+	require.NoError(t, err)
+	t.Cleanup(c.Shutdown)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, err = c.Initialize(ctx, dir)
+	require.NoError(t, err)
+	require.NoError(t, c.WaitForServerReady(ctx))
+	return c
+}
+
+func TestEnsureFileOpenOpensNewFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o644))
+	c := newFakeServerClient(t, dir)
+
+	opened, err := c.EnsureFileOpen(t.Context(), path)
+	require.NoError(t, err)
+	require.True(t, opened, "a file that is not open yet is opened")
+	require.True(t, c.IsFileOpen(path))
+
+	opened, err = c.EnsureFileOpen(t.Context(), path)
+	require.NoError(t, err)
+	require.False(t, opened, "the second call finds the file already open")
+}
+
+func TestRestartReopensFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o644))
+	uri := protocol.URIFromPath(path)
+	c := newFakeServerClient(t, dir)
+
+	require.NoError(t, c.OpenFile(t.Context(), path))
+	require.Eventually(t, func() bool {
+		return len(c.GetFileDiagnostics(uri)) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.NoError(t, c.Restart())
+
+	// The file is open in the new server, which republishes its
+	// diagnostics.
+	require.True(t, c.IsFileOpen(path))
+	require.Eventually(t, func() bool {
+		return len(c.GetFileDiagnostics(uri)) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, DiagnosticCounts{Error: 1}, c.GetDiagnosticCounts())
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
+	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -238,22 +239,34 @@ func (c *Completions) applyNamePriorityFilter(query string) {
 		return
 	}
 
-	c.list.SetItems(c.allItems...)
-	c.list.SetFilter(query)
-	raw := c.list.FilteredItems()
-	filtered := make([]list.FilterableItem, 0, len(raw))
-	for _, item := range raw {
-		filterable, ok := item.(list.FilterableItem)
-		if !ok {
-			continue
-		}
-		filtered = append(filtered, filterable)
-	}
+	// Match against every item once and set the list items once, with the
+	// final order. The list's own filter is bypassed: the popup renders the
+	// list directly, so nothing re-filters it.
+	matches := fuzzy.FindFrom(query, list.FilterableItemsSource(c.allItems))
 
+	// Rank each match once up front rather than inside the comparator.
+	type rankedItem struct {
+		item list.FilterableItem
+		tier int
+	}
 	queryLower := strings.ToLower(strings.TrimSpace(query))
-	slices.SortStableFunc(filtered, func(a, b list.FilterableItem) int {
-		return namePriorityTier(a.Filter(), queryLower) - namePriorityTier(b.Filter(), queryLower)
+	ranked := make([]rankedItem, len(matches))
+	for i, match := range matches {
+		item := c.allItems[match.Index]
+		if ms, ok := item.(list.MatchSettable); ok {
+			ms.SetMatch(match)
+		}
+		ranked[i] = rankedItem{item: item, tier: namePriorityTier(item.Filter(), queryLower)}
+	}
+	// Stable, so fuzzy score order is kept within a tier.
+	slices.SortStableFunc(ranked, func(a, b rankedItem) int {
+		return a.tier - b.tier
 	})
+
+	filtered := make([]list.FilterableItem, len(ranked))
+	for i, r := range ranked {
+		filtered[i] = r.item
+	}
 	c.filtered = filtered
 	c.list.SetItems(c.filtered...)
 }
@@ -274,10 +287,26 @@ func namePriorityTier(path, queryLower string) int {
 	return tierFallback
 }
 
+// hasPathSegment reports whether queryLower is one of the '/' or '\'
+// separated segments of pathLower. Empty segments never match.
 func hasPathSegment(pathLower, queryLower string) bool {
-	return slices.Contains(strings.FieldsFunc(pathLower, func(r rune) bool {
-		return r == '/' || r == '\\'
-	}), queryLower)
+	if queryLower == "" {
+		return false
+	}
+	for rest := pathLower; ; {
+		i := strings.IndexAny(rest, `/\`)
+		seg := rest
+		if i >= 0 {
+			seg = rest[:i]
+		}
+		if seg == queryLower {
+			return true
+		}
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+1:]
+	}
 }
 
 func (c *Completions) updateSize() {

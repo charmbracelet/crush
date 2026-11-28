@@ -104,6 +104,27 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.NoError(t, bgManager.Kill(t.Context(), meta.ShellID))
 }
 
+func TestBashTool_BackgroundFastExitReturnsEarly(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	start := time.Now()
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:     "fast background exit",
+		Command:         "echo quick",
+		RunInBackground: true,
+	})
+	elapsed := time.Since(start)
+
+	require.False(t, resp.IsError)
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Empty(t, meta.ShellID, "a finished command is not reported as a job")
+	require.Contains(t, meta.Output, "quick")
+	require.Less(t, elapsed, backgroundFastFailWait, "should not wait out the fast-fail window")
+}
+
 type recordingPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	requestCount int

@@ -60,6 +60,10 @@ const (
 	DefaultAutoBackgroundAfter = 60 // Commands taking longer automatically become background jobs
 	MaxOutputLength            = 30000
 	BashNoOutput               = "no output"
+
+	// backgroundFastFailWait is how long a background command is watched
+	// for an early exit before it is reported as a running job.
+	backgroundFastFailWait = time.Second
 )
 
 //go:embed bash.md.tpl
@@ -359,8 +363,17 @@ func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, 
 			return fantasy.NewTextErrorResponse("Failed to start background shell: " + err.Error()), nil
 		}
 
-		// Wait a short time to detect fast failures (blocked commands, syntax errors, etc.)
-		time.Sleep(1 * time.Second)
+		// Wait a short time to detect fast failures (blocked commands,
+		// syntax errors, etc.), returning early when the command finishes
+		// or the call is cancelled. A cancelled call still reports the
+		// job, which keeps running detached.
+		fastFailTimer := time.NewTimer(backgroundFastFailWait)
+		select {
+		case <-bgShell.Done():
+		case <-fastFailTimer.C:
+		case <-ctx.Done():
+		}
+		fastFailTimer.Stop()
 		stdout, stderr, done, execErr := bgShell.GetOutput()
 
 		if done {

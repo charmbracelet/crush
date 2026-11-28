@@ -56,10 +56,12 @@ type Client struct {
 	// Diagnostic cache
 	diagnostics *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
 
-	// Cached diagnostic counts to avoid map copy on every UI render.
-	diagCountsCache   DiagnosticCounts
-	diagCountsVersion uint64
-	diagCountsMu      sync.Mutex
+	// Running diagnostic totals, kept in step with diagnostics so that
+	// counting never needs to copy the whole map. diagMu also serializes
+	// writes to diagnostics so the totals cannot drift.
+	diagMu     sync.Mutex
+	diagCounts DiagnosticCounts
+	diagTotal  int
 
 	// Files are currently opened by the LSP
 	openFiles *csync.Map[string, *OpenFileInfo]
@@ -264,8 +266,9 @@ func (c *Client) Restart() error {
 
 	c.SetServerState(StateStopped)
 
-	c.diagCountsCache = DiagnosticCounts{}
-	c.diagCountsVersion = 0
+	// Diagnostics from the old server instance are stale. The new server
+	// republishes them for the files reopened below.
+	c.clearDiagnostics()
 
 	if err := c.createPowernapClient(); err != nil {
 		return err
@@ -501,41 +504,65 @@ func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic
 	return c.diagnostics.Copy()
 }
 
-// GetDiagnosticCounts returns cached diagnostic counts by severity.
-// Uses the VersionedMap version to avoid recomputing on every call.
+// GetDiagnosticCounts returns diagnostic counts by severity.
 func (c *Client) GetDiagnosticCounts() DiagnosticCounts {
 	if c == nil {
 		return DiagnosticCounts{}
 	}
-	currentVersion := c.diagnostics.Version()
+	c.diagMu.Lock()
+	defer c.diagMu.Unlock()
+	return c.diagCounts
+}
 
-	c.diagCountsMu.Lock()
-	defer c.diagCountsMu.Unlock()
+// setFileDiagnostics replaces the diagnostics for a file and returns the
+// new total number of diagnostics across all files. Files without
+// diagnostics are removed from the cache.
+func (c *Client) setFileDiagnostics(uri protocol.DocumentURI, diags []protocol.Diagnostic) int {
+	c.diagMu.Lock()
+	defer c.diagMu.Unlock()
 
-	if currentVersion == c.diagCountsVersion {
-		return c.diagCountsCache
+	old, _ := c.diagnostics.Get(uri)
+	if len(diags) == 0 {
+		c.diagnostics.Del(uri)
+	} else {
+		c.diagnostics.Set(uri, diags)
 	}
+	c.diagCounts.add(old, -1)
+	c.diagCounts.add(diags, 1)
+	c.diagTotal += len(diags) - len(old)
+	return c.diagTotal
+}
 
-	// Recompute counts.
-	counts := DiagnosticCounts{}
-	for _, diags := range c.diagnostics.Seq2() {
-		for _, diag := range diags {
-			switch diag.Severity {
-			case protocol.SeverityError:
-				counts.Error++
-			case protocol.SeverityWarning:
-				counts.Warning++
-			case protocol.SeverityInformation:
-				counts.Information++
-			case protocol.SeverityHint:
-				counts.Hint++
-			}
+// clearDiagnostics removes all cached diagnostics and notifies the
+// diagnostics callback.
+func (c *Client) clearDiagnostics() {
+	c.diagMu.Lock()
+	for uri := range c.diagnostics.Seq2() {
+		c.diagnostics.Del(uri)
+	}
+	c.diagCounts = DiagnosticCounts{}
+	c.diagTotal = 0
+	c.diagMu.Unlock()
+
+	if c.onDiagnosticsChanged != nil {
+		c.onDiagnosticsChanged(c.name, 0)
+	}
+}
+
+// add adds (sign 1) or removes (sign -1) the given diagnostics.
+func (d *DiagnosticCounts) add(diags []protocol.Diagnostic, sign int) {
+	for _, diag := range diags {
+		switch diag.Severity {
+		case protocol.SeverityError:
+			d.Error += sign
+		case protocol.SeverityWarning:
+			d.Warning += sign
+		case protocol.SeverityInformation:
+			d.Information += sign
+		case protocol.SeverityHint:
+			d.Hint += sign
 		}
 	}
-
-	c.diagCountsCache = counts
-	c.diagCountsVersion = currentVersion
-	return counts
 }
 
 // OpenFileOnDemand opens a file only if it's not already open.

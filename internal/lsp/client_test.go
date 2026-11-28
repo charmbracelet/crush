@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"testing/synctest"
@@ -209,4 +210,50 @@ func TestWaitForDiagnostics_NilClient(t *testing.T) {
 	var c *Client
 	// Should not panic.
 	c.WaitForDiagnostics(context.Background(), time.Second)
+}
+
+func TestHandleDiagnosticsTracksTotals(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient()
+	var totals []int
+	c.SetDiagnosticsCallback(func(_ string, count int) {
+		totals = append(totals, count)
+	})
+
+	publish := func(uri string, severities ...protocol.DiagnosticSeverity) {
+		diags := make([]protocol.Diagnostic, 0, len(severities))
+		for _, sev := range severities {
+			diags = append(diags, protocol.Diagnostic{Severity: sev})
+		}
+		params, err := json.Marshal(protocol.PublishDiagnosticsParams{
+			URI:         protocol.DocumentURI(uri),
+			Diagnostics: diags,
+		})
+		require.NoError(t, err)
+		HandleDiagnostics(c, params)
+	}
+
+	publish("file:///a.go", protocol.SeverityError, protocol.SeverityWarning)
+	publish("file:///b.go", protocol.SeverityError)
+	require.Equal(t, DiagnosticCounts{Error: 2, Warning: 1}, c.GetDiagnosticCounts())
+	require.Equal(t, 2, c.diagnostics.Len())
+
+	// Clearing a file removes it from the cache.
+	publish("file:///a.go")
+	require.Equal(t, DiagnosticCounts{Error: 1}, c.GetDiagnosticCounts())
+	require.Equal(t, 1, c.diagnostics.Len())
+	require.Nil(t, c.GetFileDiagnostics("file:///a.go"))
+
+	// Publishing again replaces rather than adds.
+	publish("file:///a.go", protocol.SeverityHint)
+	publish("file:///a.go", protocol.SeverityInformation)
+	require.Equal(t, DiagnosticCounts{Error: 1, Information: 1}, c.GetDiagnosticCounts())
+	require.Equal(t, 2, c.diagnostics.Len())
+
+	c.clearDiagnostics()
+	require.Equal(t, DiagnosticCounts{}, c.GetDiagnosticCounts())
+	require.Zero(t, c.diagnostics.Len())
+
+	require.Equal(t, []int{2, 3, 1, 2, 2, 0}, totals)
 }

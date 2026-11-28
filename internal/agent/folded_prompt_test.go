@@ -142,3 +142,66 @@ func TestRun_PreservesFoldedQueuedPromptAcrossAutonomousSteps(t *testing.T) {
 	require.Equal(t, "user", decoded.Role)
 	require.Equal(t, queuedPrompt, decoded.Content)
 }
+
+func TestRun_FoldedPromptStaysAfterRecall(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	model := &foldedPromptProbeModel{
+		secondEntered: make(chan struct{}),
+		releaseSecond: make(chan struct{}),
+	}
+	small := &finishStreamModel{text: "title"}
+	echo := fantasy.NewAgentTool(
+		"echo",
+		"Echo the input.",
+		func(_ context.Context, input struct {
+			Message string `json:"message"`
+		}, _ fantasy.ToolCall,
+		) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("Echo: " + input.Message), nil
+		},
+	)
+	agent := testSessionAgent(env, model, small, "system", echo)
+	agent.SetMemory(&stubMemory{recall: "remembered fact"})
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, runErr := agent.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			Prompt:    "initial task",
+		})
+		firstDone <- runErr
+	}()
+
+	select {
+	case <-model.secondEntered:
+	case <-t.Context().Done():
+		t.Fatal("second autonomous step did not start")
+	}
+
+	const queuedPrompt = "Please pause and report progress."
+	_, err = agent.Run(t.Context(), SessionAgentCall{
+		SessionID: sess.ID,
+		Prompt:    queuedPrompt,
+	})
+	require.NoError(t, err)
+	close(model.releaseSecond)
+	require.NoError(t, <-firstDone)
+
+	calls := model.recordedCalls()
+	require.Len(t, calls, 4)
+
+	lastText := func(call fantasy.Call) string {
+		last := call.Prompt[len(call.Prompt)-1]
+		text, ok := fantasy.AsMessagePart[fantasy.TextPart](last.Content[0])
+		require.True(t, ok)
+		return text.Text
+	}
+	require.Contains(t, lastText(calls[2]), queuedPrompt, "the folded prompt is the last thing the model reads")
+	require.NotContains(t, lastText(calls[2]), "remembered fact")
+	require.Contains(t, lastText(calls[3]), "remembered fact", "recall returns on the step after the fold")
+}

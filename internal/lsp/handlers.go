@@ -118,13 +118,7 @@ func HandleDiagnostics(client *Client, params json.RawMessage) {
 		return
 	}
 
-	client.diagnostics.Set(diagParams.URI, diagParams.Diagnostics)
-
-	// Calculate total diagnostic count
-	totalCount := 0
-	for _, diagnostics := range client.diagnostics.Seq2() {
-		totalCount += len(diagnostics)
-	}
+	totalCount := client.setFileDiagnostics(diagParams.URI, diagParams.Diagnostics)
 
 	// Trigger callback if set
 	if client.onDiagnosticsChanged != nil {

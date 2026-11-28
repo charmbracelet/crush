@@ -2,10 +2,13 @@ package completions
 
 import (
 	"io"
+	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/sahilm/fuzzy"
 	"github.com/stretchr/testify/require"
 )
@@ -89,6 +92,70 @@ func TestNamePriorityTier(t *testing.T) {
 			got := namePriorityTier(tt.path, tt.query)
 			require.Equal(t, tt.wantTier, got)
 		})
+	}
+}
+
+// TestHasPathSegmentMatchesFields verifies the allocation-free segment scan
+// agrees with splitting the path on separators.
+func TestHasPathSegmentMatchesFields(t *testing.T) {
+	t.Parallel()
+
+	fields := func(pathLower, queryLower string) bool {
+		return slices.Contains(strings.FieldsFunc(pathLower, func(r rune) bool {
+			return r == '/' || r == '\\'
+		}), queryLower)
+	}
+	paths := []string{
+		"", "/", "//", "a", "a/b", "/a/b/", `a\b\c`, "a//b", "internal/ui/chat/mcp.go",
+		`mixed\path/chat\x`, "chat", "xchat/chatx", "ui/chat",
+	}
+	queries := []string{"", "a", "b", "c", "chat", "ui", "mcp.go", "ui/chat", "x", "path"}
+	for _, p := range paths {
+		for _, q := range queries {
+			require.Equalf(t, fields(p, q), hasPathSegment(p, q), "path %q query %q", p, q)
+		}
+	}
+}
+
+// TestFilterOrderUnchanged verifies ranking matches by a precomputed tier
+// gives the same order as ranking them inside the sort comparator.
+func TestFilterOrderUnchanged(t *testing.T) {
+	t.Parallel()
+
+	paths := []string{
+		"internal/ui/chat/user.go", "internal/ui/chat/search.go", "internal/ui/model/chat.go",
+		"internal/ui/chat/mcp.go", "internal/ui/model/xychat.go", "Chat/README.md",
+		"docs/User/guide.md", "cmd/user/main.go", "USER.md", "internal/user_test.go",
+		`win\chat\file.go`, "a/b/c/chatter.go",
+	}
+	values := make([]FileCompletionValue, len(paths))
+	for i, p := range paths {
+		values[i] = FileCompletionValue{Path: p}
+	}
+
+	for _, q := range []string{"user", "chat", "chat.g", "u", "c", "go", "Chat", "md"} {
+		c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+		c.SetItems(values, nil)
+
+		matches := fuzzy.FindFrom(q, list.FilterableItemsSource(c.allItems))
+		want := make([]string, len(matches))
+		for i, m := range matches {
+			want[i] = c.allItems[m.Index].Filter()
+		}
+		require.NotEmptyf(t, want, "query %q", q)
+		queryLower := strings.ToLower(strings.TrimSpace(q))
+		slices.SortStableFunc(want, func(a, b string) int {
+			return namePriorityTier(a, queryLower) - namePriorityTier(b, queryLower)
+		})
+
+		c.Filter(q)
+		got := make([]string, len(c.filtered))
+		for i, item := range c.filtered {
+			got[i] = item.Filter()
+			require.NotEmptyf(t, item.(*CompletionItem).match.MatchedIndexes, "query %q item %q", q, got[i])
+		}
+		require.Equalf(t, want, got, "query %q", q)
+		require.Equal(t, len(got), c.list.Len())
 	}
 }
 

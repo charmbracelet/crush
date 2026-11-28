@@ -1025,7 +1025,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs := msg.messages
-		if cmd := m.setSessionMessages(msgs); cmd != nil {
+		if cmd := m.setSessionMessagesWithNested(msgs, msg.nested); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.restoreModelFromSession(msgs); cmd != nil {
@@ -1830,8 +1830,16 @@ func (m *UI) handleAnimTick(msg animTickMsg) {
 	}
 }
 
-// setSessionMessages sets the messages for the current session in the chat
+// setSessionMessages sets the messages for the current session in the chat,
+// without any nested agent transcripts.
 func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
+	return m.setSessionMessagesWithNested(msgs, nestedTranscripts{})
+}
+
+// setSessionMessagesWithNested sets the messages for the current session in
+// the chat. nested holds what the session load read off the event loop for
+// the agent tool calls, so nothing here queries the workspace.
+func (m *UI) setSessionMessagesWithNested(msgs []message.Message, nested nestedTranscripts) tea.Cmd {
 	var cmds []tea.Cmd
 	// Build tool result map to link tool calls with their results
 	msgPtrs := make([]*message.Message, len(msgs))
@@ -1861,11 +1869,11 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		}
 	}
 
-	// Load nested tool calls for agent/agentic_fetch tools.
-	m.loadNestedToolCalls(items)
+	// Attach nested tool calls for agent/agentic_fetch tools.
+	m.loadNestedToolCalls(items, nested.messages)
 	m.setMessagePlanFlags(items)
 	replayDispatchReports(items, msgPtrs, func(messageID, toolCallID string) bool {
-		return m.com.Workspace.AgentIsSessionBusy(m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID))
+		return nested.busy[m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID)]
 	})
 
 	// If the user switches between sessions while the agent is working we
@@ -1979,8 +1987,10 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	return cmds
 }
 
-// loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
-func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
+// loadNestedToolCalls recursively attaches nested tool calls to
+// agent/agentic_fetch tools, building them from the nested transcripts the
+// session load read off the event loop (see loadNestedTranscripts).
+func (m *UI) loadNestedToolCalls(items []chat.MessageItem, transcripts map[string][]message.Message) {
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
 		if !ok {
@@ -1997,9 +2007,8 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Get the agent tool session ID.
 		agentSessionID := m.com.Workspace.CreateAgentToolSessionID(messageID, tc.ID)
 
-		// Fetch nested messages.
-		nestedMsgs, err := m.com.Workspace.ListMessages(context.Background(), agentSessionID)
-		if err != nil || len(nestedMsgs) == 0 {
+		nestedMsgs := transcripts[agentSessionID]
+		if len(nestedMsgs) == 0 {
 			continue
 		}
 
@@ -2030,7 +2039,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		for i, nt := range nestedTools {
 			nestedMessageItems[i] = nt
 		}
-		m.loadNestedToolCalls(nestedMessageItems)
+		m.loadNestedToolCalls(nestedMessageItems, transcripts)
 
 		// Set nested tools on the parent.
 		nestedContainer.SetNestedTools(nestedTools)

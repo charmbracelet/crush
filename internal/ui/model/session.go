@@ -12,11 +12,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -30,7 +32,26 @@ type loadSessionMsg struct {
 	files     []SessionFile
 	readFiles []string
 	messages  []message.Message
+	nested    nestedTranscripts
 }
+
+// nestedTranscripts is what a session load reads, off the event loop, for
+// the agent tool calls in a transcript, so building the chat items never
+// queries the workspace.
+type nestedTranscripts struct {
+	// messages holds the transcript of each nested agent session, keyed by
+	// its session ID. A session whose read failed or was empty is absent.
+	messages map[string][]message.Message
+	// busy reports, keyed by the subagent session ID, whether the subagent
+	// of each open latest dispatch is still working. A dispatch missing
+	// here is treated as finished.
+	busy map[string]bool
+}
+
+// nestedLoadConcurrency bounds the nested transcript reads of a session
+// load that run at once. In-process they serialize on the agent's settle
+// lock anyway; in client/server mode each one is a request to the server.
+const nestedLoadConcurrency = 4
 
 // lspFilePaths returns deduplicated file paths from both modified and read
 // files for starting LSP servers.
@@ -111,9 +132,113 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			files:     sessionFiles,
 			readFiles: readFiles,
 			messages:  messages,
+			nested: nestedTranscripts{
+				messages: m.loadNestedTranscripts(messages),
+				busy:     m.probeOpenDispatches(messages),
+			},
 		}
 	}
 	return tea.Batch(load, m.refreshSkillOverrides(), m.reportCurrentSession(sessionID))
+}
+
+// nestedSessionIDs returns the agent session IDs started by the tool calls
+// in msgs that show nested tools, in transcript order.
+func (m *UI) nestedSessionIDs(msgs []message.Message) []string {
+	var ids []string
+	for i := range msgs {
+		if msgs[i].Role != message.Assistant {
+			continue
+		}
+		for _, tc := range msgs[i].ToolCalls() {
+			if chat.HasNestedTools(tc.Name) {
+				ids = append(ids, m.com.Workspace.CreateAgentToolSessionID(msgs[i].ID, tc.ID))
+			}
+		}
+	}
+	return ids
+}
+
+// loadNestedTranscripts reads the transcripts of the agent sessions started
+// by the tool calls in msgs, then those started inside them, level by level.
+// It runs inside a command, off the event loop. A read that fails or comes
+// back empty is skipped, so its tool shows no nested tools.
+func (m *UI) loadNestedTranscripts(msgs []message.Message) map[string][]message.Message {
+	ws := m.com.Workspace
+	seen := make(map[string]struct{})
+	var nested map[string][]message.Message
+	level := m.nestedSessionIDs(msgs)
+	for len(level) > 0 {
+		ids := make([]string, 0, len(level))
+		for _, id := range level {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+		fetched := make([][]message.Message, len(ids))
+		var g errgroup.Group
+		g.SetLimit(nestedLoadConcurrency)
+		for i, id := range ids {
+			g.Go(func() error {
+				transcript, err := ws.ListMessages(context.Background(), id)
+				if err != nil {
+					slog.Debug("Failed to load nested agent messages", "session", id, "error", err)
+					return nil
+				}
+				fetched[i] = transcript
+				return nil
+			})
+		}
+		_ = g.Wait()
+
+		level = nil
+		for i, id := range ids {
+			if len(fetched[i]) == 0 {
+				continue
+			}
+			if nested == nil {
+				nested = make(map[string][]message.Message)
+			}
+			nested[id] = fetched[i]
+			level = append(level, m.nestedSessionIDs(fetched[i])...)
+		}
+	}
+	return nested
+}
+
+// probeOpenDispatches asks the backend, for the latest open dispatch of each
+// subagent label in msgs, whether its subagent is still working. It runs
+// inside a command, off the event loop; see replayDispatchReports.
+func (m *UI) probeOpenDispatches(msgs []message.Message) map[string]bool {
+	ptrs := make([]*message.Message, len(msgs))
+	for i := range msgs {
+		ptrs[i] = &msgs[i]
+	}
+	open := make(map[string]bool)
+	for _, state := range agent.LatestDispatches(ptrs) {
+		if state.Open {
+			open[state.CallID] = true
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	ws := m.com.Workspace
+	busy := make(map[string]bool, len(open))
+	for i := range msgs {
+		if msgs[i].Role != message.Assistant {
+			continue
+		}
+		for _, tc := range msgs[i].ToolCalls() {
+			if !open[tc.ID] {
+				continue
+			}
+			id := ws.CreateAgentToolSessionID(msgs[i].ID, tc.ID)
+			busy[id] = ws.AgentIsSessionBusy(id)
+		}
+	}
+	return busy
 }
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that

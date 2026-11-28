@@ -56,7 +56,7 @@ var _ Dialog = (*SkillToggles)(nil)
 // NewSkillsToggles creates a new skills toggles dialog.
 func NewSkillsToggles(com *common.Common, items []SkillToggleItem) *SkillToggles {
 	m := &SkillToggles{items: items}
-	m.toggleDialog = newToggleDialog(com, m, "Toggle Skills", "No skills configured.")
+	m.init(com, m, "Toggle Skills", "No skills configured.")
 	return m
 }
 
@@ -75,6 +75,7 @@ func (m *SkillToggles) Items() []SkillToggleItem {
 func (m *SkillToggles) SetItems(items []SkillToggleItem) {
 	m.items = items
 	m.cursor = min(m.cursor, max(0, len(items)-1))
+	m.syncKeys()
 }
 
 func (m *SkillToggles) toggleRows(MCPToggleScope) []toggleRow {

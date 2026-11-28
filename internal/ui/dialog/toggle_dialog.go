@@ -46,8 +46,9 @@ type toggleDialog struct {
 	}
 }
 
-func newToggleDialog(com *common.Common, src toggleSource, title, emptyMsg string) toggleDialog {
-	d := toggleDialog{
+// init sets up d in place, so src can already reach d's fields.
+func (d *toggleDialog) init(com *common.Common, src toggleSource, title, emptyMsg string) {
+	*d = toggleDialog{
 		toggleWindow: toggleWindow{maxRows: maxVisibleToggleRows},
 		com:          com,
 		src:          src,
@@ -74,7 +75,15 @@ func newToggleDialog(com *common.Common, src toggleSource, title, emptyMsg strin
 		key.WithHelp("tab", "switch scope"),
 	)
 	d.keyMap.Close = CloseKey
-	return d
+	d.syncKeys()
+}
+
+// syncKeys disables the row keys while there are no rows.
+func (d *toggleDialog) syncKeys() {
+	hasRows := len(d.src.toggleRows(d.scope)) > 0
+	d.keyMap.Toggle.SetEnabled(hasRows)
+	d.keyMap.UpDown.SetEnabled(hasRows)
+	d.keyMap.Scope.SetEnabled(hasRows)
 }
 
 // Scope returns the selected toggle scope.
@@ -194,9 +203,5 @@ func (d *toggleDialog) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (d *toggleDialog) ShortHelp() []key.Binding {
-	if len(d.src.toggleRows(d.scope)) == 0 {
-		// Nothing to move between or toggle: only closing does anything.
-		return []key.Binding{d.keyMap.Close}
-	}
 	return dialogHelp(d.keyMap.Toggle, d.keyMap.Close, d.keyMap.UpDown, d.keyMap.Scope)
 }

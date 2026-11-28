@@ -255,7 +255,7 @@ func (d *Channels) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // ShortHelp implements help.KeyMap.
 func (d *Channels) ShortHelp() []key.Binding {
 	// Channels are only browsed; there is no main action.
-	return dialogHelp(key.Binding{}, d.keyMap.Close, d.keyMap.UpDown)
+	return []key.Binding{d.keyMap.Close, d.keyMap.UpDown}
 }
 
 // FullHelp implements help.KeyMap.

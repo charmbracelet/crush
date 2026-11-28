@@ -75,7 +75,7 @@ var _ Dialog = (*MCPToggles)(nil)
 // NewMCPToggles creates a new MCP toggles dialog.
 func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
 	m := &MCPToggles{items: items}
-	m.toggleDialog = newToggleDialog(com, m, "Toggle MCPs", "No MCP servers configured.")
+	m.init(com, m, "Toggle MCPs", "No MCP servers configured.")
 	return m
 }
 

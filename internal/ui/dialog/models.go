@@ -164,6 +164,8 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 		key.WithHelp("↑", "previous item"),
 	)
 	m.keyMap.Close = CloseKey
+	// Onboarding cannot be left before a model is chosen.
+	m.keyMap.Close.SetEnabled(!isOnboarding)
 
 	// A stale catalog must not keep this dialog from opening: it is the
 	// only way for the user to choose a model.
@@ -398,12 +400,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
 	if m.isOnboarding {
-		return dialogHelp(m.keyMap.Select, key.Binding{}, m.keyMap.UpDown)
+		return dialogHelp(m.keyMap.Select, m.keyMap.Close, m.keyMap.UpDown)
 	}
-	edit := key.Binding{}
-	if m.isSelectedConfigured() {
-		edit = m.keyMap.Edit
-	}
+	edit := m.keyMap.Edit
+	edit.SetEnabled(m.isSelectedConfigured())
 	return dialogHelp(m.keyMap.Select, m.keyMap.Close, m.keyMap.UpDown, m.keyMap.Tab, edit)
 }
 

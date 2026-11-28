@@ -132,6 +132,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		key.WithHelp("shift+tab", "switch selection prev"),
 	)
 	c.keyMap.Close = CloseKey
+	c.syncTabKeys()
 
 	if available, known := config.DockerMCPAvailabilityCached(); known {
 		c.dockerMCPAvailable = &available
@@ -196,15 +197,11 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
-			if c.hasCommandTypes() {
-				c.selected = c.nextCommandType()
-				c.setCommandItems(c.selected)
-			}
+			c.selected = c.nextCommandType()
+			c.setCommandItems(c.selected)
 		case key.Matches(msg, c.keyMap.ShiftTab):
-			if c.hasCommandTypes() {
-				c.selected = c.previousCommandType()
-				c.setCommandItems(c.selected)
-			}
+			c.selected = c.previousCommandType()
+			c.setCommandItems(c.selected)
 		default:
 			var cmd tea.Cmd
 			for _, item := range c.list.FilteredItems() {
@@ -302,13 +299,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (c *Commands) ShortHelp() []key.Binding {
-	// Tab only switches lists when there are user commands or MCP
-	// prompts.
-	tab := key.Binding{}
-	if c.hasCommandTypes() {
-		tab = c.keyMap.Tab
-	}
-	return dialogHelp(c.keyMap.Select, c.keyMap.Close, c.keyMap.UpDown, tab)
+	return dialogHelp(c.keyMap.Select, c.keyMap.Close, c.keyMap.UpDown, c.keyMap.Tab)
 }
 
 // hasCommandTypes reports whether there is more than one list of commands
@@ -317,14 +308,16 @@ func (c *Commands) hasCommandTypes() bool {
 	return len(c.customCommands) > 0 || len(c.mcpPrompts) > 0
 }
 
+// syncTabKeys enables tab switching only when there are user commands or MCP prompts.
+func (c *Commands) syncTabKeys() {
+	c.keyMap.Tab.SetEnabled(c.hasCommandTypes())
+	c.keyMap.ShiftTab.SetEnabled(c.hasCommandTypes())
+}
+
 // FullHelp implements [help.KeyMap].
 func (c *Commands) FullHelp() [][]key.Binding {
-	row := []key.Binding{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous}
-	if c.hasCommandTypes() {
-		row = append(row, c.keyMap.Tab)
-	}
 	return [][]key.Binding{
-		row,
+		{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous, c.keyMap.Tab},
 		{c.keyMap.Close},
 	}
 }
@@ -591,6 +584,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.
 func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 	c.customCommands = customCommands
+	c.syncTabKeys()
 	if c.selected == UserCommands {
 		c.setCommandItems(c.selected)
 	}
@@ -599,6 +593,7 @@ func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 // SetMCPPrompts sets the MCP prompts and refreshes the view if MCP prompts are currently displayed.
 func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 	c.mcpPrompts = mcpPrompts
+	c.syncTabKeys()
 	if c.selected == MCPPrompts {
 		c.setCommandItems(c.selected)
 	}

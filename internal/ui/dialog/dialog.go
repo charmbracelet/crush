@@ -20,18 +20,9 @@ const (
 	titleContentHeight = 1
 )
 
-// dialogHelp orders a dialog's short help the same way everywhere: the
-// main action, then esc, then everything else. A narrow help line drops
-// entries from the end, so the way forward and the way out survive the
-// longest. Pass a zero binding when there is no main action.
+// dialogHelp orders short help as main action, esc, then the rest, so a narrow help line drops optional hints first.
 func dialogHelp(action, esc key.Binding, rest ...key.Binding) []key.Binding {
-	h := make([]key.Binding, 0, len(rest)+2)
-	for _, b := range append([]key.Binding{action, esc}, rest...) {
-		if b.Enabled() {
-			h = append(h, b)
-		}
-	}
-	return h
+	return append([]key.Binding{action, esc}, rest...)
 }
 
 // upDownKey is the help entry for moving through a list. Lists match

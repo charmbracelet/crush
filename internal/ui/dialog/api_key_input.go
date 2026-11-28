@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -35,23 +34,20 @@ const APIKeyInputID = "api_key_input"
 
 // APIKeyInput represents a model selection dialog.
 type APIKeyInput struct {
-	com          *common.Common
+	authBase
 	isOnboarding bool
 
 	provider  catwalk.Provider
 	model     config.SelectedModel
 	modelType config.SelectedModelType
 
-	width int
 	state APIKeyInputState
 
 	keyMap struct {
 		Submit key.Binding
 		Close  key.Binding
 	}
-	input   textinput.Model
-	spinner spinner.Model
-	help    help.Model
+	input textinput.Model
 }
 
 var _ Dialog = (*APIKeyInput)(nil)
@@ -66,27 +62,17 @@ func NewAPIKeyInput(
 ) (*APIKeyInput, tea.Cmd) {
 	t := com.Styles
 
-	m := APIKeyInput{}
-	m.com = com
+	m := APIKeyInput{authBase: newAuthBase(com, t.Dialog.APIKey.Spinner)}
 	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
-	m.width = 0 // Set dynamically in Draw().
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
 	m.input.Placeholder = "Paste your key..."
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
-
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Dialog.APIKey.Spinner),
-	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	m.keyMap.Submit = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
@@ -115,11 +101,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 	case spinner.TickMsg:
 		switch m.state {
 		case APIKeyInputStateVerifying:
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			if cmd != nil {
-				return ActionCmd{cmd}
-			}
+			return m.tickSpinner(msg)
 		}
 	case tea.KeyPressMsg:
 		switch {
@@ -159,46 +141,31 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 // Draw implements [Dialog].
 func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-
-	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	contentWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	width, contentWidth := authWidths(t, area, authDialogMaxWidth)
 	// The prompt icon differs per state (the error icon is wider), so
 	// set it before sizing the text area around it.
 	m.applyInputState()
 	sizeDialogInput(t, &m.input, contentWidth)
 
 	textStyle := t.Dialog.SecondaryText
-	dialogStyle := t.Dialog.View.Width(m.width)
-	inputStyle := t.Dialog.InputPrompt
-	helpView := renderDialogHelp(t, &m.help, m, contentWidth)
-
-	content := strings.Join([]string{
-		m.headerView(),
-		inputStyle.Render(m.input.View()),
+	body := strings.Join([]string{
+		t.Dialog.InputPrompt.Render(m.input.View()),
 		textStyle.Width(contentWidth).Render("This will be written in your global configuration:"),
 		// Break the path at any character: it has no spaces to wrap at,
 		// and continuation lines must keep the padding.
 		textStyle.Width(contentWidth).Render(ansi.Hardwrap(config.GlobalConfigData(),
 			max(1, contentWidth-textStyle.GetHorizontalFrameSize()), true)),
 		"",
-		helpView,
 	}, "\n")
+	help := renderDialogHelp(t, &m.help, m, contentWidth)
+	view := authFrame(t, width, m.dialogTitle(), body, help, m.isOnboarding)
 
 	cur := m.Cursor()
-
 	if m.isOnboarding {
-		view := content
 		cur = adjustOnboardingInputCursor(t, cur)
-		DrawOnboardingCursor(scr, area, view, cur)
-	} else {
-		view := dialogStyle.Render(content)
-		DrawCenterCursor(scr, area, view, cur)
 	}
+	authDraw(scr, area, view, cur, m.isOnboarding)
 	return cur
-}
-
-func (m *APIKeyInput) headerView() string {
-	return authTitle(m.com.Styles, m.width, m.dialogTitle(), m.isOnboarding)
 }
 
 func (m *APIKeyInput) dialogTitle() string {

@@ -3,9 +3,7 @@ package dialog
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -31,8 +29,7 @@ const (
 
 // MCPAuth handles the MCP OAuth authentication dialog.
 type MCPAuth struct {
-	com   *common.Common
-	width int
+	authBase
 
 	pending   []mcptools.PendingAuthServer
 	current   int
@@ -42,9 +39,7 @@ type MCPAuth struct {
 
 	cancelAuth context.CancelFunc
 
-	spinner spinner.Model
-	help    help.Model
-	keyMap  struct {
+	keyMap struct {
 		Submit key.Binding
 		Copy   key.Binding
 		Skip   key.Binding
@@ -58,20 +53,11 @@ var _ Dialog = (*MCPAuth)(nil)
 func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authURLFn func(string) string) (*MCPAuth, tea.Cmd) {
 	t := com.Styles
 	m := &MCPAuth{
-		com:       com,
-		width:     0, // Set dynamically in Draw().
+		authBase:  newAuthBase(com, t.Dialog.OAuth.Spinner),
 		pending:   pending,
 		state:     MCPAuthStatePrompt,
 		authURLFn: authURLFn,
 	}
-
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Dialog.OAuth.Spinner),
-	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	m.keyMap.Submit = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
@@ -234,40 +220,28 @@ func (m *MCPAuth) currentServer() mcptools.PendingAuthServer {
 // overflows a narrow terminal.
 func (m *MCPAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	dialogStyle := t.Dialog.View.Width(m.width)
-	view := dialogStyle.Render(m.dialogContent())
+	width, innerWidth := authWidths(t, area, authDialogMaxWidth)
+	help := renderDialogHelp(t, &m.help, m, innerWidth)
+	view := authFrame(t, width, m.title(), m.body(innerWidth), help, false)
 	DrawCenter(scr, area, view)
 	return nil
 }
 
-func (m *MCPAuth) dialogContent() string {
-	t := m.com.Styles
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-	elements := []string{
-		m.headerContent(),
-		m.innerContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
-	}
-	return strings.Join(elements, "\n")
-}
-
-func (m *MCPAuth) headerContent() string {
+// title names the server being signed in to and, with more than one
+// queued, how far through the queue it is.
+func (m *MCPAuth) title() string {
 	title := fmt.Sprintf("Authenticate with %s", m.currentServer().Name)
 	if len(m.pending) > 1 {
 		title += fmt.Sprintf(" (%d/%d)", m.current+1, len(m.pending))
 	}
-	return authTitle(m.com.Styles, m.width, title, false)
+	return title
 }
 
-func (m *MCPAuth) innerContent() string {
+// body renders the dialog's content for the current state, innerWidth
+// cells wide.
+func (m *MCPAuth) body(innerWidth int) string {
 	t := m.com.Styles
 	linkStyle := t.Dialog.OAuth.Link
-
-	// innerWidth is the dialog's content area: total width minus the
-	// View frame (border). Every block sizes to this so nothing gets
-	// re-wrapped when the dialog frame renders it.
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 	server := m.currentServer()
 
 	block := func(s string) string {

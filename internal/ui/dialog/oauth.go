@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -51,7 +50,7 @@ const OAuthID = "oauth"
 
 // OAuth handles the OAuth flow authentication.
 type OAuth struct {
-	com          *common.Common
+	authBase
 	isOnboarding bool
 
 	provider      catwalk.Provider
@@ -61,9 +60,7 @@ type OAuth struct {
 
 	State OAuthState
 
-	spinner spinner.Model
-	help    help.Model
-	keyMap  struct {
+	keyMap struct {
 		Copy      key.Binding
 		CopyURL   key.Binding
 		Submit    key.Binding
@@ -71,7 +68,6 @@ type OAuth struct {
 		Close     key.Binding
 	}
 
-	width           int
 	deviceCode      string
 	userCode        string
 	verificationURL string
@@ -102,23 +98,13 @@ func newOAuth(
 ) (*OAuth, tea.Cmd) {
 	t := com.Styles
 
-	m := OAuth{}
-	m.com = com
+	m := OAuth{authBase: newAuthBase(com, t.Dialog.OAuth.Spinner)}
 	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
 	m.oAuthProvider = oAuthProvider
-	m.width = 0 // Set dynamically in Draw().
 	m.State = OAuthStateInitializing
-
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Dialog.OAuth.Spinner),
-	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	m.keyMap.Copy = key.NewBinding(
 		key.WithKeys("c"),
@@ -163,11 +149,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 	case spinner.TickMsg:
 		switch m.State {
 		case OAuthStateInitializing, OAuthStateDisplay, OAuthStateSaving:
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			if cmd != nil {
-				return ActionCmd{cmd}
-			}
+			return m.tickSpinner(msg)
 		}
 
 	case tea.KeyPressMsg:
@@ -311,35 +293,24 @@ type oauthSaveErrMsg struct {
 	err error
 }
 
-// View renders the device flow dialog.
+// Draw renders the device flow dialog.
 func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	var (
-		t           = m.com.Styles
-		dialogWidth = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-		dialogStyle = t.Dialog.View.Width(dialogWidth)
-	)
-	m.width = dialogWidth
+	t := m.com.Styles
+	width, innerWidth := authWidths(t, area, authDialogMaxWidth)
+	title := fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
+	body := m.body(innerWidth)
+	view := authFrame(t, width, title, body, renderDialogHelp(t, &m.help, m, innerWidth), m.isOnboarding)
+	cur := m.cursor()
 	if m.isOnboarding {
-		view := m.dialogContent()
-		cur := m.cursor()
-		if cur != nil {
-			cur = adjustOnboardingInputCursor(t, cur)
-			DrawOnboardingCursor(scr, area, view, cur)
-			return cur
-		}
-		DrawOnboarding(scr, area, view)
-	} else {
-		view := dialogStyle.Render(m.dialogContent())
-		cur := m.cursor()
-		DrawCenterCursor(scr, area, view, cur)
-		return cur
+		cur = adjustOnboardingInputCursor(t, cur)
 	}
-	return nil
+	authDraw(scr, area, view, cur, m.isOnboarding)
+	return cur
 }
 
 // cursor reports the paste field's cursor when it is focused, so the
-// terminal caret sits in the input. It must run after dialogContent,
-// which records where the field lands.
+// terminal caret sits in the input. It must run after body, which
+// records where the field lands.
 func (m *OAuth) cursor() *tea.Cursor {
 	if !m.codeEntryActive() || !m.codeInput.Focused() {
 		return nil
@@ -351,41 +322,22 @@ func (m *OAuth) cursor() *tea.Cursor {
 	t := m.com.Styles
 	frame := t.Dialog.View
 	input := t.Dialog.InputPrompt
+	const titleHeight = 1
 	cur.X += frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft() +
 		input.GetMarginLeft() + input.GetBorderLeftSize() + input.GetPaddingLeft()
 	cur.Y += frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop() +
-		lipgloss.Height(m.headerContent()) + m.codeInputRow
+		titleHeight + m.codeInputRow
 	return cur
 }
 
-func (m *OAuth) dialogContent() string {
-	t := m.com.Styles
-
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-	elements := []string{
-		m.headerContent(),
-		m.innerDialogContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
-	}
-	return strings.Join(elements, "\n")
-}
-
-func (m *OAuth) headerContent() string {
-	title := fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
-	return authTitle(m.com.Styles, m.width, title, m.isOnboarding)
-}
-
-func (m *OAuth) innerDialogContent() string {
+// body renders the dialog's content for the current state, innerWidth
+// cells wide.
+func (m *OAuth) body(innerWidth int) string {
 	var (
 		t               = m.com.Styles
 		linkStyle       = t.Dialog.OAuth.Link
 		statusTextStyle = t.Dialog.OAuth.StatusText
 	)
-
-	// innerWidth is the dialog's content area: total width minus the
-	// View frame (border). Every block sizes to this so nothing gets
-	// re-wrapped when the dialog frame renders it.
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 
 	switch m.State {
 	case OAuthStateInitializing:

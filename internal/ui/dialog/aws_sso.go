@@ -1,9 +1,6 @@
 package dialog
 
 import (
-	"strings"
-
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -32,20 +29,17 @@ const (
 // appears, and the final success or error. The only local action it performs
 // is opening the URL in the user's browser.
 type AWSSSO struct {
-	com *common.Common
+	authBase
 
 	state   awsSSOState
 	command string
 
-	spinner spinner.Model
-	help    help.Model
-	keyMap  struct {
+	keyMap struct {
 		Open    key.Binding
 		CopyURL key.Binding
 		Close   key.Binding
 	}
 
-	width  int
 	url    string
 	errMsg string
 }
@@ -59,19 +53,10 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 	t := com.Styles
 
 	m := &AWSSSO{
-		com:     com,
-		command: command,
-		width:   0, // Set dynamically in Draw().
-		state:   awsSSOStateWaiting,
+		authBase: newAuthBase(com, t.Dialog.OAuth.Spinner),
+		command:  command,
+		state:    awsSSOStateWaiting,
 	}
-
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Dialog.OAuth.Spinner),
-	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	m.keyMap.Open = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
@@ -118,11 +103,7 @@ func (m *AWSSSO) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		if m.state == awsSSOStateWaiting {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			if cmd != nil {
-				return ActionCmd{cmd}
-			}
+			return m.tickSpinner(msg)
 		}
 
 	case tea.KeyPressMsg:
@@ -150,43 +131,21 @@ func (m *AWSSSO) HandleMsg(msg tea.Msg) Action {
 
 // Draw renders the AWS SSO auth dialog.
 func (m *AWSSSO) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	var (
-		t           = m.com.Styles
-		dialogWidth = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-		dialogStyle = t.Dialog.View.Width(dialogWidth)
-	)
-	m.width = dialogWidth
-	view := dialogStyle.Render(m.dialogContent())
+	t := m.com.Styles
+	width, innerWidth := authWidths(t, area, authDialogMaxWidth)
+	help := renderDialogHelp(t, &m.help, m, innerWidth)
+	view := authFrame(t, width, "AWS SSO Authentication", m.body(innerWidth), help, false)
 	DrawCenter(scr, area, view)
 	return nil
 }
 
-func (m *AWSSSO) dialogContent() string {
-	t := m.com.Styles
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-
-	elements := []string{
-		m.headerContent(),
-		m.innerDialogContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
-	}
-	return strings.Join(elements, "\n")
-}
-
-func (m *AWSSSO) headerContent() string {
-	return authTitle(m.com.Styles, m.width, "AWS SSO Authentication", false)
-}
-
-func (m *AWSSSO) innerDialogContent() string {
+// body renders the dialog's content for the current state, innerWidth
+// cells wide.
+func (m *AWSSSO) body(innerWidth int) string {
 	var (
 		t         = m.com.Styles
 		linkStyle = t.Dialog.OAuth.Link
 	)
-
-	// innerWidth is the dialog's content area (total minus the View
-	// border). Every block sizes to this and uses padding for the inset, so
-	// nothing is re-wrapped when the dialog frame renders it.
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 
 	switch m.state {
 	case awsSSOStateWaiting:

@@ -264,28 +264,35 @@ func formatSourcegraphResult(buffer *strings.Builder, index int, res any, contex
 }
 
 func formatSourcegraphLineMatches(buffer *strings.Builder, lineMatches []any, fileContent string, contextWindow int) {
+	// Split the file once rather than once per line match.
+	var lines []string
+	if fileContent != "" && len(lineMatches) > 0 {
+		lines = strings.Split(fileContent, "\n")
+	}
 	for _, lm := range lineMatches {
 		lineMatch, ok := lm.(map[string]any)
 		if !ok {
 			continue
 		}
-		formatSourcegraphLineMatch(buffer, lineMatch, fileContent, contextWindow)
+		formatSourcegraphLineMatch(buffer, lineMatch, lines, contextWindow)
 	}
 }
 
-func formatSourcegraphLineMatch(buffer *strings.Builder, lineMatch map[string]any, fileContent string, contextWindow int) {
+// formatSourcegraphLineMatch writes one line match with contextWindow lines
+// of context around it. lines is the split file content, or nil when the
+// content is unavailable, in which case only the match preview is written.
+func formatSourcegraphLineMatch(buffer *strings.Builder, lineMatch map[string]any, lines []string, contextWindow int) {
 	lineNumber, _ := lineMatch["lineNumber"].(float64)
 	preview, _ := lineMatch["preview"].(string)
 	line := int(lineNumber)
 
 	buffer.WriteString("```\n")
-	if fileContent == "" {
+	if lines == nil {
 		fmt.Fprintf(buffer, "%d| %s\n", line, preview)
 		buffer.WriteString("```\n\n")
 		return
 	}
 
-	lines := strings.Split(fileContent, "\n")
 	startLine := max(1, line-contextWindow)
 	for j := startLine - 1; j < line-1 && j < len(lines); j++ {
 		if j >= 0 {

@@ -109,3 +109,26 @@ func TestFormatSourcegraphResultsErrorsAndNoResults(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, strings.HasSuffix(got, "No results found. Try a different query.\n"))
 }
+
+func TestFormatSourcegraphLineMatchesSharesFileContext(t *testing.T) {
+	t.Parallel()
+
+	lineMatches := []any{
+		map[string]any{"lineNumber": float64(2), "preview": "two"},
+		"not a match",
+		map[string]any{"lineNumber": float64(5), "preview": "five"},
+	}
+
+	var withContent strings.Builder
+	formatSourcegraphLineMatches(&withContent, lineMatches, "one\ntwo\nthree\nfour\nfive", 1)
+	require.Equal(t,
+		"```\n1| one\n2|  two\n3| three\n```\n\n"+
+			"```\n4| four\n5|  five\n```\n\n",
+		withContent.String())
+
+	var withoutContent strings.Builder
+	formatSourcegraphLineMatches(&withoutContent, lineMatches, "", 1)
+	require.Equal(t,
+		"```\n2| two\n```\n\n```\n5| five\n```\n\n",
+		withoutContent.String())
+}

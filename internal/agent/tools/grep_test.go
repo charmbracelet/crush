@@ -87,7 +87,8 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -147,7 +148,8 @@ func TestSearchImplementations(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -403,7 +405,8 @@ func TestMultipleMatchesPerFile(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -435,7 +438,8 @@ func TestColumnMatch(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -2,11 +2,9 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"cmp"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -16,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +22,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -161,10 +159,7 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 						fmt.Fprintf(&output, "%s:\n", filepath.ToSlash(match.path))
 					}
 					if match.lineNum > 0 {
-						lineText := match.lineText
-						if ansi.StringWidth(lineText) > maxGrepContentWidth {
-							lineText = ansi.Truncate(lineText, maxGrepContentWidth, "...")
-						}
+						lineText := truncateGrepLine(match.lineText)
 						if match.charNum > 0 {
 							fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
 						} else {
@@ -192,12 +187,14 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
-	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
+	matches, truncated, err := searchWithRipgrep(ctx, pattern, rootPath, include, limit)
+	if err == nil {
+		return matches, truncated, nil
+	}
+
+	matches, err = searchFilesWithRegex(pattern, rootPath, include)
 	if err != nil {
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
-		if err != nil {
-			return nil, false, err
-		}
+		return nil, false, err
 	}
 
 	// Use a stable sort so that the multiple matches a single file can
@@ -207,7 +204,7 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 		return matches[i].modTime.After(matches[j].modTime)
 	})
 
-	truncated := len(matches) > limit
+	truncated = len(matches) > limit
 	if truncated {
 		matches = matches[:limit]
 	}
@@ -215,10 +212,13 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 	return matches, truncated, nil
 }
 
-func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
+// searchWithRipgrep runs ripgrep and returns the newest limit matches,
+// ordered by file modification time (newest first), and whether more
+// matches were found than were returned.
+func searchWithRipgrep(ctx context.Context, pattern, path, include string, limit int) ([]grepMatch, bool, error) {
 	cmd := getRgSearchCmd(ctx, pattern, path, include)
 	if cmd == nil {
-		return nil, fmt.Errorf("ripgrep not found in $PATH")
+		return nil, false, fmt.Errorf("ripgrep not found in $PATH")
 	}
 
 	// Only add ignore files if they exist
@@ -229,43 +229,42 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		}
 	}
 
-	output, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return []grepMatch{}, nil
-		}
-		return nil, err
+	// A single file never contributes more than limit matches to the
+	// result, so cap the matching lines per file. The extra line keeps
+	// the truncated flag accurate when one file has more than limit.
+	if limit > 0 {
+		cmd.Args = append(cmd.Args, "--max-count", strconv.Itoa(limit+1))
 	}
 
-	var matches []grepMatch
-	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
-		if len(line) == 0 {
-			continue
-		}
-		var match ripgrepMatch
-		if err := json.Unmarshal(line, &match); err != nil {
-			continue
-		}
-		if match.Type != "match" {
-			continue
-		}
-		for _, m := range match.Data.Submatches {
-			fi, err := os.Stat(match.Data.Path.Text)
-			if err != nil {
-				continue // Skip files we can't access
-			}
-			matches = append(matches, grepMatch{
-				path:     match.Data.Path.Text,
-				modTime:  fi.ModTime(),
-				lineNum:  match.Data.LineNumber,
-				charNum:  m.Start + 1, // ensure 1-based
-				lineText: strings.TrimSpace(match.Data.Lines.Text),
-			})
-			// only get the first match of each line
-			break
-		}
+	// Stream ripgrep's output instead of buffering it: a broad pattern
+	// over a large tree can produce hundreds of MB of JSON, of which we
+	// only keep limit matches.
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, false, err
 	}
-	return matches, nil
+	if err := cmd.Start(); err != nil {
+		return nil, false, err
+	}
+
+	collector := newRipgrepCollector(limit, os.Stat)
+	readErr := collector.readFrom(stdout)
+
+	// Close our end so ripgrep cannot block on a full pipe if reading
+	// stopped early, then reap it.
+	_ = stdout.Close()
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return []grepMatch{}, false, nil
+		}
+		return nil, false, err
+	}
+	if readErr != nil {
+		return nil, false, readErr
+	}
+
+	matches, truncated := collector.results()
+	return matches, truncated, nil
 }
 
 type ripgrepMatch struct {

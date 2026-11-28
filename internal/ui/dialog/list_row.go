@@ -85,6 +85,13 @@ func (r *pickerRow) SetMatch(m fuzzy.Match) {
 	}
 }
 
+// HeightStable implements [list.HeightStable]. Focus, match and style
+// changes restyle a row without changing its line count, so filtering
+// does not have to render every row just to size the scrollbar.
+func (r *pickerRow) HeightStable() bool {
+	return true
+}
+
 // RefreshStyles implements [StyleRefresher].
 func (r *pickerRow) RefreshStyles() {
 	r.invalidate()

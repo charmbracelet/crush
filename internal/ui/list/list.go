@@ -277,9 +277,30 @@ func (l *List) itemHeight(idx int) int {
 		return 0
 	}
 	if entry == nil {
+		if h, ok := l.stableHeight(idx); ok {
+			return h
+		}
 		entry = l.render(idx, item)
 	}
 	return entry.height
+}
+
+// stableHeight returns the cached height of the item at idx when only its
+// version is out of date and the item reports that version bumps keep its
+// height (see [HeightStable]). The entry keeps its old version, so the
+// item still re-renders when drawn, and that render corrects the height
+// should it have changed after all.
+func (l *List) stableHeight(idx int) (int, bool) {
+	rawItem := l.items[idx]
+	hs, ok := rawItem.(HeightStable)
+	if !ok || !hs.HeightStable() {
+		return 0, false
+	}
+	entry := l.cache[rawItem]
+	if entry == nil || entry.width != l.width {
+		return 0, false
+	}
+	return entry.height, true
 }
 
 // drawEntry returns a current, drawable entry for the given index,

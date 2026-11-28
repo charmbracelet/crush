@@ -82,6 +82,18 @@ type Highlightable interface {
 	Highlight() (startLine, startCol, endLine, endCol int)
 }
 
+// HeightStable is implemented by items whose line count at a given width
+// does not change when their version does, such as picker rows whose match
+// or focus changes only restyle them. The list then reuses the last cached
+// height for scroll geometry instead of rendering the item again, and
+// renders it only when it is drawn. A height that does change anyway is
+// picked up on that draw.
+type HeightStable interface {
+	// HeightStable reports whether the item's height is stable across
+	// version bumps.
+	HeightStable() bool
+}
+
 // MouseClickable represents an item that can handle mouse click events.
 type MouseClickable interface {
 	// HandleMouseClick processes a mouse click event at the given coordinates.

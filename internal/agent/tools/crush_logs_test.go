@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -526,4 +527,128 @@ func TestCrushLogs_SourceVariations(t *testing.T) {
 	require.Contains(t, lines[0], "app.go:42")
 	require.Contains(t, lines[1], "handler.go") // String source gets basename too
 	require.Contains(t, lines[2], "unknown:0")  // Missing source
+}
+
+func TestReadLastLines_LinesAcrossChunkBoundaries(t *testing.T) {
+	t.Parallel()
+
+	// Lines of uneven length so that many of them straddle the 8KB chunks
+	// the file is read in.
+	var entries []map[string]any
+	for i := range 300 {
+		msg := fmt.Sprintf("Entry %d %s", i, strings.Repeat("y", 100+i*7%300))
+		entries = append(entries, makeLogEntry("INFO", msg, "app.go", i, nil))
+	}
+	logFile := createTestLogFile(t, entries)
+
+	for _, n := range []int{1, 50, 100, 300} {
+		got, err := readLastLines(logFile, n)
+		require.NoError(t, err)
+		require.Len(t, got, n)
+		for i, entry := range got {
+			require.Equal(t, entries[len(entries)-n+i]["msg"], entry["msg"])
+		}
+	}
+}
+
+func TestReadLastLines_SkipsHugeLines(t *testing.T) {
+	t.Parallel()
+	logFile := filepath.Join(t.TempDir(), "crush.log")
+
+	var want []string
+	var buf strings.Builder
+	writeEntry := func(entry map[string]any) {
+		line, err := json.Marshal(entry)
+		require.NoError(t, err)
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	for i := range 20 {
+		msg := fmt.Sprintf("Before %d", i)
+		want = append(want, msg)
+		writeEntry(makeLogEntry("INFO", msg, "app.go", i, nil))
+	}
+	// Debug logging puts whole request bodies on one line.
+	writeEntry(makeLogEntry("DEBUG", "HTTP Request", "http.go", 1, map[string]any{
+		"body": strings.Repeat("z", 5*maxLogLineSize),
+	}))
+	for i := range 10 {
+		msg := fmt.Sprintf("After %d", i)
+		want = append(want, msg)
+		writeEntry(makeLogEntry("INFO", msg, "app.go", i, nil))
+	}
+	require.NoError(t, os.WriteFile(logFile, []byte(buf.String()), 0o644))
+
+	got, err := readLastLines(logFile, 50)
+	require.NoError(t, err)
+	msgs := make([]string, len(got))
+	for i, entry := range got {
+		msgs[i], _ = entry["msg"].(string)
+	}
+	require.Equal(t, want, msgs)
+}
+
+func TestReadLastLines_MatchesWholeFileSplit(t *testing.T) {
+	t.Parallel()
+
+	// Line sizes around the chunk size and the line size limit.
+	sizes := []int{
+		0, 10, 8000, 8192, 9000, 20000,
+		maxLogLineSize - 200, maxLogLineSize + 200, 3 * maxLogLineSize,
+	}
+	for seed := range uint64(8) {
+		rng := rand.New(rand.NewPCG(seed, 1))
+		var buf strings.Builder
+		for i := range 40 {
+			size := sizes[rng.IntN(len(sizes))]
+			line, err := json.Marshal(makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i,
+				map[string]any{"pad": strings.Repeat("p", size)}))
+			require.NoError(t, err)
+			buf.Write(line)
+			buf.WriteByte('\n')
+		}
+		content := buf.String()
+		if rng.IntN(2) == 0 {
+			content += `{"msg": "Truncated`
+		}
+		logFile := filepath.Join(t.TempDir(), "crush.log")
+		require.NoError(t, os.WriteFile(logFile, []byte(content), 0o644))
+
+		var want []any
+		for line := range strings.SplitSeq(content, "\n") {
+			var entry map[string]any
+			if len(line) <= maxLogLineSize && json.Unmarshal([]byte(line), &entry) == nil {
+				want = append(want, entry["msg"])
+			}
+		}
+
+		for _, n := range []int{1, 10, 100} {
+			got, err := readLastLines(logFile, n)
+			require.NoError(t, err)
+			msgs := make([]any, len(got))
+			for i, entry := range got {
+				msgs[i] = entry["msg"]
+			}
+			require.Equal(t, want[max(len(want)-n, 0):], msgs, "seed %d, n %d", seed, n)
+		}
+	}
+}
+
+func TestReadLastLines_HugeLineAtFileStart(t *testing.T) {
+	t.Parallel()
+	logFile := filepath.Join(t.TempDir(), "crush.log")
+
+	big, err := json.Marshal(makeLogEntry("DEBUG", "Big", "http.go", 1, map[string]any{
+		"body": strings.Repeat("z", 2*maxLogLineSize),
+	}))
+	require.NoError(t, err)
+	small, err := json.Marshal(makeLogEntry("INFO", "Small", "app.go", 1, nil))
+	require.NoError(t, err)
+	content := string(big) + "\n" + string(small) + "\n"
+	require.NoError(t, os.WriteFile(logFile, []byte(content), 0o644))
+
+	got, err := readLastLines(logFile, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "Small", got[0]["msg"])
 }

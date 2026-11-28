@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -145,72 +146,85 @@ func readLastLines(filePath string, n int) ([]map[string]any, error) {
 	var entries []map[string]any
 	const chunkSize = 8192 // 8KB chunks
 
-	pos := stat.Size()
-	var remainder []byte
+	// addLine parses a complete line, newest first. Empty, oversized and
+	// malformed lines are skipped silently.
+	addLine := func(line []byte) {
+		if len(line) == 0 || len(line) > maxLogLineSize || len(entries) >= n {
+			return
+		}
+		var entry map[string]any
+		if err := json.Unmarshal(line, &entry); err == nil {
+			entries = append(entries, entry)
+		}
+	}
 
+	// A line can span several chunks. tail holds the pieces of it read so
+	// far, latest first, and tailLen their total size. Once the line grows
+	// past maxLogLineSize its pieces are dropped and skipping is set until
+	// the newline that starts it is found, so a huge line is never
+	// assembled or copied.
+	var tail [][]byte
+	tailLen := 0
+	skipping := false
+
+	// lineWithTail returns head followed by the pieces in tail.
+	lineWithTail := func(head []byte) []byte {
+		if len(tail) == 0 {
+			return head
+		}
+		line := make([]byte, 0, len(head)+tailLen)
+		line = append(line, head...)
+		for i := len(tail) - 1; i >= 0; i-- {
+			line = append(line, tail[i]...)
+		}
+		return line
+	}
+
+	pos := stat.Size()
 	for pos > 0 && len(entries) < n {
 		chunkStart := max(pos-chunkSize, 0)
 
-		chunkLen := int(pos - chunkStart)
-		if chunkLen == 0 {
-			break
-		}
-
-		_, err := file.Seek(chunkStart, 0)
+		_, err := file.Seek(chunkStart, io.SeekStart)
 		if err != nil {
 			return nil, err
 		}
 
-		chunk := make([]byte, chunkLen)
+		chunk := make([]byte, int(pos-chunkStart))
 		_, err = io.ReadFull(file, chunk)
 		if err != nil {
 			return nil, err
 		}
+		pos = chunkStart
 
-		// Combine with remainder from previous (earlier) chunk.
-		data := append(chunk, remainder...)
-
-		// Split into lines (without the final incomplete line if any).
-		lines := splitLines(data)
-
-		// Keep the incomplete line for next iteration.
-		if len(data) > 0 && data[len(data)-1] != '\n' {
-			remainder = lines[len(lines)-1]
-			lines = lines[:len(lines)-1]
-		} else {
-			remainder = nil
-		}
-
-		// Parse lines from end to start to get most recent first.
-		for i := len(lines) - 1; i >= 0; i-- {
-			if len(lines[i]) > maxLogLineSize {
-				// Skip oversized lines silently.
-				continue
-			}
-
-			// Try to parse as JSON.
-			var entry map[string]any
-			if err := json.Unmarshal(lines[i], &entry); err != nil {
-				// Skip malformed lines silently.
-				continue
-			}
-
-			entries = append(entries, entry)
-			if len(entries) >= n {
+		// Walk the chunk's newlines from the end. The bytes after each
+		// newline, followed by the tail, form a complete line.
+		end := len(chunk)
+		for len(entries) < n {
+			idx := bytes.LastIndexByte(chunk[:end], '\n')
+			if idx < 0 {
 				break
 			}
+			if skipping {
+				skipping = false
+			} else if tailLen+end-idx-1 <= maxLogLineSize {
+				addLine(lineWithTail(chunk[idx+1 : end]))
+			}
+			tail, tailLen = nil, 0
+			end = idx
 		}
 
-		pos = chunkStart
-	}
-
-	// Handle final remainder.
-	if len(remainder) > 0 && len(remainder) <= maxLogLineSize {
-		var entry map[string]any
-		if err := json.Unmarshal(remainder, &entry); err == nil {
-			if len(entries) < n {
-				entries = append(entries, entry)
-			}
+		// The bytes before the chunk's first newline start a line that
+		// begins earlier in the file, or at its very start.
+		head := chunk[:end]
+		switch {
+		case skipping:
+		case tailLen+len(head) > maxLogLineSize:
+			tail, tailLen, skipping = nil, 0, true
+		case pos == 0:
+			addLine(lineWithTail(head))
+		case len(head) > 0:
+			tail = append(tail, head)
+			tailLen += len(head)
 		}
 	}
 
@@ -220,22 +234,6 @@ func readLastLines(filePath string, n int) ([]map[string]any, error) {
 	}
 
 	return entries, nil
-}
-
-// splitLines splits data into lines without allocating strings.
-func splitLines(data []byte) [][]byte {
-	var lines [][]byte
-	start := 0
-	for i := range len(data) {
-		if data[i] == '\n' {
-			lines = append(lines, data[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(data) {
-		lines = append(lines, data[start:])
-	}
-	return lines
 }
 
 // formatLogEntries formats log entries into compact text format.

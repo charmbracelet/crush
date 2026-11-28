@@ -236,21 +236,11 @@ func (m *MCPAuth) title() string {
 // cells wide.
 func (m *MCPAuth) body(innerWidth int) string {
 	t := m.com.Styles
-	linkStyle := t.Dialog.OAuth.Link
 	server := m.currentServer()
 
-	block := func(s string) string {
-		return lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).Render(s)
-	}
-
-	// urlText renders the URL as a green hyperlink, matching the Hyper
-	// OAuth dialog's link style. No label, no box — just the URL, broken
-	// at fixed widths like the other sign-in dialogs.
+	// The URL alone, with no label: the title already says what it is.
 	urlText := func(u string) string {
-		if u == "" {
-			return ""
-		}
-		return block(wrappedLink(linkStyle, u, "id=mcp-oauth", innerWidth-2)) // -2 for padding
+		return authLinkBlock(t, innerWidth, u, "mcp-oauth", "")
 	}
 
 	switch m.state {

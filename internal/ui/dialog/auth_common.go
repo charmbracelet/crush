@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"image"
+	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // authDialogMaxWidth is the widest a sign-in dialog grows, frame included.
@@ -136,4 +138,83 @@ func finishKey(label string) key.Binding {
 		key.WithKeys("enter", "ctrl+y", "esc", "alt+esc"),
 		key.WithHelp("enter", label),
 	)
+}
+
+// authSpinnerLine renders a sign-in progress row: the spinner followed by
+// msg, sized to width and inset by one cell.
+func authSpinnerLine(t *styles.Styles, sp spinner.Model, width int, msg string) string {
+	status := t.Dialog.OAuth.StatusText
+	return status.
+		Width(width).
+		Padding(0, 1).
+		Render(t.Dialog.OAuth.Success.Render(sp.View()) + status.Render(msg))
+}
+
+// authSuccessBlock renders the sign-in confirmation, sized to width and
+// padded by one cell on every side.
+func authSuccessBlock(t *styles.Styles, width int) string {
+	return t.Dialog.OAuth.Success.
+		Width(width).
+		Padding(1).
+		Render("Authentication successful!")
+}
+
+// authErrorBlock renders a failed sign-in: an "Authentication failed."
+// header and, when there is one, the reason below it, flattened onto one
+// line and wrapped to width. Both are inset by one cell and framed by
+// blank lines.
+func authErrorBlock(t *styles.Styles, width int, reason string) string {
+	header := t.Dialog.OAuth.ErrorText.
+		Width(width).
+		Padding(0, 1).
+		Render("Authentication failed.")
+	reason = strings.Join(strings.Fields(reason), " ")
+	if reason == "" {
+		return lipgloss.JoinVertical(lipgloss.Left, "", header, "")
+	}
+	detail := t.Dialog.OAuth.StatusText.
+		Width(width).
+		Padding(0, 1).
+		Render(reason)
+	return lipgloss.JoinVertical(lipgloss.Left, "", header, "", detail, "")
+}
+
+// errText is the message of err, or "" when there is none.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// authLinkBlock renders url as a hyperlink broken to fit width, inset by
+// one cell, with label on the line above when there is one. id names the
+// hyperlink so terminals treat its lines as one link. An empty url
+// renders nothing.
+func authLinkBlock(t *styles.Styles, width int, url, id, label string) string {
+	if url == "" {
+		return ""
+	}
+	const inset = 1
+	text := wrappedLink(t.Dialog.OAuth.Link, url, "id="+id, width-2*inset)
+	style := lipgloss.NewStyle()
+	if label != "" {
+		text = label + "\n" + text
+		style = t.Dialog.OAuth.StatusText
+	}
+	return style.Width(width).Padding(0, inset).Render(text)
+}
+
+// wrappedLink renders url in style as a hyperlink broken at fixed
+// character widths of at most width cells, rather than at hyphens, so it
+// reads as one unbroken token. Each line carries its own hyperlink to
+// the full URL, so clicking any of them opens it. params are the OSC 8
+// hyperlink parameters, such as "id=oauth-verify".
+func wrappedLink(style lipgloss.Style, url, params string, width int) string {
+	link := style.Hyperlink(url, params)
+	lines := strings.Split(ansi.Hardwrap(url, max(1, width), false), "\n")
+	for i, line := range lines {
+		lines[i] = link.Render(line)
+	}
+	return strings.Join(lines, "\n")
 }

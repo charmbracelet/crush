@@ -303,7 +303,6 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *OAuth) body(innerWidth int) (string, *tea.Cursor) {
 	var (
 		t               = m.com.Styles
-		linkStyle       = t.Dialog.OAuth.Link
 		statusTextStyle = t.Dialog.OAuth.StatusText
 	)
 
@@ -337,11 +336,7 @@ func (m *OAuth) body(innerWidth int) (string, *tea.Cursor) {
 			elements = append(elements, codeBox, "")
 		}
 
-		link := wrappedLink(linkStyle, m.verificationURL, "id=oauth-verify", innerWidth-2) // -2 for padding
-		url := statusTextStyle.
-			Width(innerWidth).
-			Padding(0, 1).
-			Render("Browser not opening? Pay a visit to:\n" + link)
+		url := authLinkBlock(t, innerWidth, m.verificationURL, "oauth-verify", "Browser not opening? Pay a visit to:")
 
 		waiting := authSpinnerLine(t, m.spinner, innerWidth, flow.waiting)
 
@@ -540,13 +535,4 @@ func (m *OAuth) confirmAndSelectModel() Action {
 		Model:     m.model,
 		ModelType: m.modelType,
 	}
-}
-
-// errText flattens an error into one line of text for display, or ""
-// when there is no error.
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return strings.Join(strings.Fields(err.Error()), " ")
 }

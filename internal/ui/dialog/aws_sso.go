@@ -138,10 +138,7 @@ func (m *AWSSSO) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // body renders the dialog's content for the current state, innerWidth
 // cells wide.
 func (m *AWSSSO) body(innerWidth int) string {
-	var (
-		t         = m.com.Styles
-		linkStyle = t.Dialog.OAuth.Link
-	)
+	t := m.com.Styles
 
 	switch m.state {
 	case awsSSOStateWaiting:
@@ -149,10 +146,7 @@ func (m *AWSSSO) body(innerWidth int) string {
 			// URL found; show it and wait for auth to complete.
 			// Show the whole URL, broken at fixed widths: the user code
 			// sits at its end. Each piece keeps the hyperlink.
-			urlBox := lipgloss.NewStyle().
-				Width(innerWidth).
-				Padding(0, 1).
-				Render(wrappedLink(linkStyle, m.url, "id=aws-sso-verify", innerWidth-2)) // -2 for padding
+			urlBox := authLinkBlock(t, innerWidth, m.url, "aws-sso-verify", "")
 
 			waiting := authSpinnerLine(t, m.spinner, innerWidth, "Waiting for authentication...")
 

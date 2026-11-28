@@ -42,6 +42,27 @@ type ShellItem struct {
 	sty             *styles.Styles
 	pending         bool
 	anim            *anim.Anim
+
+	// pendingBody caches a pending item's render without the spinner
+	// line, so a spinner frame does not reprocess the whole output.
+	pendingBody    string
+	pendingBodyKey shellBodyKey
+}
+
+// shellBodyKey is everything a pending ShellItem's render depends on
+// besides the spinner.
+type shellBodyKey struct {
+	outputLen int
+	width     int
+	xOffset   int
+	focused   bool
+	expanded  bool
+}
+
+// clearCache drops the cached renders, the pending body included.
+func (s *ShellItem) clearCache() {
+	s.cachedMessageItem.clearCache()
+	s.pendingBody = ""
 }
 
 var (
@@ -99,6 +120,7 @@ func (s *ShellItem) Complete(output string, exitCode int) {
 	s.replaceOutput(output)
 	s.exitCode = exitCode
 	s.pending = false
+	s.pendingBody = ""
 	s.Bump()
 }
 
@@ -197,6 +219,18 @@ func (s *ShellItem) ToggleExpanded() bool {
 
 func (s *ShellItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)
+
+	// Output only grows while pending, so its length identifies it.
+	bodyKey := shellBodyKey{
+		outputLen: s.output.Len(),
+		width:     cappedWidth,
+		xOffset:   s.xOffset,
+		focused:   s.focused,
+		expanded:  s.expandedContent,
+	}
+	if s.pending && s.pendingBody != "" && s.pendingBodyKey == bodyKey {
+		return s.pendingBody + "\n" + s.anim.Render()
+	}
 
 	cmd := strings.ReplaceAll(s.command, "\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
@@ -311,6 +345,10 @@ func (s *ShellItem) RawRender(width int) string {
 
 	// While streaming, keep the spinner pinned below the latest output.
 	if s.pending {
+		// The render clamps xOffset, so key the body on the clamped
+		// value it was drawn with.
+		bodyKey.xOffset = s.xOffset
+		s.pendingBody, s.pendingBodyKey = result, bodyKey
 		result += "\n" + s.anim.Render()
 	}
 

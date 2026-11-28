@@ -714,6 +714,52 @@ func TestClientWorkspace_AgentModelReportsMainAgent(t *testing.T) {
 	require.Equal(t, config.AgentPlan, ws.AgentModel().Agent)
 }
 
+// AgentStatus answers readiness, busy state and model from one agent info
+// request rather than one request each.
+func TestClientWorkspace_AgentStatus(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ready", func(t *testing.T) {
+		t.Parallel()
+		var requests atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			require.Equal(t, "/v1/workspaces/ws-1/agent", r.URL.Path)
+			require.NoError(t, json.NewEncoder(w).Encode(proto.AgentInfo{
+				IsReady: true, IsBusy: true, MainAgent: config.AgentPlan,
+			}))
+		}))
+		t.Cleanup(srv.Close)
+		u, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+		c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+		require.NoError(t, err)
+		ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+		st := ws.AgentStatus()
+		require.NoError(t, st.ReadyErr)
+		require.True(t, st.Busy)
+		require.Equal(t, config.AgentPlan, st.Model.Agent)
+		require.Equal(t, int32(1), requests.Load())
+	})
+
+	t.Run("not initialized", func(t *testing.T) {
+		t.Parallel()
+		ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: false, IsBusy: true})
+		st := ws.AgentStatus()
+		require.ErrorIs(t, st.ReadyErr, ErrAgentNotInitialized)
+		require.False(t, st.Busy)
+	})
+
+	t.Run("server unreachable", func(t *testing.T) {
+		t.Parallel()
+		c, err := client.NewClient(t.TempDir(), "tcp", "127.0.0.1:1")
+		require.NoError(t, err)
+		ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+		require.ErrorIs(t, ws.AgentStatus().ReadyErr, ErrServerUnreachable)
+	})
+}
+
 // agentInfoWorkspace returns a ClientWorkspace whose server answers the
 // agent-info endpoint with the given info.
 func agentInfoWorkspace(t *testing.T, info proto.AgentInfo) *ClientWorkspace {

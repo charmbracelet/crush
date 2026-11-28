@@ -185,17 +185,35 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	sessionID := m.currentSessionID()
 	return func() tea.Msg {
 		st := busyStateMsg{gen: gen, forSession: sessionID}
-		if ws.AgentIsReady() {
-			st.ready = true
-			st.agentBusy = ws.AgentIsBusy()
-			st.model = ws.AgentModel()
-			if sessionID != "" {
-				st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
-			}
+		st.ready, st.agentBusy, st.model = probeAgent(ws)
+		if st.ready && sessionID != "" {
+			st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
 		}
 		st.permMode = ws.PermissionMode()
 		return st
 	}
+}
+
+// agentStatusProber is implemented by workspaces that can report the
+// agent's readiness, busy state and model in one round trip.
+type agentStatusProber interface {
+	AgentStatus() workspace.AgentStatus
+}
+
+// probeAgent reports whether the agent is ready and, when it is, whether
+// it is busy and which model it runs. It runs off the Update goroutine.
+func probeAgent(ws workspace.Workspace) (ready, busy bool, model workspace.AgentModel) {
+	if p, ok := ws.(agentStatusProber); ok {
+		s := p.AgentStatus()
+		if s.ReadyErr != nil {
+			return false, false, workspace.AgentModel{}
+		}
+		return true, s.Busy, s.Model
+	}
+	if !ws.AgentIsReady() {
+		return false, false, workspace.AgentModel{}
+	}
+	return true, ws.AgentIsBusy(), ws.AgentModel()
 }
 
 // updateAgentModelCmd sequences a coordinator model rebuild

@@ -115,6 +115,14 @@ type LSPEvent struct {
 	DiagnosticCount int
 }
 
+// AgentStatus is the agent's readiness, busy state and model taken from a
+// single snapshot. Busy and Model are only set when ReadyErr is nil.
+type AgentStatus struct {
+	ReadyErr error
+	Busy     bool
+	Model    AgentModel
+}
+
 // AgentModel holds the active agent and its model, as exposed to the UI.
 type AgentModel struct {
 	// Agent names the active agent (config.AgentCoder or config.AgentPlan),

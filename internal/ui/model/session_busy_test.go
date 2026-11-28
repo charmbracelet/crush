@@ -169,7 +169,7 @@ func (w *countingWorkspace) resetCounters() {
 
 // newBusyUI builds a UI wired to the stub workspace with an active session
 // "s1", enough state for Update to run end to end.
-func newBusyUI(ws *countingWorkspace) *UI {
+func newBusyUI(ws workspace.Workspace) *UI {
 	com := common.DefaultCommon(ws)
 	return &UI{
 		com:         com,
@@ -742,6 +742,43 @@ func TestBusyRefreshCarriesReadyAndModel(t *testing.T) {
 	sel := m.selectedLargeModel()
 	require.NotNil(t, sel)
 	require.Equal(t, "test-model", sel.ModelCfg.Model, "the probe must land the model in the cache")
+}
+
+// statusWorkspace answers the busy probe's agent questions in one call, as
+// the client/server workspace does.
+type statusWorkspace struct {
+	countingWorkspace
+	status      workspace.AgentStatus
+	statusCalls int
+}
+
+func (w *statusWorkspace) AgentStatus() workspace.AgentStatus {
+	w.statusCalls++
+	return w.status
+}
+
+// TestBusyRefreshUsesSingleAgentStatus: a workspace that reports the
+// agent's status in one round trip is asked once per probe instead of
+// once each for readiness, busy state and model.
+func TestBusyRefreshUsesSingleAgentStatus(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &statusWorkspace{status: workspace.AgentStatus{
+		Busy:  true,
+		Model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "test-model", Provider: "prov"}},
+	}}
+	m := newBusyUI(ws)
+
+	_, cmd := m.Update(plainMsg{}) // stale caches: the backstop dispatches
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.statusCalls)
+	require.Zero(t, ws.agentBusyCalls)
+	require.Zero(t, ws.modelCalls)
+	require.True(t, m.agentReady)
+	sel := m.selectedLargeModel()
+	require.NotNil(t, sel)
+	require.Equal(t, "test-model", sel.ModelCfg.Model)
 }
 
 // TestAgentModelChangedRefreshesModel: after a model change

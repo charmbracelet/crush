@@ -52,3 +52,24 @@ func TestStaleStatusTimerThroughUpdate(t *testing.T) {
 
 	require.Equal(t, "what the user is here to read", m.status.msg.Msg)
 }
+
+// TestStatusDismissOnlyClearsItsOwnMessage checks that dismissing a keyed
+// message leaves alone whatever replaced it, and that keyed messages
+// outlast the default TTL.
+func TestStatusDismissOnlyClearsItsOwnMessage(t *testing.T) {
+	t.Parallel()
+
+	s := NewStatus(common.DefaultCommon(&countingWorkspace{ready: true}), nil)
+
+	s.ShowKeyed("touch", util.InfoMsg{Type: util.InfoTypeWarn, Msg: "touch your key"})
+	require.Greater(t, s.msg.TTL, DefaultStatusTTL)
+	s.Dismiss("other")
+	require.Equal(t, "touch your key", s.msg.Msg, "another key must not dismiss it")
+	s.Dismiss("touch")
+	require.True(t, s.msg.IsEmpty())
+
+	s.ShowKeyed("touch", util.InfoMsg{Type: util.InfoTypeWarn, Msg: "touch your key"})
+	s.Show(util.InfoMsg{Type: util.InfoTypeInfo, Msg: "newer"})
+	s.Dismiss("touch")
+	require.Equal(t, "newer", s.msg.Msg, "a replaced keyed message must not clear its successor")
+}

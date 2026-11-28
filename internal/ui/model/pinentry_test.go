@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,4 +58,17 @@ func TestHandlePinentryEvent(t *testing.T) {
 		require.True(t, ui.pinentryTouchPending)
 		require.Equal(t, pinentryTouchMessage, ui.status.msg.Msg)
 	})
+}
+
+// TestPinentryTouchClearKeepsNewerMessage checks that the touch landing
+// does not wipe a status message that replaced the touch hint.
+func TestPinentryTouchClearKeepsNewerMessage(t *testing.T) {
+	t.Parallel()
+
+	com := &common.Common{Workspace: &testWorkspace{}, Styles: &styles.Styles{}}
+	ui := &UI{com: com, status: NewStatus(com, nil)}
+	ui.handlePinentryEvent(pinentry.Event{TouchPending: true})
+	ui.status.Show(util.InfoMsg{Type: util.InfoTypeInfo, Msg: "newer"})
+	ui.handlePinentryEvent(pinentry.Event{})
+	require.Equal(t, "newer", ui.status.msg.Msg)
 }

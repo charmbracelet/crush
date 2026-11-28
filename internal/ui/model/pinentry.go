@@ -14,6 +14,9 @@ import (
 // security key touch after the passphrase dialog closed.
 const pinentryTouchMessage = "GPG is waiting: touch your security key to continue"
 
+// pinentryTouchKey keys the GPG security key touch hint in the status bar.
+const pinentryTouchKey = "gpg-touch"
+
 // handlePinentryEvent applies a pinentry watcher event: it hands the
 // terminal over while a terminal-based pinentry dialog is up, takes it
 // back once the dialog closes, and surfaces a status hint while gpg waits
@@ -42,12 +45,12 @@ func (m *UI) handlePinentryEvent(ev pinentry.Event) tea.Cmd {
 	if ev.TouchPending != m.pinentryTouchPending {
 		m.pinentryTouchPending = ev.TouchPending
 		if ev.TouchPending {
-			cmds = append(cmds, m.status.Show(util.InfoMsg{
+			cmds = append(cmds, m.status.ShowKeyed(pinentryTouchKey, util.InfoMsg{
 				Type: util.InfoTypeWarn,
 				Msg:  pinentryTouchMessage,
 			}))
 		} else {
-			m.status.ClearInfoMsg(m.status.msgSeq)
+			m.status.Dismiss(pinentryTouchKey)
 		}
 	}
 

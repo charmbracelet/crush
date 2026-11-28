@@ -17,6 +17,10 @@ import (
 // DefaultStatusTTL is the default time-to-live for status messages.
 const DefaultStatusTTL = 5 * time.Second
 
+// keyedStatusTTL backstops messages shown with [Status.ShowKeyed], which
+// normally stay up until their owner dismisses them.
+const keyedStatusTTL = time.Hour
+
 // badgeLeftInset is the number of cells between the status bar's left edge
 // and the mode badge.
 const badgeLeftInset = 1
@@ -31,6 +35,9 @@ type Status struct {
 
 	// msgSeq identifies the message on screen; expiry timers carry it.
 	msgSeq uint64
+	// keyed maps the key of each message shown with ShowKeyed to its seq,
+	// so Dismiss only clears it while it is still the one on screen.
+	keyed map[string]uint64
 
 	// inputMode and permMode drive the mode badge shown before the help
 	// hints.
@@ -68,6 +75,31 @@ func (s *Status) ClearInfoMsg(seq uint64) {
 	if seq == s.msgSeq {
 		s.msg = util.InfoMsg{}
 	}
+}
+
+// ShowKeyed puts msg on screen until [Status.Dismiss] is called with the
+// same key, with an hour as a backstop when msg carries no TTL.
+func (s *Status) ShowKeyed(key string, msg util.InfoMsg) tea.Cmd {
+	if msg.TTL <= 0 {
+		msg.TTL = keyedStatusTTL
+	}
+	cmd := s.Show(msg)
+	if s.keyed == nil {
+		s.keyed = make(map[string]uint64)
+	}
+	s.keyed[key] = s.msgSeq
+	return cmd
+}
+
+// Dismiss clears the message shown under key, unless another message has
+// replaced it since.
+func (s *Status) Dismiss(key string) {
+	seq, ok := s.keyed[key]
+	if !ok {
+		return
+	}
+	delete(s.keyed, key)
+	s.ClearInfoMsg(seq)
 }
 
 // SetMode sets the input mode and permission mode used for the mode badge.

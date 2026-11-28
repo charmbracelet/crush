@@ -1,8 +1,6 @@
 package model
 
 import (
-	"time"
-
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/crush/internal/sshaskpass"
@@ -10,11 +8,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
-
-// sshTouchWarningTTL bounds how long the security key touch warning
-// stays up. It normally clears as soon as the touch lands; this is only
-// a backstop matching how long the prompt server holds a request.
-const sshTouchWarningTTL = 10 * time.Minute
 
 // handleSSHPrompt routes an SSH askpass request: a passive security key
 // touch is surfaced as a warning until it lands, while
@@ -28,16 +21,11 @@ func (m *UI) handleSSHPrompt(req sshaskpass.PromptRequest) []tea.Cmd {
 		// The physical touch is the approval, so there is nothing to
 		// answer: show a warning until the prompt server reports the
 		// touch landed (see handleSSHNotification).
-		cmds = append(cmds, m.status.Show(util.InfoMsg{
+		cmds = append(cmds, m.status.ShowKeyed(sshTouchKey(req.ID), util.InfoMsg{
 			Type: util.InfoTypeWarn,
 			Msg:  req.Message,
-			TTL:  sshTouchWarningTTL,
 		}))
-		m.sshTouchID, m.sshTouchSeq = req.ID, m.status.msgSeq
-		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
-			Message: req.Message,
-		}); cmd != nil {
+		if cmd := m.sendNotification(sshWaitingNotification(req)); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return cmds
@@ -66,13 +54,15 @@ func (m *UI) openSSHDialog(req sshaskpass.PromptRequest) tea.Cmd {
 // resolved, covering the case where another subscriber (or a cancelled
 // ssh command) resolved it first.
 func (m *UI) handleSSHNotification(n sshaskpass.Notification) {
-	if n.RequestID != "" && n.RequestID == m.sshTouchID {
-		m.status.ClearInfoMsg(m.sshTouchSeq)
-		m.sshTouchID = ""
-	}
+	m.status.Dismiss(sshTouchKey(n.RequestID))
 	if d, ok := m.dialog.Dialog(dialog.SSHID).(*dialog.SSH); ok && d.RequestID() == n.RequestID {
 		m.dialog.CloseDialog(dialog.SSHID)
 	}
+}
+
+// sshTouchKey keys the status warning for a pending security key touch.
+func sshTouchKey(requestID string) string {
+	return "ssh-touch:" + requestID
 }
 
 // sshWaitingMessage describes the pending prompt for desktop
@@ -84,8 +74,6 @@ func sshWaitingMessage(req sshaskpass.PromptRequest) string {
 	switch req.Kind {
 	case sshaskpass.KindConfirm:
 		return "SSH is waiting for you to confirm the security key or host"
-	case sshaskpass.KindTouch:
-		return "Touch your security key to continue"
 	default:
 		return "SSH needs your password to continue"
 	}

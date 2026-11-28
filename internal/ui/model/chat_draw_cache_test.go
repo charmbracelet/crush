@@ -25,6 +25,50 @@ func renderToBuffer(t *testing.T, c *Chat, w, h int) string {
 	return scr.Render()
 }
 
+// drawTwice draws the chat twice so the second sighting of the same list
+// output builds the decoded cache.
+func drawTwice(t *testing.T, c *Chat, w, h int) string {
+	t.Helper()
+	_ = renderToBuffer(t, c, w, h)
+	return renderToBuffer(t, c, w, h)
+}
+
+// TestChatDrawCache_FirstSightingDrawsDirectly asserts that a list output
+// seen for the first time is drawn directly, without building the decoded
+// cache: while streaming the output changes every frame and the cache
+// would never be hit. The second sighting builds it.
+func TestChatDrawCache_FirstSightingDrawsDirectly(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.chat.SetMessages(
+		testMessageItem{id: "a", text: "alpha"},
+		testMessageItem{id: "b", text: "beta"},
+	)
+	u.updateLayoutAndSize()
+
+	w, h := 80, 20
+	first := renderToBuffer(t, u.chat, w, h)
+	require.Nil(t, u.chat.drawCache, "first sighting must not build the cache")
+	require.Equal(t, freshStyledRender(u.chat.list.Render(), w, h), first)
+
+	second := renderToBuffer(t, u.chat, w, h)
+	require.NotNil(t, u.chat.drawCache, "second sighting must build the cache")
+	require.Equal(t, first, second)
+
+	// A stream of distinct outputs never rebuilds the cache.
+	cache := u.chat.drawCache
+	for i := range 5 {
+		u.chat.SetMessages(
+			testMessageItem{id: "x", text: "tick " + strconv.Itoa(i)},
+		)
+		u.updateLayoutAndSize()
+		got := renderToBuffer(t, u.chat, w, h)
+		require.Same(t, cache, u.chat.drawCache)
+		require.Equal(t, freshStyledRender(u.chat.list.Render(), w, h), got)
+	}
+}
+
 // TestChatDrawCache_HitOnIdenticalRender asserts that two consecutive Draws
 // against the same list output reuse the same chatDrawCache rather than
 // allocating a fresh one. Both the wrapper pointer and the embedded
@@ -41,8 +85,8 @@ func TestChatDrawCache_HitOnIdenticalRender(t *testing.T) {
 	u.updateLayoutAndSize()
 
 	w, h := 80, 20
-	_ = renderToBuffer(t, u.chat, w, h)
-	require.NotNil(t, u.chat.drawCache, "first draw should populate cache")
+	_ = drawTwice(t, u.chat, w, h)
+	require.NotNil(t, u.chat.drawCache, "second draw should populate cache")
 	firstCache := u.chat.drawCache
 	firstBuf := u.chat.drawCache.buf.RenderBuffer
 
@@ -66,7 +110,7 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	u.updateLayoutAndSize()
 
 	w, h := 80, 20
-	_ = renderToBuffer(t, u.chat, w, h)
+	_ = drawTwice(t, u.chat, w, h)
 	require.NotNil(t, u.chat.drawCache)
 	firstCache := u.chat.drawCache
 
@@ -76,7 +120,7 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	)
 	u.updateLayoutAndSize()
 
-	got := renderToBuffer(t, u.chat, w, h)
+	got := drawTwice(t, u.chat, w, h)
 	require.NotSame(t, firstCache, u.chat.drawCache,
 		"changed rendered string must replace the cache entry")
 
@@ -102,7 +146,7 @@ func TestChatDrawCache_ReusedAcrossDifferentArea(t *testing.T) {
 	u.updateLayoutAndSize()
 
 	w, h := 80, 20
-	_ = renderToBuffer(t, u.chat, w, h)
+	_ = drawTwice(t, u.chat, w, h)
 	require.NotNil(t, u.chat.drawCache)
 	firstCache := u.chat.drawCache
 	firstBuf := u.chat.drawCache.buf.RenderBuffer
@@ -141,7 +185,7 @@ func TestChatDrawCache_BoundedSize(t *testing.T) {
 			testMessageItem{id: "x", text: "tick " + strconv.Itoa(i)},
 		)
 		u.updateLayoutAndSize()
-		_ = renderToBuffer(t, u.chat, w, h)
+		_ = drawTwice(t, u.chat, w, h)
 		require.NotNil(t, u.chat.drawCache)
 		require.Equal(t, u.chat.list.Render(), u.chat.drawCache.rendered,
 			"cache.rendered must always match the most recent list output")
@@ -188,6 +232,7 @@ func TestChatDrawCache_InvalidatedByWidthMethodSwap(t *testing.T) {
 		Method:       ansi.GraphemeWidth,
 	}
 	u.chat.Draw(scrA, uv.Rect(0, 0, w, h))
+	u.chat.Draw(scrA, uv.Rect(0, 0, w, h))
 	require.NotNil(t, u.chat.drawCache)
 	require.Equal(t, ansi.GraphemeWidth, u.chat.drawCache.method)
 	firstCache := u.chat.drawCache
@@ -198,6 +243,9 @@ func TestChatDrawCache_InvalidatedByWidthMethodSwap(t *testing.T) {
 		RenderBuffer: uv.NewRenderBuffer(w, h),
 		Method:       ansi.WcWidth,
 	}
+	u.chat.Draw(scrB, uv.Rect(0, 0, w, h))
+	require.Same(t, firstCache, u.chat.drawCache,
+		"first sighting under the new method must not rebuild the cache")
 	u.chat.Draw(scrB, uv.Rect(0, 0, w, h))
 	require.NotSame(t, firstCache, u.chat.drawCache,
 		"width method change must invalidate the cache")

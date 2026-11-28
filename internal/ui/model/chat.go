@@ -120,6 +120,13 @@ type Chat struct {
 	// (docs/notes/2026-05-12-chat-rendering-perf.md §4.8). Bounded to one
 	// entry; invalidated implicitly by string inequality on the next Draw.
 	drawCache *chatDrawCache
+	// drawCandidate and drawCandidateMethod remember the last rendered
+	// string that was drawn directly. The decoded cache is only built when
+	// the same string is drawn a second time: while streaming or animating
+	// the output changes every frame, and building a cache that is never
+	// hit costs several times a direct draw.
+	drawCandidate       string
+	drawCandidateMethod ansi.Method
 
 	// Scrollbar visibility state
 	scrollbarVisible bool
@@ -235,12 +242,25 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 		// to the uncached path so behavior matches upstream exactly.
 		uv.NewStyledString(rendered).Draw(scr, area)
 	} else {
-		if m.drawCache == nil ||
-			m.drawCache.rendered != rendered ||
-			m.drawCache.method != method {
+		switch {
+		case m.drawCache != nil &&
+			m.drawCache.rendered == rendered &&
+			m.drawCache.method == method:
+			drawCachedBuffer(scr, area, m.drawCache.buf)
+		case m.drawCandidate == rendered && m.drawCandidateMethod == method:
+			// Second sighting of the same output: decode it once and
+			// serve the following identical frames from the cache.
 			m.drawCache = newChatDrawCache(rendered, method)
+			m.drawCandidate = ""
+			drawCachedBuffer(scr, area, m.drawCache.buf)
+		default:
+			// First sighting: the output may change on the next frame
+			// (streaming, spinners), so draw it directly and only
+			// remember it.
+			uv.NewStyledString(rendered).Draw(scr, area)
+			m.drawCandidate = rendered
+			m.drawCandidateMethod = method
 		}
-		drawCachedBuffer(scr, area, m.drawCache.buf)
 	}
 
 	// Never drawn while resizing.

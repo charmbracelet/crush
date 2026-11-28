@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"regexp"
 	"slices"
@@ -34,8 +33,6 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
-	"charm.land/lipgloss/v2"
-	"charm.land/tone"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -1328,43 +1325,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
-		var fantasyErr *fantasy.Error
-		var providerErr *fantasy.ProviderError
-		var requestTimedOutErr *requestTimeoutError
-		const defaultTitle = "Provider Error"
-		linkStyle := lipgloss.NewStyle().Foreground(tone.Guac).Underline(true)
-		if isCancelErr {
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-		} else if errors.Is(err, errRefused) {
-			// Every retry was refused; keep the refusal banner rather than
-			// reporting a generic provider error.
-			currentAssistant.AddFinish(message.FinishReasonContentFilter, "", "")
-		} else if errors.As(err, &requestTimedOutErr) {
-			// Checked before the provider branches so a deadline our own
-			// request timeout imposed is never reported as a provider error.
-			currentAssistant.AddFinish(message.FinishReasonError, "Request timed out", requestTimedOutErr.userMessage())
-		} else if largeModel.OAuth && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
-			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", signInAgainMessage(largeModel))
-		} else if errors.As(err, &providerErr) {
-			if providerErr.Message == "The requested model is not supported." {
-				url := "https://github.com/settings/copilot/features"
-				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
-				currentAssistant.AddFinish(
-					message.FinishReasonError,
-					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
-				)
-			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-			}
-		} else if errors.As(err, &fantasyErr) {
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
-		} else if fantasy.IsTransportError(err) {
-			wrapped := fantasy.NewTransportError(err)
-			currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
-		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
-		}
+		reason, title, detail := turnFailure(err, largeModel, isCancelErr)
+		currentAssistant.AddFinish(reason, title, detail)
 		updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
 		if updateErr != nil {
 			return nil, updateErr
@@ -2659,12 +2621,4 @@ func sanitizeToolInput(toolName, toolCallID, input string) (string, bool) {
 		return "{}", true
 	}
 	return input, false
-}
-
-// signInAgainMessage tells the user how to replace a credential the provider
-// refused after a refresh.
-func signInAgainMessage(m Model) string {
-	name := cmp.Or(m.ProviderName, m.ModelCfg.Provider)
-	return fmt.Sprintf("Please sign in to %s again. You can also run \"crush login %s --force\".",
-		name, m.ModelCfg.Provider)
 }

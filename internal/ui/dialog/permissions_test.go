@@ -369,3 +369,53 @@ func TestPermissions_ShortWindowFavorsContent(t *testing.T) {
 		require.Contains(t, out, want)
 	}
 }
+
+// TestPermissions_ContentMemoizedPerWidth verifies non-diff content is
+// rendered once per width instead of on every frame, stays bounded, and is
+// dropped when the styles change.
+func TestPermissions_ContentMemoizedPerWidth(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s, Workspace: permissionsTestWorkspace{}}
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = "echo line " + strconv.Itoa(i)
+	}
+	p := NewPermissions(com, permission.PermissionRequest{
+		ID: "p", ToolName: tools.BashToolName, Path: "/tmp",
+		Params: tools.BashPermissionsParams{Command: strings.Join(lines, "\n")},
+	})
+
+	p.Draw(uv.NewScreenBuffer(100, 30), image.Rect(0, 0, 100, 30))
+	require.NotEmpty(t, p.contentCache)
+	require.LessOrEqual(t, len(p.contentCache), maxContentCacheWidths)
+	for w, out := range p.contentCache {
+		require.Equal(t, p.renderToolContent(w), out)
+	}
+
+	// A marker in the cache shows later frames reuse it.
+	for w := range p.contentCache {
+		p.contentCache[w] = "cached"
+	}
+	p.Draw(uv.NewScreenBuffer(100, 30), image.Rect(0, 0, 100, 30))
+	for w := range p.contentCache {
+		require.Equal(t, "cached", p.renderContent(w))
+	}
+
+	// Other sizes replace the cache rather than growing it.
+	for _, w := range []int{60, 70, 80, 90} {
+		p.Draw(uv.NewScreenBuffer(w, 30), image.Rect(0, 0, w, 30))
+		require.LessOrEqual(t, len(p.contentCache), maxContentCacheWidths)
+	}
+
+	p.RefreshStyles()
+	require.Empty(t, p.contentCache)
+
+	// Diffs keep their own viewport-keyed cache.
+	d := NewPermissions(com, permission.PermissionRequest{
+		ID: "p", ToolName: tools.EditToolName, Path: "/tmp",
+		Params: tools.EditPermissionsParams{FilePath: "/tmp/a.go", OldContent: "a\nb\n", NewContent: "a\nc\n"},
+	})
+	d.Draw(uv.NewScreenBuffer(100, 30), image.Rect(0, 0, 100, 30))
+	require.Empty(t, d.contentCache)
+}

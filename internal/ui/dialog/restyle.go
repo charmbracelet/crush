@@ -33,6 +33,7 @@ func (p *Permissions) RefreshStyles() {
 	// The viewport keeps the rendered content, diffs included, until it
 	// is marked dirty.
 	p.viewportDirty = true
+	p.contentCache = nil
 }
 
 // RefreshStyles implements [StyleRefresher].

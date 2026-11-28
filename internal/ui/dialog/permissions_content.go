@@ -10,7 +10,32 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 )
 
+// maxContentCacheWidths is how many widths of rendered non-diff content
+// are kept. Draw renders at most two per size: the full content width and
+// one column narrower when a scrollbar is needed.
+const maxContentCacheWidths = 2
+
+// renderContent renders the request content at the given width. Draw calls
+// it on every frame, so non-diff content, which only changes with the
+// width or the styles, is memoized per width. Diffs keep their own cache,
+// keyed on the viewport state.
 func (p *Permissions) renderContent(width int) string {
+	if p.hasDiffView() {
+		return p.renderToolContent(width)
+	}
+	if out, ok := p.contentCache[width]; ok {
+		return out
+	}
+	out := p.renderToolContent(width)
+	if p.contentCache == nil || len(p.contentCache) >= maxContentCacheWidths {
+		p.contentCache = make(map[int]string, maxContentCacheWidths)
+	}
+	p.contentCache[width] = out
+	return out
+}
+
+// renderToolContent renders the request content for its tool.
+func (p *Permissions) renderToolContent(width int) string {
 	switch p.permission.ToolName {
 	case tools.BashToolName:
 		return p.renderBashContent(width)

@@ -37,6 +37,9 @@ type Permissions struct {
 	viewport      viewport.Model
 	viewportDirty bool // true when viewport content needs to be re-rendered
 	viewportWidth int
+	// contentCache holds rendered non-diff content by width; see
+	// renderContent.
+	contentCache map[int]string
 
 	// Diff view state.
 	diffSplitMode        *bool // nil means use default based on width

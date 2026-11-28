@@ -12,7 +12,8 @@ import (
 )
 
 // countBumps calls Advance n times and reports how many calls bumped the
-// item's version.
+// item's version. Like the list, it re-renders the item after each change,
+// so a clock tick-over bumps once instead of on every later frame.
 func countBumps(t *testing.T, item ToolMessageItem, n int) int {
 	t.Helper()
 	a := item.(Animatable)
@@ -24,6 +25,7 @@ func countBumps(t *testing.T, item ToolMessageItem, n int) int {
 		require.Equal(t, changed, v.Version() > before, "Advance must bump exactly when it reports a change")
 		if changed {
 			bumps++
+			item.Render(100)
 		}
 	}
 	return bumps

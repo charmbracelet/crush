@@ -45,7 +45,6 @@ type APIKeyInput struct {
 
 	keyMap struct {
 		Submit key.Binding
-		Close  key.Binding
 	}
 	input textinput.Model
 }
@@ -78,7 +77,6 @@ func NewAPIKeyInput(
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "submit"),
 	)
-	m.keyMap.Close = CloseKey
 
 	return &m, nil
 }
@@ -107,7 +105,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case m.state == APIKeyInputStateVerifying:
 			// do nothing
-		case key.Matches(msg, m.keyMap.Close):
+		case key.Matches(msg, CloseKey):
 			switch m.state {
 			case APIKeyInputStateVerified:
 				return m.saveKeyAndContinue()
@@ -239,18 +237,10 @@ func (m *APIKeyInput) ShortHelp() []key.Binding {
 		// Keys are ignored until verification finishes.
 		return nil
 	case APIKeyInputStateVerified:
-		// Both enter and esc save the key and continue.
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter", "ctrl+y", "esc", "alt+esc"),
-				key.WithHelp("enter", "save & continue"),
-			),
-		}
+		return []key.Binding{finishKey("save & continue")}
 	default:
-		return []key.Binding{
-			m.keyMap.Submit,
-			m.keyMap.Close,
-		}
+		// No sign-in is running yet, so esc has nothing to cancel.
+		return []key.Binding{m.keyMap.Submit, authEscKey(true)}
 	}
 }
 

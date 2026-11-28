@@ -43,7 +43,6 @@ type MCPAuth struct {
 		Submit key.Binding
 		Copy   key.Binding
 		Skip   key.Binding
-		Close  key.Binding
 	}
 }
 
@@ -71,10 +70,6 @@ func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authUR
 		key.WithKeys("s"),
 		key.WithHelp("s", "skip"),
 	)
-	// Esc abandons a sign-in in progress; once a server has signed in
-	// or failed there is nothing left to cancel, so those states show
-	// plain exit.
-	m.keyMap.Close = cancelKey
 
 	return m, m.spinner.Tick
 }
@@ -137,7 +132,7 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 				m.state == MCPAuthStateError && m.hasNext():
 				return m.advance()
 			}
-		case key.Matches(msg, m.keyMap.Close):
+		case key.Matches(msg, CloseKey):
 			m.CancelAuth()
 			return ActionClose{}
 		}
@@ -299,33 +294,34 @@ func (m *MCPAuth) ShortHelp() []key.Binding {
 	case MCPAuthStatePrompt:
 		// The main action and esc come first so a narrow help bar
 		// truncates the optional hints rather than the way out.
-		bindings := []key.Binding{m.keyMap.Submit, m.keyMap.Close}
+		bindings := []key.Binding{m.keyMap.Submit, authEscKey(false)}
 		if len(m.pending) > 1 {
 			bindings = append(bindings, m.keyMap.Skip)
 		}
 		return append(bindings, m.keyMap.Copy)
 	case MCPAuthStateAuthenticating:
-		return []key.Binding{m.keyMap.Submit, m.keyMap.Close, m.keyMap.Copy}
+		return []key.Binding{m.keyMap.Submit, authEscKey(false), m.keyMap.Copy}
 	case MCPAuthStateSuccess:
-		label := "finish"
-		if m.current+1 < len(m.pending) {
-			label = "next"
+		if !m.hasNext() {
+			return []key.Binding{finishKey("finish")}
 		}
+		// Esc leaves the rest of the queue, so it is not the same as
+		// moving on to the next server.
 		return []key.Binding{
 			key.NewBinding(
 				key.WithKeys("enter", "ctrl+y"),
-				key.WithHelp("enter", label),
+				key.WithHelp("enter", "next"),
 			),
-			CloseKey,
+			authEscKey(true),
 		}
 	case MCPAuthStateError:
 		if m.hasNext() {
 			// Move on to the remaining servers instead of abandoning
 			// the whole queue.
-			return []key.Binding{m.keyMap.Skip, CloseKey}
+			return []key.Binding{m.keyMap.Skip, authEscKey(true)}
 		}
-		return []key.Binding{CloseKey}
+		return []key.Binding{authEscKey(true)}
 	default:
-		return []key.Binding{m.keyMap.Close}
+		return []key.Binding{authEscKey(false)}
 	}
 }

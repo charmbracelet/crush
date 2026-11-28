@@ -37,7 +37,6 @@ type AWSSSO struct {
 	keyMap struct {
 		Open    key.Binding
 		CopyURL key.Binding
-		Close   key.Binding
 	}
 
 	url    string
@@ -67,9 +66,6 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 		key.WithKeys("c", "u"),
 		key.WithHelp("c", "copy url"),
 	)
-	// Esc abandons a sign-in in progress; once it has failed there is
-	// nothing left to cancel, so the error state shows plain exit.
-	m.keyMap.Close = cancelKey
 
 	return m, m.spinner.Tick
 }
@@ -121,7 +117,7 @@ func (m *AWSSSO) HandleMsg(msg tea.Msg) Action {
 				return ActionCmd{common.CopyToClipboard(m.url, "URL copied to clipboard")}
 			}
 
-		case key.Matches(msg, m.keyMap.Close):
+		case key.Matches(msg, CloseKey):
 			return ActionClose{}
 		}
 	}
@@ -194,19 +190,14 @@ func (m *AWSSSO) FullHelp() [][]key.Binding {
 func (m *AWSSSO) ShortHelp() []key.Binding {
 	switch m.state {
 	case awsSSOStateError:
-		return []key.Binding{CloseKey}
+		return []key.Binding{authEscKey(true)}
 	case awsSSOStateSuccess:
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter", "ctrl+y", "esc"),
-				key.WithHelp("enter", "close"),
-			),
-		}
+		return []key.Binding{finishKey("close")}
 	default:
 		if m.url != "" {
-			return []key.Binding{m.keyMap.Open, m.keyMap.Close, m.keyMap.CopyURL}
+			return []key.Binding{m.keyMap.Open, authEscKey(false), m.keyMap.CopyURL}
 		}
-		return []key.Binding{m.keyMap.Close}
+		return []key.Binding{authEscKey(false)}
 	}
 }
 

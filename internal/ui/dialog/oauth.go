@@ -65,7 +65,6 @@ type OAuth struct {
 		CopyURL   key.Binding
 		Submit    key.Binding
 		FocusCode key.Binding
-		Close     key.Binding
 	}
 
 	deviceCode      string
@@ -122,9 +121,6 @@ func newOAuth(
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "enter code"),
 	)
-	// Esc abandons a sign-in in progress; once it has failed there is
-	// nothing left to cancel, so the error state shows plain exit.
-	m.keyMap.Close = cancelKey
 
 	if m.oAuthProvider.supportsCodeEntry() {
 		m.codeInput = textinput.New()
@@ -166,7 +162,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 				cmd := m.copyCodeAndOpenURL()
 				return ActionCmd{cmd}
 
-			case key.Matches(msg, m.keyMap.Close):
+			case key.Matches(msg, CloseKey):
 				m.codeInput.Blur()
 				return nil
 
@@ -207,7 +203,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 				return ActionCmd{cmd}
 			}
 
-		case key.Matches(msg, m.keyMap.Close):
+		case key.Matches(msg, CloseKey):
 			switch m.State {
 			case OAuthStateSuccess:
 				return m.confirmAndSelectModel()
@@ -430,15 +426,10 @@ func (m *OAuth) FullHelp() [][]key.Binding {
 func (m *OAuth) ShortHelp() []key.Binding {
 	switch m.State {
 	case OAuthStateError:
-		return []key.Binding{CloseKey}
+		return []key.Binding{authEscKey(true)}
 
 	case OAuthStateSuccess:
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter", "ctrl+y", "esc"),
-				key.WithHelp("enter", "finish"),
-			),
-		}
+		return []key.Binding{finishKey("finish")}
 
 	case OAuthStateSaving:
 		// No actionable keys while the save completes.
@@ -446,7 +437,7 @@ func (m *OAuth) ShortHelp() []key.Binding {
 
 	case OAuthStateInitializing:
 		// Only esc does anything yet: it abandons the sign-in.
-		return []key.Binding{m.keyMap.Close}
+		return []key.Binding{authEscKey(false)}
 
 	default:
 		if m.codeEntryActive() && m.codeInput.Focused() {
@@ -467,7 +458,7 @@ func (m *OAuth) ShortHelp() []key.Binding {
 		}
 		// The main action and esc come first so a narrow help bar
 		// truncates the optional hints rather than the way out.
-		h := []key.Binding{submit, m.keyMap.Close}
+		h := []key.Binding{submit, authEscKey(false)}
 		if m.codeEntryActive() {
 			h = append(h, m.keyMap.FocusCode)
 		}

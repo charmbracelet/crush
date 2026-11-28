@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -79,4 +80,23 @@ func authDraw(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor, on
 		return
 	}
 	DrawCenterCursor(scr, area, view, cur)
+}
+
+// authEscKey is esc in a sign-in dialog: it cancels while a sign-in is
+// still running, and once it is done (signed in, failed, or never
+// started) there is nothing left to cancel, so it just exits.
+func authEscKey(done bool) key.Binding {
+	if done {
+		return CloseKey
+	}
+	return cancelKey
+}
+
+// finishKey acknowledges a finished sign-in. Enter and esc both do it,
+// since moving on is all that is left.
+func finishKey(label string) key.Binding {
+	return key.NewBinding(
+		key.WithKeys("enter", "ctrl+y", "esc", "alt+esc"),
+		key.WithHelp("enter", label),
+	)
 }

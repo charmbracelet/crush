@@ -22,19 +22,27 @@ const maxRipgrepJSONLine = 32 * 1024 * 1024
 // ripgrepCollector keeps the newest limit matches, ordered by file
 // modification time, out of a ripgrep --json stream. It returns the same
 // matches as stably sorting every match by modification time and keeping
-// the first limit, but holds only O(limit) matches in memory and stats
-// each file once.
+// the first limit, but holds only O(limit) matches and files in memory.
+//
+// Ripgrep prints each file's matches together, so besides the kept files
+// only the file currently being read is remembered, and each file is
+// stat'ed once. A file whose matches reappear later in the stream after it
+// was evicted or found unreadable is stat'ed again; it is still evicted,
+// since the files that pushed it out are only ever replaced by better ones.
 type ripgrepCollector struct {
 	limit int
 	total int
 	kept  int
-	files map[string]*rgFileGroup
+	seen  int                     // Number of file groups created so far.
+	files map[string]*rgFileGroup // Kept files, by path.
+	cur   *rgFileGroup            // File of the previous match.
 	heap  rgFileHeap
 	stat  func(string) (os.FileInfo, error)
 }
 
 // rgFileGroup holds the kept matches of a single file.
 type rgFileGroup struct {
+	path       string
 	order      int // Order in which the file was first seen.
 	modTime    time.Time
 	unreadable bool // Stat failed, so its matches are ignored.
@@ -138,16 +146,7 @@ func (c *ripgrepCollector) addLine(line []byte) {
 }
 
 func (c *ripgrepCollector) add(m grepMatch) {
-	g, ok := c.files[m.path]
-	if !ok {
-		g = &rgFileGroup{order: len(c.files)}
-		c.files[m.path] = g
-		if fi, err := c.stat(m.path); err != nil {
-			g.unreadable = true // Skip files we can't access.
-		} else {
-			g.modTime = fi.ModTime()
-		}
-	}
+	g := c.group(m.path)
 	if g.unreadable {
 		return
 	}
@@ -161,6 +160,7 @@ func (c *ripgrepCollector) add(m grepMatch) {
 	m.modTime = g.modTime
 	if len(g.matches) == 0 {
 		heap.Push(&c.heap, g)
+		c.files[g.path] = g
 	}
 	g.matches = append(g.matches, m)
 	c.kept++
@@ -171,7 +171,28 @@ func (c *ripgrepCollector) add(m grepMatch) {
 		c.kept -= len(worst.matches)
 		worst.matches = nil
 		worst.evicted = true
+		delete(c.files, worst.path)
 	}
+}
+
+// group returns the group of the file at path, creating and stat'ing it
+// when the file is neither kept nor the one currently being read.
+func (c *ripgrepCollector) group(path string) *rgFileGroup {
+	if c.cur != nil && c.cur.path == path {
+		return c.cur
+	}
+	g, ok := c.files[path]
+	if !ok {
+		g = &rgFileGroup{path: path, order: c.seen}
+		c.seen++
+		if fi, err := c.stat(path); err != nil {
+			g.unreadable = true // Skip files we can't access.
+		} else {
+			g.modTime = fi.ModTime()
+		}
+	}
+	c.cur = g
+	return g
 }
 
 // results returns the kept matches, newest file first, and whether any

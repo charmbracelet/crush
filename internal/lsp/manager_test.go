@@ -132,9 +132,10 @@ func TestStartServerBacksOffAfterStartFailure(t *testing.T) {
 	tests := []struct {
 		name    string
 		command string
+		delay   time.Duration
 	}{
-		{name: "missing command", command: "crush-test-missing-lsp-command"},
-		{name: "initialize failure", command: "false"},
+		{name: "missing command", command: "crush-test-missing-lsp-command", delay: unavailableRetryDelay},
+		{name: "initialize failure", command: "false", delay: startFailureRetryDelay},
 	}
 
 	for _, tt := range tests {
@@ -167,9 +168,9 @@ func TestStartServerBacksOffAfterStartFailure(t *testing.T) {
 			require.True(t, manager.recentlyUnavailable("broken"))
 
 			retryAt, _ := manager.unavailable.Get("broken")
-			require.Equal(t, base.Add(startFailureRetryDelay), retryAt)
+			require.Equal(t, base.Add(tt.delay), retryAt)
 
-			now = base.Add(startFailureRetryDelay + time.Second)
+			now = base.Add(tt.delay + time.Second)
 			require.False(t, manager.recentlyUnavailable("broken"))
 		})
 	}

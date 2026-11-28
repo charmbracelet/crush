@@ -23,12 +23,12 @@ import (
 )
 
 const (
-	// unavailableRetryDelay is how long a server whose command is missing
-	// is skipped before Crush looks for it again.
+	// unavailableRetryDelay is how long a server whose command is missing,
+	// or could not be spawned, is skipped before Crush looks for it again.
 	unavailableRetryDelay = 30 * time.Second
-	// startFailureRetryDelay is how long a server that failed to start or
-	// initialize is skipped. It is longer than unavailableRetryDelay because
-	// each retry spawns a process and may block for the full init timeout.
+	// startFailureRetryDelay is how long a server that failed to initialize
+	// is skipped. It is longer than unavailableRetryDelay because each retry
+	// spawns a process and may block for the full init timeout.
 	startFailureRetryDelay = 5 * time.Minute
 )
 
@@ -223,7 +223,9 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
-		s.markUnavailableFor(name, startFailureRetryDelay)
+		// Usually the command is missing. Retrying that is cheap, so a
+		// server installed mid-session is picked up soon.
+		s.markUnavailable(name)
 		return
 	}
 	// Only store non-nil clients. If another goroutine raced us,

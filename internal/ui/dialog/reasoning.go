@@ -286,9 +286,7 @@ func (r *ReasoningItem) SetFocused(focused bool) {
 	}
 	r.cache = nil
 	r.focused = focused
-	if r.Versioned != nil {
-		r.Bump()
-	}
+	r.Bump()
 }
 
 // SetMatch sets the fuzzy match for the reasoning item.
@@ -298,9 +296,7 @@ func (r *ReasoningItem) SetMatch(m fuzzy.Match) {
 	}
 	r.cache = nil
 	r.m = m
-	if r.Versioned != nil {
-		r.Bump()
-	}
+	r.Bump()
 }
 
 // Render returns the string representation of the reasoning item.

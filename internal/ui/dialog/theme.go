@@ -734,9 +734,7 @@ func (r *ThemeItem) SetHideInfo(v bool) {
 	}
 	r.cache = nil
 	r.hideInfo = v
-	if r.Versioned != nil {
-		r.Bump()
-	}
+	r.Bump()
 }
 
 func (r *ThemeItem) InputValue() string {
@@ -746,9 +744,7 @@ func (r *ThemeItem) InputValue() string {
 func (r *ThemeItem) HandleInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	r.renameInput, cmd = r.renameInput.Update(msg)
-	if r.Versioned != nil {
-		r.Bump()
-	}
+	r.Bump()
 	return cmd
 }
 

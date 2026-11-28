@@ -308,9 +308,7 @@ func (n *NotificationItem) SetFocused(focused bool) {
 	}
 	n.cache = nil
 	n.focused = focused
-	if n.Versioned != nil {
-		n.Bump()
-	}
+	n.Bump()
 }
 
 // SetMatch sets the fuzzy match for the notification item.
@@ -320,9 +318,7 @@ func (n *NotificationItem) SetMatch(m fuzzy.Match) {
 	}
 	n.cache = nil
 	n.m = m
-	if n.Versioned != nil {
-		n.Bump()
-	}
+	n.Bump()
 }
 
 // Render returns the string representation of the notification item.

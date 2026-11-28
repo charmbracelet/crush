@@ -73,9 +73,7 @@ func (s *SessionItem) SetMatch(m fuzzy.Match) {
 	}
 	s.cache = nil
 	s.m = m
-	if s.Versioned != nil {
-		s.Bump()
-	}
+	s.Bump()
 }
 
 // InputValue returns the updated title value
@@ -87,9 +85,7 @@ func (s *SessionItem) InputValue() string {
 func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	s.updateTitleInput, cmd = s.updateTitleInput.Update(msg)
-	if s.Versioned != nil {
-		s.Bump()
-	}
+	s.Bump()
 	return cmd
 }
 
@@ -111,9 +107,7 @@ func (s *SessionItem) SetHideInfo(v bool) {
 	}
 	s.cache = nil
 	s.hideInfo = v
-	if s.Versioned != nil {
-		s.Bump()
-	}
+	s.Bump()
 }
 
 // Render returns the string representation of the session item.
@@ -255,9 +249,7 @@ func (s *SessionItem) SetFocused(focused bool) {
 	}
 	s.cache = nil
 	s.focused = focused
-	if s.Versioned != nil {
-		s.Bump()
-	}
+	s.Bump()
 }
 
 // sessionItems takes a slice of [session.Session]s and convert them to a slice

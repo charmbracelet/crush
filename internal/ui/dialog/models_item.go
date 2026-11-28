@@ -140,9 +140,7 @@ func (m *ModelItem) SetFocused(focused bool) {
 	}
 	m.cache = nil
 	m.focused = focused
-	if m.Versioned != nil {
-		m.Bump()
-	}
+	m.Bump()
 }
 
 // SetMatch implements ListItem.
@@ -152,7 +150,5 @@ func (m *ModelItem) SetMatch(fm fuzzy.Match) {
 	}
 	m.cache = nil
 	m.m = fm
-	if m.Versioned != nil {
-		m.Bump()
-	}
+	m.Bump()
 }

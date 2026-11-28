@@ -77,9 +77,7 @@ func (c *CommandItem) SetFocused(focused bool) {
 	}
 	c.cache = nil
 	c.focused = focused
-	if c.Versioned != nil {
-		c.Bump()
-	}
+	c.Bump()
 }
 
 // SetMatch implements ListItem.
@@ -89,9 +87,7 @@ func (c *CommandItem) SetMatch(m fuzzy.Match) {
 	}
 	c.cache = nil
 	c.m = m
-	if c.Versioned != nil {
-		c.Bump()
-	}
+	c.Bump()
 }
 
 // Action returns the action associated with the command item.
@@ -117,9 +113,7 @@ func (c *CommandItem) SetHideInfo(v bool) {
 	}
 	c.cache = nil
 	c.hideInfo = v
-	if c.Versioned != nil {
-		c.Bump()
-	}
+	c.Bump()
 }
 
 // Render implements ListItem.

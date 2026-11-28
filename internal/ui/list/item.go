@@ -51,7 +51,11 @@ func (vc *Versioned) Version() uint64 {
 // affect the rendered output must call Bump exactly once per
 // observable state change. Bumping more than once per change is
 // harmless other than a single extra cache miss.
+// Bump on a nil *Versioned is a no-op.
 func (vc *Versioned) Bump() {
+	if vc == nil {
+		return
+	}
 	vc.v++
 }
 

@@ -60,9 +60,7 @@ func (c *ChannelItem) SetFocused(focused bool) {
 	}
 	c.cache = nil
 	c.focused = focused
-	if c.Versioned != nil {
-		c.Bump()
-	}
+	c.Bump()
 }
 
 // SetMatch implements ListItem.
@@ -72,9 +70,7 @@ func (c *ChannelItem) SetMatch(match fuzzy.Match) {
 	}
 	c.cache = nil
 	c.m = match
-	if c.Versioned != nil {
-		c.Bump()
-	}
+	c.Bump()
 }
 
 // Render implements ListItem.

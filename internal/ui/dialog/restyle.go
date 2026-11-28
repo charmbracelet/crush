@@ -49,9 +49,7 @@ func (m *Models) RefreshStyles() {
 	m.input.SetStyles(m.com.Styles.TextInput)
 	for i := range m.list.groups {
 		g := &m.list.groups[i]
-		if g.Versioned != nil {
-			g.Bump()
-		}
+		g.Bump()
 		refreshItems(g.Items)
 	}
 }
@@ -182,17 +180,13 @@ func (p *PlanHandoffInline) RefreshStyles() {
 // RefreshStyles implements [StyleRefresher].
 func (c *CommandItem) RefreshStyles() {
 	c.cache = nil
-	if c.Versioned != nil {
-		c.Bump()
-	}
+	c.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher].
 func (m *ModelItem) RefreshStyles() {
 	m.cache = nil
-	if m.Versioned != nil {
-		m.Bump()
-	}
+	m.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher].
@@ -201,47 +195,35 @@ func (s *SessionItem) RefreshStyles() {
 	if s.sessionsMode == sessionsModeUpdating {
 		s.updateTitleInput.SetStyles(sessionRenameInputStyles(s.t))
 	}
-	if s.Versioned != nil {
-		s.Bump()
-	}
+	s.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher].
 func (r *ReasoningItem) RefreshStyles() {
 	r.cache = nil
-	if r.Versioned != nil {
-		r.Bump()
-	}
+	r.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher].
 func (c *ChannelItem) RefreshStyles() {
 	c.cache = nil
-	if c.Versioned != nil {
-		c.Bump()
-	}
+	c.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher].
 func (n *NotificationItem) RefreshStyles() {
 	n.cache = nil
-	if n.Versioned != nil {
-		n.Bump()
-	}
+	n.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher].
 func (i *ThemeItem) RefreshStyles() {
 	i.cache = nil
-	if i.Versioned != nil {
-		i.Bump()
-	}
+	i.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher]. Headers are cached by the
 // list, so bump them to force a re-render with the new styles.
 func (h *ThemeSectionHeader) RefreshStyles() {
-	if h.Versioned != nil {
-		h.Bump()
-	}
+	h.Bump()
 }

@@ -1,0 +1,1 @@
+List the background shells started in this session, running and finished, with their IDs, status, and commands. Use it to find a job ID you no longer have, then read it with job_output or stop it with job_kill. Jobs started by subagents you dispatched are included.

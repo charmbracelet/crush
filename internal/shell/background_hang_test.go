@@ -66,7 +66,7 @@ func TestKill_SetsidDescendantHoldsPipe(t *testing.T) {
 	reapSleep(t, "17")
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(context.Background(), nil, t.TempDir(), nil, CoreutilsTurtle, "sh -c 'setsid sleep 17 &'", "", testMaxJobs)
+	bgShell, err := manager.Start(context.Background(), JobScope{}, t.TempDir(), nil, CoreutilsTurtle, "sh -c 'setsid sleep 17 &'", "", testMaxJobs)
 	require.NoError(t, err)
 	requireDescendant(t, "sleep 17")
 
@@ -83,7 +83,7 @@ func TestJobCompletesWhenBackgroundedChildHoldsPipe(t *testing.T) {
 	manager := newBackgroundShellManager()
 
 	start := time.Now()
-	bgShell, err := manager.Start(context.Background(), nil, t.TempDir(), nil, CoreutilsTurtle, "sh -c 'sleep 8 &'; echo hi", "", testMaxJobs)
+	bgShell, err := manager.Start(context.Background(), JobScope{}, t.TempDir(), nil, CoreutilsTurtle, "sh -c 'sleep 8 &'; echo hi", "", testMaxJobs)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
@@ -149,7 +149,7 @@ func TestKill_ShebangScriptChild(t *testing.T) {
 	manager := newBackgroundShellManager()
 
 	// t.Context cancels the job before cleanup, so a failed assertion cannot leak it.
-	bgShell, err := manager.Start(t.Context(), nil, dir, nil, CoreutilsTurtle, "./hang.sh", "", testMaxJobs)
+	bgShell, err := manager.Start(t.Context(), JobScope{}, dir, nil, CoreutilsTurtle, "./hang.sh", "", testMaxJobs)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultKillTimeout+4*time.Second)

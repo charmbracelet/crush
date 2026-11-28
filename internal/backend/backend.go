@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/google/uuid"
@@ -269,11 +270,10 @@ type Workspace struct {
 	// goes away. Stored themes are never mutated, only replaced.
 	hostTheme *proto.HostTheme
 
-	// rootCache memoizes [Backend.RootSessionID] resolutions, keyed by
-	// session ID. Session parentage is fixed at creation, so entries
-	// never go stale; the cache keeps a DB read per event per client
-	// off the SSE hot path.
-	rootCache sync.Map // map[string]string
+	// roots memoizes [Backend.RootSessionID] resolutions. Session
+	// parentage is fixed at creation, so entries never go stale; the
+	// cache keeps a DB read per event per client off the SSE hot path.
+	roots session.Roots
 
 	// shutdownFn is the function invoked by [Backend.teardown] to
 	// release the workspace's underlying resources. It defaults to the

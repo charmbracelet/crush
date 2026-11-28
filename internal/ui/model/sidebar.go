@@ -115,6 +115,9 @@ func (m *UI) updateSidebarScrollState() {
 	if subAgentSection := m.subAgentsInfo(subAgents, contentWidth, len(subAgents), true); subAgentSection != "" {
 		sections = append(sections, subAgentSection, "")
 	}
+	if m.backgroundJobs > 0 {
+		sections = append(sections, t.Resource.AdditionalText.Render(backgroundJobsLabel(m.backgroundJobs)+" running in background"), "")
+	}
 	sections = append(sections,
 		filesSection,
 		"",

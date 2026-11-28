@@ -37,13 +37,13 @@ type JobOutputResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 }
 
-func NewJobOutputTool(spillDir string, progress pubsub.Publisher[ToolProgress]) fantasy.AgentTool {
-	return newJobOutputTool(spillDir, progress, jobOutputWaitLimit)
+func NewJobOutputTool(spillDir string, jobs BackgroundJobs, progress pubsub.Publisher[ToolProgress]) fantasy.AgentTool {
+	return newJobOutputTool(spillDir, jobs, progress, jobOutputWaitLimit)
 }
 
 // newJobOutputTool is NewJobOutputTool with an injectable wait limit, so
 // tests need not wait the full two minutes.
-func newJobOutputTool(spillDir string, progress pubsub.Publisher[ToolProgress], waitLimit time.Duration) fantasy.AgentTool {
+func newJobOutputTool(spillDir string, jobs BackgroundJobs, progress pubsub.Publisher[ToolProgress], waitLimit time.Duration) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
 		jobOutputDescription,
@@ -53,7 +53,11 @@ func newJobOutputTool(spillDir string, progress pubsub.Publisher[ToolProgress], 
 			}
 
 			bgManager := shell.GetBackgroundShellManager()
-			bgShell, ok := bgManager.Get(params.ShellID)
+			scope, err := jobs.Scope(ctx)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			bgShell, ok := bgManager.Lookup(scope, params.ShellID)
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
 			}

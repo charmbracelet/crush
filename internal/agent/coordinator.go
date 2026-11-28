@@ -157,6 +157,7 @@ type coordinator struct {
 	toolProgress pubsub.Publisher[tools.ToolProgress]
 	interactive  bool
 	shellOwner   any
+	roots        *session.Roots
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
 	// HTTP handler goroutines while runs, cancels, and probes read the
@@ -245,6 +246,10 @@ type CoordinatorOptions struct {
 	// ShellOwner tags the background shells the bash tool starts, so the
 	// owner can stop its own shells without touching anyone else's.
 	ShellOwner any
+	// SessionRoots resolves subagent sessions to their top-level session,
+	// so a subagent's background jobs belong to the session it serves.
+	// Nil gives the coordinator its own.
+	SessionRoots *session.Roots
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -280,6 +285,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:     opts.Interactive,
 		hookRunner:      opts.HookRunner,
 		shellOwner:      opts.ShellOwner,
+		roots:           cmp.Or(opts.SessionRoots, new(session.Roots)),
 		dispatched:      csync.NewMap[string, *dispatchedAgent](),
 		backgroundAfter: subAgentBackgroundAfter,
 	}
@@ -1135,13 +1141,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
+	jobs := tools.NewBackgroundJobs(c.shellOwner, c.sessions, c.roots)
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Options.GetCoreutils(), c.cfg.Config().Permissions, c.shellOwner, c.toolProgress),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Options.GetCoreutils(), c.cfg.Config().Permissions, jobs, c.toolProgress),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
-		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory, c.toolProgress),
-		tools.NewJobKillTool(),
+		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory, jobs, c.toolProgress),
+		tools.NewJobKillTool(jobs),
+		tools.NewJobListTool(jobs),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),

@@ -484,7 +484,10 @@ type UI struct {
 	// runs this client did not start.
 	probedSession     string
 	probedSessionBusy bool
-	pillsView         string
+	// backgroundJobs is how many background shells the agent had running
+	// for probedSession as of the last busy probe.
+	backgroundJobs int
+	pillsView      string
 
 	// Todo spinner
 	todoSpinner    spinner.Model
@@ -3835,6 +3838,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.hyperCredits,
 		m.gitBranchLabel(),
 		m.subAgentsRunning,
+		m.backgroundJobs,
 	)
 }
 

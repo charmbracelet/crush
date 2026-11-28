@@ -77,6 +77,7 @@ func (h *header) drawHeader(
 	hyperCredits *int,
 	gitBranch string,
 	runningSubAgents int,
+	backgroundJobs int,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
@@ -108,6 +109,7 @@ func (h *header) drawHeader(
 		hyperCredits,
 		gitBranch,
 		runningSubAgents,
+		backgroundJobs,
 	)
 
 	remainingWidth := width -
@@ -142,6 +144,7 @@ func renderHeaderDetails(
 	hyperCredits *int,
 	gitBranch string,
 	runningSubAgents int,
+	backgroundJobs int,
 ) string {
 	t := com.Styles
 
@@ -153,6 +156,10 @@ func renderHeaderDetails(
 		parts = append(parts, t.Header.Percentage.Render(fmt.Sprintf(
 			"%s %d", subAgentSpinner(time.Now()), runningSubAgents,
 		)))
+	}
+
+	if backgroundJobs > 0 {
+		parts = append(parts, t.Header.Percentage.Render(backgroundJobsLabel(backgroundJobs)))
 	}
 
 	if lspErrorCount > 0 {
@@ -205,4 +212,12 @@ func renderHeaderDetails(
 
 	result := cwd + metadata
 	return ansi.Truncate(result, max(0, availWidth), "…")
+}
+
+// backgroundJobsLabel counts background jobs, as in "1 job" or "3 jobs".
+func backgroundJobsLabel(n int) string {
+	if n == 1 {
+		return "1 job"
+	}
+	return fmt.Sprintf("%d jobs", n)
 }

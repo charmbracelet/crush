@@ -117,6 +117,25 @@ func TestOverlay_GraceClearedOnClose(t *testing.T) {
 	require.Len(t, d2.received, 1, "new dialog after grace close should receive keys immediately")
 }
 
+// TestOverlay_CloseReleasesDialog verifies a closed dialog is not kept
+// reachable through the stack's spare capacity.
+func TestOverlay_CloseReleasesDialog(t *testing.T) {
+	t.Parallel()
+
+	o := NewOverlay()
+	o.OpenDialog(&stubDialog{id: "first"})
+	o.OpenDialog(&stubDialog{id: "second"})
+	o.OpenDialog(&stubDialog{id: "third"})
+
+	o.CloseFrontDialog()
+	o.CloseDialog("first")
+	require.Len(t, o.dialogs, 1)
+	require.Equal(t, "second", o.dialogs[0].ID())
+	for i, d := range o.dialogs[len(o.dialogs):cap(o.dialogs)] {
+		require.Nilf(t, d, "spare slot %d still holds a closed dialog", i)
+	}
+}
+
 // TestOverlay_NonKeyMessagesPassDuringGrace verifies that non-keypress
 // messages (e.g. mouse, tick) are forwarded even during the grace period.
 func TestOverlay_NonKeyMessagesPassDuringGrace(t *testing.T) {

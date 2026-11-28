@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -32,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
 
@@ -480,6 +482,70 @@ func TestClientWorkspaceListMCPPromptsServerError(t *testing.T) {
 	_, err = workspace.ListMCPPrompts(t.Context())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
+}
+
+// The diagnostic counts come from the server's cached counts, so the full
+// diagnostics are never fetched only to be counted.
+func TestClientWorkspace_LSPGetDiagnosticCounts(t *testing.T) {
+	t.Parallel()
+
+	var paths []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		require.Equal(t, "/v1/workspaces/ws-1/lsps/gopls/diagnostic-counts", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(proto.LSPDiagnosticCounts{
+			Error: 3, Warning: 2, Information: 1, Hint: 4,
+		}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	require.Equal(t, lsp.DiagnosticCounts{Error: 3, Warning: 2, Information: 1, Hint: 4},
+		workspace.LSPGetDiagnosticCounts("gopls"))
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, paths, 1)
+}
+
+// A server predating the counts endpoint answers 404 for it; the counts
+// then come from its full diagnostics, as before.
+func TestClientWorkspace_LSPGetDiagnosticCountsOlderServer(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workspaces/ws-1/lsps/gopls/diagnostics" {
+			http.NotFound(w, r)
+			return
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(map[protocol.DocumentURI][]protocol.Diagnostic{
+			"file:///a.go": {
+				{Severity: protocol.SeverityError},
+				{Severity: protocol.SeverityWarning},
+			},
+			"file:///b.go": {
+				{Severity: protocol.SeverityError},
+				{Severity: protocol.SeverityHint},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	require.Equal(t, lsp.DiagnosticCounts{Error: 2, Warning: 1, Hint: 1},
+		workspace.LSPGetDiagnosticCounts("gopls"))
 }
 
 // TestClientWorkspace_MCPGetStatesTimeout pins the probe deadline: a hung

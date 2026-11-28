@@ -101,6 +101,11 @@ func (w *countingWorkspace) AgentModel() workspace.AgentModel {
 	return w.model
 }
 
+// AgentSessionModel reports the default, as for a session not yet pinned.
+func (w *countingWorkspace) AgentSessionModel(string) workspace.AgentModel {
+	return w.AgentModel()
+}
+
 func (w *countingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
 	w.lspStateCalls++
 	return w.lspStates

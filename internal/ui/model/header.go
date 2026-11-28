@@ -7,7 +7,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/x/nerdfont"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -77,6 +76,7 @@ func (h *header) drawHeader(
 	hyperCredits *int,
 	gitBranch string,
 	runningSubAgents int,
+	contextWindow int64,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
@@ -108,6 +108,7 @@ func (h *header) drawHeader(
 		hyperCredits,
 		gitBranch,
 		runningSubAgents,
+		contextWindow,
 	)
 
 	remainingWidth := width -
@@ -142,6 +143,7 @@ func renderHeaderDetails(
 	hyperCredits *int,
 	gitBranch string,
 	runningSubAgents int,
+	contextWindow int64,
 ) string {
 	t := com.Styles
 
@@ -159,10 +161,9 @@ func renderHeaderDetails(
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", nerdfont.Glyph(styles.LSPErrorIcon, "E"), lspErrorCount)))
 	}
 
-	agentCfg := com.Config().Agents[config.AgentCoder]
-	model := com.Config().GetModelByType(agentCfg.Model)
-	if model != nil && model.ContextWindow > 0 {
-		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
+	// The window of the current session's model, which may not be the default.
+	if contextWindow > 0 {
+		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(contextWindow)) * 100
 		percentageText := fmt.Sprintf("%d%%", int(percentage))
 		if session.EstimatedUsage {
 			percentageText = "~" + percentageText

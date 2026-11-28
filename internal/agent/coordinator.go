@@ -136,6 +136,10 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	// SetSessionModel pins a session's model from its next turn on.
+	SetSessionModel(ctx context.Context, sessionID string, model config.SelectedModel) error
+	// SessionModel reports the model a session runs on, without pinning it.
+	SessionModel(sessionID string) Model
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 	// SetHostContext records what the host application has in view;
 	// each run from then on tells the model about it.
@@ -173,11 +177,15 @@ type coordinator struct {
 
 	// awsRefresh shares one AWS SSO login among requests that need it.
 	awsRefresh singleflight.Group
-	// modelsGen counts rebuilds; override models rebuild when it moves.
+	// modelsGen counts rebuilds; shared builds refresh when it moves.
 	modelsGen atomic.Uint64
-	// overrideModels shares builds of per-dispatch model overrides.
-	overrideModelsMu sync.Mutex
-	overrideModels   map[overrideModelKey]*overrideModel
+	// builds shares model builds across sessions and override subagents.
+	buildsMu sync.Mutex
+	builds   map[buildKey]*sharedBuild
+
+	// sessionModels is the selection each session is pinned to.
+	sessionModelsMu sync.Mutex
+	sessionModels   map[string]config.SelectedModel
 
 	// dispatched tracks detached subagents by parent session and label.
 	dispatched *csync.Map[string, *dispatchedAgent]
@@ -433,7 +441,10 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 		slog.Error("Failed to rebuild system prompt after skill toggle", "error", err)
 	}
 
-	model := agent.Model()
+	model, err := c.modelForSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
@@ -1056,7 +1067,7 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 	})
 
 	ready.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent, func() Model { return models().Large })
+		tools, err := c.buildTools(initCtx, agent, isSubAgent)
 		if err != nil {
 			return err
 		}
@@ -1087,9 +1098,8 @@ func (c *coordinator) effectiveToolNames(agentCfg config.Agent, isSubAgent bool)
 	})
 }
 
-// buildTools builds an agent's tools. parentModel reports the model the
-// agent runs on, which a dispatched subagent inherits.
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, parentModel func() Model) ([]fantasy.AgentTool, error) {
+// buildTools builds an agent's tools.
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	allowed := c.effectiveToolNames(agent, isSubAgent)
 
 	var allTools []fantasy.AgentTool
@@ -1101,14 +1111,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, agentTool)
 	}
 	if slices.Contains(allowed, AgentDispatchToolName) {
-		dispatchTool, err := c.agentDispatchTool(ctx, agent.ID, parentModel)
+		dispatchTool, err := c.agentDispatchTool(ctx, agent.ID)
 		if err != nil {
 			return nil, err
 		}
 		allTools = append(allTools, dispatchTool)
 	}
 	if slices.Contains(allowed, AgentSendToolName) {
-		allTools = append(allTools, c.agentSendTool(parentModel))
+		allTools = append(allTools, c.agentSendTool())
 	}
 	if slices.Contains(allowed, AgentStatusToolName) {
 		allTools = append(allTools, c.agentStatusTool())
@@ -1730,14 +1740,19 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
 	c.cfg.RefetchGrokModels(ctx)
 
+	// Callers come here after changing credentials or the config, perhaps
+	// in place, so rebuild even if the config looks unchanged.
+	if err := c.rebuildModels(ctx); err != nil {
+		return err
+	}
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)
 }
 
-// updateAgentModels rebuilds the shared models and the given agent's tools
-// from the current config.
+// updateAgentModels refreshes the shared models and rebuilds the given
+// agent's tools from the current config.
 func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent, name string) error {
-	if err := c.rebuildModels(ctx); err != nil {
+	if err := c.refreshModels(ctx); err != nil {
 		return err
 	}
 
@@ -1746,7 +1761,7 @@ func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent,
 		return fmt.Errorf("%w: %s", errMainAgentNotFound, name)
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false, agent.Model)
+	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}
@@ -1764,7 +1779,10 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	agent := c.currentAgent()
-	model := agent.Model()
+	model, err := c.modelForSession(sessionID)
+	if err != nil {
+		return err
+	}
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured

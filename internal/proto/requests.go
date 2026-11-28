@@ -120,6 +120,13 @@ type AgentSetMainRequest struct {
 	AgentID string `json:"agent_id"`
 }
 
+// AgentSetSessionModelRequest pins a session to a model selection. The pin
+// applies to the session's next turn without changing the default model
+// other or new sessions run on.
+type AgentSetSessionModelRequest struct {
+	Model config.SelectedModel `json:"model"`
+}
+
 // LSPStartRequest represents a request to start an LSP for a path.
 type LSPStartRequest struct {
 	Path string `json:"path"`

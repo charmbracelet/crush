@@ -215,6 +215,9 @@ type Model struct {
 	OAuth bool
 	// ProviderName is the provider's display name, such as "GitHub Copilot".
 	ProviderName string
+	// latest serves the newest build of this model, so a retry after a
+	// credential refresh uses the renewed credential. Nil for shared models.
+	latest func() fantasy.LanguageModel
 }
 
 // activeCancel wraps a context.CancelFunc with a unique pointer identity.
@@ -988,7 +991,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio, call.Attachments...)
 
 	startTime := time.Now()
-	a.eventPromptSent(call.SessionID)
+	a.eventPromptSent(call.SessionID, call.Model)
 	a.fireTurnHook(genCtx, call, hooks.Event{Name: hooks.EventTurnStart})
 
 	var stepMessages []fantasy.Message
@@ -1283,7 +1286,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 	})
 
-	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
+	a.eventPromptResponded(call.SessionID, call.Model, time.Since(startTime).Truncate(time.Second))
 
 	// Final writes use a context detached from the run: workspace shutdown
 	// cancels ctx before agent goroutines finish, and the turn's ending

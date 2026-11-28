@@ -7,16 +7,16 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 )
 
-func (a *sessionAgent) eventPromptSent(sessionID string) {
+func (a *sessionAgent) eventPromptSent(sessionID string, model Model) {
 	event.PromptSent(
-		a.eventCommon(sessionID, a.models().Large)...,
+		a.eventCommon(sessionID, model)...,
 	)
 }
 
-func (a *sessionAgent) eventPromptResponded(sessionID string, duration time.Duration) {
+func (a *sessionAgent) eventPromptResponded(sessionID string, model Model, duration time.Duration) {
 	event.PromptResponded(
 		append(
-			a.eventCommon(sessionID, a.models().Large),
+			a.eventCommon(sessionID, model),
 			"prompt duration pretty", duration.String(),
 			"prompt duration in seconds", int64(duration.Seconds()),
 		)...,

@@ -329,6 +329,10 @@ func (w *testWorkspace) SetCompactMode(scope config.Scope, compact bool) error {
 	return nil
 }
 
+func (w *testWorkspace) SetSessionModel(context.Context, string, config.SelectedModel) error {
+	return nil
+}
+
 func (w *testWorkspace) UpdatePreferredModel(_ config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
 	w.cfg.Models[modelType] = model
 	return nil

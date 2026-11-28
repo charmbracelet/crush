@@ -277,7 +277,13 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
-			safeReadOnly := isSafeReadOnly(params.Command, userSafe)
+			// A session root set means this run is root-scoped (ACP). Shell
+			// commands cannot be confined by a path check, so every
+			// non-safe command asks, regardless of the permission mode.
+			// The empty-root case (CLI, tests) keeps the TUI's existing
+			// safe-read-only behavior untouched.
+			rootScoped := len(GetRootsFromContext(ctx)) > 0
+			safeReadOnly := isSafeReadOnly(params.Command, userSafe) && !rootScoped
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {

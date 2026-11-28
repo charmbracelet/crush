@@ -1,0 +1,16 @@
+{
+  "sessionUpdate": "tool_call",
+  "toolCallId": "call_003",
+  "title": "Apply edit",
+  "kind": "edit",
+  "status": "pending",
+  "locations": [
+    {
+      "path": "/home/user/project/src/config.json"
+    }
+  ],
+  "rawInput": {
+    "path": "/home/user/project/src/config.json",
+    "content": "print('hello')"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "sessionUpdate": "tool_call_update",
+  "toolCallId": "call_010",
+  "title": "Processing changes",
+  "kind": "edit",
+  "status": "completed",
+  "locations": [
+    {
+      "path": "/home/user/project/src/config.json"
+    }
+  ],
+  "rawInput": {
+    "path": "/home/user/project/src/config.json"
+  },
+  "rawOutput": {
+    "result": "ok"
+  },
+  "content": [
+    {
+      "type": "content",
+      "content": {
+        "type": "text",
+        "text": "Edit completed."
+      }
+    }
+  ]
+}

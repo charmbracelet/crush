@@ -749,6 +749,32 @@ func turnFinish(largeModel Model, sessionID string, reason fantasy.FinishReason)
 	return message.FinishReasonUnknown, "", ""
 }
 
+// rootDir returns the session's working directory for the root set. It is
+// empty when no config store is wired (tests and subagents), which leaves
+// root enforcement off for those paths.
+func (a *sessionAgent) rootDir() string {
+	if a.cfg == nil {
+		return ""
+	}
+	return a.cfg.WorkingDir()
+}
+
+// rootSet returns the session's effective root set: the workspace directory
+// followed by any roots the caller already put on the context. The ACP
+// adapter uses that channel for the additionalDirectories a session setup
+// request asked for, so paths under them need no per-use consent
+// (session-setup.md:444-452).
+func (a *sessionAgent) rootSet(ctx context.Context) []string {
+	roots := []string{a.rootDir()}
+	for _, r := range tools.GetRootsFromContext(ctx) {
+		if r == "" || r == a.rootDir() {
+			continue
+		}
+		roots = append(roots, r)
+	}
+	return roots
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -842,6 +868,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	runCtx = context.WithValue(runCtx, tools.RootsContextKey, a.rootSet(ctx))
 	runCtx = withRefusalRetries(runCtx, refusalRetriesPerTurn)
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
@@ -938,6 +965,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
+	if appended := tools.SystemPromptAppend(ctx); appended != "" {
+		systemPrompt += "\n\n<acp-system-prompt>\n" + appended + "\n</acp-system-prompt>"
+	}
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -984,6 +1014,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	// The session's root set is the workspace working directory plus any
+	// roots the caller supplied. The tools bound paths outside it by consent
+	// (session-setup.md:444-452).
+	ctx = context.WithValue(ctx, tools.RootsContextKey, a.rootSet(ctx))
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio, call.Attachments...)
 
@@ -1895,6 +1929,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 // Connections are process-global and left untouched; only the tool list
 // changes.
 func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fantasy.AgentTool) []fantasy.AgentTool {
+	toolList = filterOtherSessionsMCPTools(ctx, toolList)
+
 	disabledServers, err := a.sessions.MCPDisabledServers(ctx)
 	if err != nil {
 		slog.Error("Failed to list disabled MCP servers", "error", err)
@@ -1915,6 +1951,35 @@ func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fa
 			}
 		}
 		filtered = append(filtered, t)
+	}
+	return filtered
+}
+
+// filterOtherSessionsMCPTools drops MCP tools belonging to an ACP session other
+// than the one making this call.
+//
+// ACP-injected MCP servers are registered in a process-wide registry under a
+// name that embeds the owning session (mcp.ACPServerName), because every
+// registry in the MCP package is keyed by name alone. The tool palette, though,
+// is built once for all sessions, so without this filter a run could offer a
+// tool backed by another session's connection — and invoking it would execute
+// against that connection rather than its own.
+//
+// A tool whose server is not an ACP server is kept: config-file MCP servers are
+// shared by design and belong to no session.
+func filterOtherSessionsMCPTools(ctx context.Context, toolList []fantasy.AgentTool) []fantasy.AgentTool {
+	sessionID := tools.GetSessionFromContext(ctx)
+	filtered := make([]fantasy.AgentTool, 0, len(toolList))
+	for _, t := range toolList {
+		mcpTool, ok := t.(*tools.Tool)
+		if !ok {
+			filtered = append(filtered, t)
+			continue
+		}
+		owner, isACP := mcp.ACPSessionOf(mcpTool.MCP())
+		if !isACP || owner == sessionID {
+			filtered = append(filtered, t)
+		}
 	}
 	return filtered
 }

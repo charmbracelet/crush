@@ -1,0 +1,99 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/charmbracelet/crush/internal/acp"
+	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/spf13/cobra"
+)
+
+var acpCmd = &cobra.Command{
+	Use:   "acp",
+	Short: "Run Crush as an ACP server over stdio",
+	Long:  `Run Crush as an Agent Client Protocol server, listening on stdin/stdout for JSON-RPC 2.0 messages from an IDE or editor.`,
+	RunE:  runACP,
+}
+
+func runACP(cmd *cobra.Command, _ []string) error {
+	// Redirect logs to stderr; stdout is reserved for JSON-RPC.
+	level := slog.LevelInfo
+	if debug, _ := cmd.Flags().GetBool("debug"); debug {
+		level = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+
+	ws, cleanup, err := setupLocalWorkspace(cmd, nil)
+	if err != nil {
+		return fmt.Errorf("setup workspace: %w", err)
+	}
+	defer cleanup()
+
+	// Extract the underlying app.App for direct service access.
+	appWs, ok := ws.(*workspace.AppWorkspace)
+	if !ok {
+		return fmt.Errorf("expected AppWorkspace, got %T", ws)
+	}
+	app := appWs.App()
+	log := slog.Default()
+	log.Info("starting ACP server")
+
+	var (
+		stdin  = io.Reader(os.Stdin)
+		stdout = io.Writer(os.Stdout)
+	)
+	// CRUSH_ACP_LOG enables a timestamped capture of every stdio JSON-RPC
+	// frame in both directions, written as JSONL.
+	if path := os.Getenv("CRUSH_ACP_LOG"); path != "" {
+		fl, err := acp.OpenFrameLogger(path)
+		if err != nil {
+			return fmt.Errorf("acp log: %w", err)
+		}
+		defer fl.Close()
+		stdin = fl.Reader(stdin)
+		stdout = fl.Writer(stdout)
+		log.Info("ACP frame capture enabled", "path", path)
+	}
+
+	srv := acp.NewServer(app, log, stdin, stdout)
+	srv.SetLogger(log)
+
+	// Wire the ACP permission service into the app and rebuild the coder
+	// agent so the tools use it. Without this, tool permission requests go
+	// to the service the coordinator captured at app setup, which no UI or
+	// bridge answers, and every bash call waits forever.
+	if err := app.SetPermissions(cmd.Context(), srv.PermissionService()); err != nil {
+		return fmt.Errorf("init coder agent: %w", err)
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
+
+	go func() {
+		select {
+		case <-sigChan:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	// Start the event bridge to stream agent updates to the client.
+	srv.StartEventBridge(ctx)
+
+	if err := srv.Start(ctx); err != nil {
+		if err.Error() == "client disconnected" {
+			return nil
+		}
+		return fmt.Errorf("ACP server: %w", err)
+	}
+	return nil
+}

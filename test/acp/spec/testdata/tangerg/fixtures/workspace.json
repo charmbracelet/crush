@@ -1,0 +1,260 @@
+{
+  "type": "",
+  "$comment": "The filesystem and terminal operations: two independent capability booleans and one covering five methods, so the payloads are where an agent's authority over a workspace is actually spelled.",
+  "cases": [
+    {
+      "name": "a whole-file read",
+      "type": "ReadTextFileRequest",
+      "why": "line and limit are optional, and their absence means the whole file",
+      "input": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go"
+      }
+    },
+    {
+      "name": "a windowed read",
+      "type": "ReadTextFileRequest",
+      "why": "both are optional-and-nullable integers whose Go types come from their formats",
+      "input": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go",
+        "line": 10,
+        "limit": 50
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go",
+        "line": 10,
+        "limit": 50
+      }
+    },
+    {
+      "name": "a read window explicitly unset",
+      "type": "ReadTextFileRequest",
+      "why": "null is a third state and must not become the zero line",
+      "input": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go",
+        "line": null
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go",
+        "line": null
+      }
+    },
+    {
+      "name": "a negative line",
+      "type": "ReadTextFileRequest",
+      "why": "the format is unsigned, so a negative value is not in range — and it recovers rather than failing",
+      "input": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go",
+        "line": -1
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go"
+      }
+    },
+    {
+      "name": "file contents",
+      "type": "ReadTextFileResponse",
+      "why": "the required property is a string, and the empty file is a valid one",
+      "input": {
+        "content": ""
+      },
+      "accepted": true,
+      "normalized": {
+        "content": ""
+      }
+    },
+    {
+      "name": "a write",
+      "type": "WriteTextFileRequest",
+      "why": "three required properties, all strings",
+      "input": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go",
+        "content": "package main\n"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go",
+        "content": "package main\n"
+      }
+    },
+    {
+      "name": "a write with no content",
+      "type": "WriteTextFileRequest",
+      "why": "content is required even though the empty string is a value",
+      "input": {
+        "sessionId": "sess-1",
+        "path": "/w/a.go"
+      },
+      "accepted": false
+    },
+    {
+      "name": "an acknowledgement",
+      "type": "WriteTextFileResponse",
+      "why": "a response whose only property is _meta still has to encode as an object",
+      "input": {},
+      "accepted": true,
+      "normalized": {}
+    },
+    {
+      "name": "a terminal",
+      "type": "CreateTerminalRequest",
+      "why": "the arrays both salvage invalid items, and the byte limit is an optional unsigned integer",
+      "input": {
+        "sessionId": "sess-1",
+        "command": "/bin/go",
+        "args": [
+          "test",
+          "./..."
+        ],
+        "env": [
+          {
+            "name": "GOFLAGS",
+            "value": "-count=1"
+          }
+        ],
+        "cwd": "/w",
+        "outputByteLimit": 1048576
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "command": "/bin/go",
+        "args": [
+          "test",
+          "./..."
+        ],
+        "env": [
+          {
+            "name": "GOFLAGS",
+            "value": "-count=1"
+          }
+        ],
+        "cwd": "/w",
+        "outputByteLimit": 1048576
+      }
+    },
+    {
+      "name": "a terminal with an invalid environment entry",
+      "type": "CreateTerminalRequest",
+      "why": "x-deserialize-skip-invalid-items drops the entry rather than the request",
+      "input": {
+        "sessionId": "sess-1",
+        "command": "/bin/go",
+        "env": [
+          {
+            "name": "A",
+            "value": "1"
+          },
+          {
+            "name": "B"
+          },
+          {
+            "name": "C",
+            "value": "3"
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "command": "/bin/go",
+        "env": [
+          {
+            "name": "A",
+            "value": "1"
+          },
+          {
+            "name": "C",
+            "value": "3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a terminal with a malformed argument list",
+      "type": "CreateTerminalRequest",
+      "why": "an array that is not an array recovers to an empty one, because the property cannot be null",
+      "input": {
+        "sessionId": "sess-1",
+        "command": "/bin/go",
+        "args": "test ./..."
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "command": "/bin/go",
+        "args": []
+      }
+    },
+    {
+      "name": "terminal output while it runs",
+      "type": "TerminalOutputResponse",
+      "why": "an absent exit status is how the response says the command has not finished",
+      "input": {
+        "output": "ok\n",
+        "truncated": false
+      },
+      "accepted": true,
+      "normalized": {
+        "output": "ok\n",
+        "truncated": false
+      }
+    },
+    {
+      "name": "terminal output after it exits",
+      "type": "TerminalOutputResponse",
+      "why": "both properties of an exit status are optional: a signal and a code are alternatives",
+      "input": {
+        "output": "ok\n",
+        "truncated": true,
+        "exitStatus": {
+          "exitCode": 0
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "output": "ok\n",
+        "truncated": true,
+        "exitStatus": {
+          "exitCode": 0
+        }
+      }
+    },
+    {
+      "name": "a terminal killed by a signal",
+      "type": "WaitForTerminalExitResponse",
+      "why": "the same shape reached through a different method",
+      "input": {
+        "signal": "SIGKILL"
+      },
+      "accepted": true,
+      "normalized": {
+        "signal": "SIGKILL"
+      }
+    },
+    {
+      "name": "a terminal that has not been told how it ended",
+      "type": "WaitForTerminalExitResponse",
+      "why": "neither property is required, so an empty object is a valid answer",
+      "input": {},
+      "accepted": true,
+      "normalized": {}
+    }
+  ]
+}

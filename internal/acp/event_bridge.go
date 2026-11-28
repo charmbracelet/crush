@@ -1,0 +1,915 @@
+// Package acp provides the ACP event bridge that translates Crush pubsub
+// events into ACP session/update notifications.
+package acp
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"log/slog"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	notify "github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/x/ansi"
+	acp "github.com/coder/acp-go-sdk"
+)
+
+// chunkDeliveryDelay is the delay between streamed ACP chunk
+// notifications. Since the message broker delivers debounced
+// full-turn snapshots rather than per-token deltas, spacing chunks
+// out makes output appear progressive rather than bursty.
+const chunkDeliveryDelay = 50 * time.Millisecond
+
+// absPather resolves a relative tool path into the absolute form the spec
+// requires on the wire (overview.md:160). Both the live event bridge and the
+// session/load replay need it, so both satisfy this.
+type absPather interface {
+	absPath(path string) string
+}
+
+// workingDir returns the directory relative tool paths resolve against. The
+// spec requires every file path on the wire to be absolute (overview.md:160),
+// and the tools resolve their own paths against this same directory, so this
+// is the value a relative input must be joined to.
+func (b *eventBridge) workingDir() string {
+	if b.app == nil {
+		return ""
+	}
+	store := b.app.Store()
+	if store == nil {
+		return ""
+	}
+	defer func() { _ = recover() }()
+	return store.WorkingDir()
+}
+
+// absPath resolves a path from a tool's input into the absolute form the spec
+// requires on the wire. A path that cannot be resolved is returned unchanged
+// rather than dropped, so a client still sees something rather than nothing.
+func (b *eventBridge) absPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	abs, err := filepath.Abs(filepathext.SmartJoin(b.workingDir(), path))
+	if err != nil {
+		return path
+	}
+	return abs
+}
+
+// eventBridge translates Crush agent events into ACP session updates.
+type eventBridge struct {
+	conn   *acp.AgentSideConnection
+	app    *app.App
+	log    *slog.Logger
+	cancel context.CancelFunc
+
+	noticesEnabled    func() bool
+	compactionEnabled func() bool
+
+	// mu guards the per-message tracking maps below. Message events carry a
+	// whole-message snapshot rather than a delta, so the difference against the
+	// last snapshot is the new content.
+	mu              sync.Mutex
+	streamed        map[string]int             // msgID -> text bytes already sent
+	thoughts        map[string]int             // msgID -> reasoning bytes already sent
+	toolCalls       map[string]map[string]bool // msgID -> toolCallID -> finished
+	toolResultSent  map[string]bool            // toolCallID -> content already sent
+	finished        map[string]bool            // toolCallID -> terminal status already reported
+	toolInputs      map[string]string          // toolCallID -> raw input JSON, for diff content
+	attachmentsSent map[string]int             // msgID -> binary content parts already sent
+	promptMeta      map[string]acp.Meta        // sessionID -> _meta from session/prompt
+	lastTitles      map[string]string          // sessionID -> last announced title
+
+	// pendingText tracks messages where thinking has started but not finished.
+	// Text for these messages is held back until thinking completes (FinishedAt > 0)
+	// to avoid interleaving agent_thought_chunk and agent_message_chunk.
+	pendingText map[string]bool
+}
+
+// withMessageID tags a chunk update with the message it belongs to. All
+// chunks of one message share the id so clients can group them.
+func withMessageID(update acp.SessionUpdate, id string) acp.SessionUpdate {
+	if id == "" {
+		return update
+	}
+	mid := acp.MessageId(id)
+	switch {
+	case update.AgentMessageChunk != nil:
+		update.AgentMessageChunk.MessageId = &mid
+	case update.AgentThoughtChunk != nil:
+		update.AgentThoughtChunk.MessageId = &mid
+	case update.UserMessageChunk != nil:
+		update.UserMessageChunk.MessageId = &mid
+	}
+	return update
+}
+
+// toolKindFor maps a Crush tool name to the closest ACP tool kind.
+func toolKindFor(name string) acp.ToolKind {
+	switch strings.ToLower(name) {
+	case "read", "view", "glob", "grep", "ls", "cat":
+		return acp.ToolKindRead
+	case "edit", "write", "str_replace", "multiedit":
+		return acp.ToolKindEdit
+	case "delete", "rm":
+		return acp.ToolKindDelete
+	case "move", "rename", "mv":
+		return acp.ToolKindMove
+	case "search":
+		return acp.ToolKindSearch
+	case "bash", "shell", "execute":
+		return acp.ToolKindExecute
+	case "fetch", "web_fetch":
+		return acp.ToolKindFetch
+	case "think":
+		return acp.ToolKindThink
+	case "switch_mode":
+		return acp.ToolKindSwitchMode
+	default:
+		return acp.ToolKindOther
+	}
+}
+
+// newEventBridge creates a bridge that listens for agent events and
+// forwards them as ACP session/update notifications.
+func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logger) *eventBridge {
+	return &eventBridge{
+		conn:            conn,
+		app:             app,
+		log:             log,
+		streamed:        make(map[string]int),
+		thoughts:        make(map[string]int),
+		toolCalls:       make(map[string]map[string]bool),
+		toolResultSent:  make(map[string]bool),
+		finished:        make(map[string]bool),
+		toolInputs:      make(map[string]string),
+		attachmentsSent: make(map[string]int),
+		promptMeta:      make(map[string]acp.Meta),
+		lastTitles:      make(map[string]string),
+		pendingText:     make(map[string]bool),
+	}
+}
+
+// SetPromptMeta records the _meta object received on the session/prompt request
+// so it is echoed on every outgoing session/update for that turn.
+func (b *eventBridge) SetPromptMeta(sessionID string, meta acp.Meta) {
+	if len(meta) == 0 {
+		return
+	}
+	b.mu.Lock()
+	b.promptMeta[sessionID] = meta
+	b.mu.Unlock()
+}
+
+// note builds a session notification, attaching any prompt-scoped _meta
+// captured for the current turn of that session.
+func (b *eventBridge) note(sessionID acp.SessionId, update acp.SessionUpdate) acp.SessionNotification {
+	note := acp.SessionNotification{SessionId: sessionID, Update: update}
+	b.mu.Lock()
+	meta := b.promptMeta[string(sessionID)]
+	b.mu.Unlock()
+	if len(meta) > 0 {
+		note.Meta = meta
+	}
+	return note
+}
+
+// Start begins listening for agent events. It returns when ctx is cancelled.
+func (b *eventBridge) Start(ctx context.Context) error {
+	ctx, b.cancel = context.WithCancel(ctx)
+
+	// Subscribe to agent notifications (errors, auth events, etc.)
+	if b.app.AgentNotifications() != nil {
+		go b.subscribeNotifications(ctx, b.app.AgentNotifications())
+	}
+	// Subscribe to run completions (turn-end signals)
+	if b.app.RunCompletions() != nil {
+		go b.subscribeRunCompletions(ctx, b.app.RunCompletions())
+	}
+	// Subscribe to message updates, which is where streaming assistant text
+	// actually lives. Without this a successful turn sends the client no
+	// session/update at all, and an editor that waits for the first
+	// agent_message_chunk shows a loading indicator forever.
+	if b.app.Messages != nil {
+		go b.subscribeMessages(ctx)
+	}
+	// Subscribe to session updates so an auto-generated title is announced
+	// rather than leaving the client showing the static new-session title.
+	if b.app.Sessions != nil {
+		go b.subscribeSessions(ctx)
+	}
+
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// Shutdown stops the event bridge.
+func (b *eventBridge) Shutdown() {
+	if b.cancel != nil {
+		b.cancel()
+	}
+}
+
+// subscribeMessages forwards assistant text as it streams. Message events hold
+// a full snapshot of the message, so what has not yet been sent is the tail
+// beyond the offset recorded for that message.
+func (b *eventBridge) subscribeMessages(ctx context.Context) {
+	ch := b.app.Messages.Subscribe(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-ch:
+			b.handleMessage(ctx, ev.Payload)
+		}
+	}
+}
+
+// subscribeSessions watches the session store for title changes. The store
+// publishes UpdatedEvent on rename and on the title-and-usage update that
+// follows a run, so the change-detection here is what keeps this from
+// announcing every usage-only save.
+func (b *eventBridge) subscribeSessions(ctx context.Context) {
+	ch := b.app.Sessions.Subscribe(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-ch:
+			if ev.Type != pubsub.CreatedEvent && ev.Type != pubsub.UpdatedEvent {
+				continue
+			}
+			b.handleSessionEvent(ctx, ev.Payload)
+		}
+	}
+}
+
+// handleSessionEvent emits a session_info_update when the stored title moved
+// since the last observation.
+func (b *eventBridge) handleSessionEvent(ctx context.Context, s session.Session) {
+	if !b.titleChanged(s) {
+		return
+	}
+	title := s.Title
+	now := time.Now().UTC().Format(time.RFC3339)
+	note := acp.SessionNotification{
+		SessionId: acp.SessionId(s.ID),
+		Update: acp.SessionUpdate{
+			SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
+				Title:     acp.PatchSet(title),
+				UpdatedAt: acp.PatchSet(now),
+			},
+		},
+	}
+	if err := b.conn.SessionUpdate(ctx, note); err != nil {
+		b.log.Warn("Failed to send session info update", "error", err)
+	}
+}
+
+// titleChanged records the session's title and reports whether it moved since
+// the previous observation. The first observation only seeds the baseline, so
+// the announcement session/new already made is not repeated and a session
+// loaded mid-life does not replay its old title.
+func (b *eventBridge) titleChanged(s session.Session) bool {
+	if s.ID == "" || s.Title == "" {
+		return false
+	}
+	b.mu.Lock()
+	last, seen := b.lastTitles[s.ID]
+	b.lastTitles[s.ID] = s.Title
+	b.mu.Unlock()
+	return seen && last != s.Title
+}
+
+func compactionUpdateFor(m message.Message) *acp.SessionCompactionUpdate {
+	text := m.Content().Text
+	if !m.IsSummaryMessage || text == "" {
+		return nil
+	}
+	return &acp.SessionCompactionUpdate{
+		CompactionId: acp.CompactionId(m.ID),
+		Status:       acp.CompactionStatusCompleted,
+		Summary:      acp.PatchSet([]acp.ContentBlock{acp.TextBlock(text)}),
+	}
+}
+
+func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
+	if update := compactionUpdateFor(m); update != nil {
+		if b.compactionAllowed() {
+			if err := b.conn.SessionUpdate(ctx, b.note(acp.SessionId(m.SessionID), acp.SessionUpdate{CompactionUpdate: update})); err != nil {
+				b.log.Warn("Failed to send compaction update", "error", err)
+			}
+		}
+		return
+	}
+	b.streamToolResults(ctx, m)
+	if m.Role != message.Assistant || m.SessionID == "" {
+		return
+	}
+
+	b.streamThoughts(ctx, m)
+
+	thinking := m.ReasoningContent()
+	hasThinking := len(thinking.Thinking) > 0
+	if hasThinking && thinking.FinishedAt == 0 {
+		b.mu.Lock()
+		b.pendingText[m.ID] = true
+		b.mu.Unlock()
+		return
+	}
+
+	b.mu.Lock()
+	delete(b.pendingText, m.ID)
+	b.mu.Unlock()
+
+	b.streamText(ctx, m)
+	b.streamToolCalls(ctx, m)
+	b.streamAttachments(ctx, m)
+}
+
+// streamAttachments emits binary content parts (images/audio produced by the
+// assistant, e.g. provider-executed tools) as agent_message_chunk content
+// blocks (O15). Part counts are tracked per message so re-snapshots do not
+// re-emit.
+func (b *eventBridge) streamAttachments(ctx context.Context, m message.Message) {
+	if m.Role != message.Assistant || m.SessionID == "" {
+		return
+	}
+	var bins []message.BinaryContent
+	for _, part := range m.Parts {
+		if bc, ok := part.(message.BinaryContent); ok && len(bc.Data) > 0 {
+			bins = append(bins, bc)
+		}
+	}
+	if len(bins) == 0 {
+		return
+	}
+
+	b.mu.Lock()
+	sent := b.attachmentsSent[m.ID]
+	if len(bins) < sent {
+		sent = 0
+	}
+	b.attachmentsSent[m.ID] = len(bins)
+	b.mu.Unlock()
+
+	sessionID := acp.SessionId(m.SessionID)
+	for _, bc := range bins[sent:] {
+		encoded := base64.StdEncoding.EncodeToString(bc.Data)
+		var block acp.ContentBlock
+		if strings.HasPrefix(bc.MIMEType, "audio/") {
+			block = acp.AudioBlock(encoded, bc.MIMEType)
+		} else {
+			block = acp.ImageBlock(encoded, bc.MIMEType)
+		}
+		if err := b.conn.SessionUpdate(ctx, b.note(sessionID, withMessageID(acp.UpdateAgentMessage(block), m.ID))); err != nil {
+			b.log.Warn("Failed to send attachment update", "error", err)
+		}
+	}
+}
+
+// streamToolResults surfaces executed tool output on its tool_call_update so
+// the client can observe tool results as they complete (O9). Without this a
+// tool-heavy turn is silent between the first tool batch and the final
+// assistant message, which reads as a stall. The terminal status is reported
+// here too: failed for tool errors, completed otherwise (S10). A per-toolCallID
+// guard prevents re-emitting the same result when a tool message is
+// re-snapshotted.
+func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) {
+	if m.Role != message.Tool || m.SessionID == "" {
+		return
+	}
+	for _, part := range m.Parts {
+		tr, ok := part.(message.ToolResult)
+		if !ok || tr.ToolCallID == "" {
+			continue
+		}
+		b.mu.Lock()
+		if b.toolResultSent[tr.ToolCallID] {
+			b.mu.Unlock()
+			continue
+		}
+		b.toolResultSent[tr.ToolCallID] = true
+		input := b.toolInputs[tr.ToolCallID]
+		b.mu.Unlock()
+
+		// A todos tool result carries the full plan state; surface it as a
+		// plan update so clients render the agent's task list (S4).
+		if plan := planUpdateFor(tr); plan != nil {
+			note := b.note(acp.SessionId(m.SessionID), acp.SessionUpdate{Plan: plan})
+			if err := b.conn.SessionUpdate(ctx, note); err != nil {
+				b.log.Warn("Failed to send plan update", "error", err)
+			}
+		}
+
+		status := acp.ToolCallStatusCompleted
+		text := tr.Content
+		if tr.IsError {
+			status = acp.ToolCallStatusFailed
+			text = "Error: " + text
+		}
+		var contents []acp.ToolCallContent
+		if text != "" {
+			contents = append(contents, acp.ToolContent(acp.TextBlock(text)))
+		}
+		if diff := diffContentFor(b, tr.Name, input, tr); diff != nil {
+			contents = append(contents, *diff)
+		}
+		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status), acp.WithUpdateName(tr.Name)}
+		if len(contents) > 0 {
+			opts = append(opts,
+				acp.WithUpdateContent(contents),
+				acp.WithUpdateRawOutput(tr.Content),
+			)
+		}
+		note := b.note(acp.SessionId(m.SessionID), acp.UpdateToolCall(acp.ToolCallId(tr.ToolCallID), opts...))
+		if err := b.conn.SessionUpdate(ctx, note); err != nil {
+			b.log.Warn("Failed to send tool result update", "error", err)
+		}
+
+		b.mu.Lock()
+		b.finished[tr.ToolCallID] = true
+		b.mu.Unlock()
+	}
+}
+
+// splitDelta splits a streaming delta into ~4-word chunks so the ACP
+// client sees smooth, token-sized updates rather than large paragraph
+// jumps. Original whitespace is preserved exactly so spaces at chunk
+// and delta boundaries are not lost.
+func splitDelta(delta string) []string {
+	if delta == "" {
+		return nil
+	}
+	var chunks []string
+	const wordsPerChunk = 4
+	s := delta
+	for len(s) > 0 {
+		pos := 0
+		wordCount := 0
+		for wordCount < wordsPerChunk && pos < len(s) {
+			for pos < len(s) && isSpace(s[pos]) {
+				pos++
+			}
+			if pos >= len(s) {
+				break
+			}
+			wordCount++
+			for pos < len(s) && !isSpace(s[pos]) {
+				pos++
+			}
+		}
+		if wordCount < wordsPerChunk {
+			chunks = append(chunks, s)
+			break
+		}
+		chunks = append(chunks, s[:pos])
+		s = s[pos:]
+	}
+	return chunks
+}
+
+func isSpace(c byte) bool {
+	return c == ' ' || c == '\n' || c == '\t'
+}
+
+// streamText streams the new tail of the assistant message text.
+func (b *eventBridge) streamText(ctx context.Context, m message.Message) {
+	text := m.Content().Text
+
+	b.mu.Lock()
+	sent := b.streamed[m.ID]
+	if len(text) < sent {
+		// The message was replaced or rewritten; resend from the start.
+		sent = 0
+	}
+	b.streamed[m.ID] = len(text)
+	b.mu.Unlock()
+
+	if len(text) <= sent {
+		return
+	}
+	delta := text[sent:]
+	// Split large streaming deltas into small pieces (~4 words) so Zed
+	// sees smooth, token-sized updates rather than paragraph-sized jumps.
+	chunks := splitDelta(delta)
+	for i, chunk := range chunks {
+		update := acp.SessionNotification{
+			SessionId: acp.SessionId(m.SessionID),
+			Update:    withMessageID(acp.UpdateAgentMessageText(chunk), m.ID),
+		}
+		if err := b.conn.SessionUpdate(ctx, update); err != nil {
+			b.log.Warn("Failed to send streamed session update", "error", err)
+		}
+		// Throttle chunk delivery so the client perceives progressive
+		// output instead of a single burst. The message broker delivers
+		// debounced full-turn snapshots (not per-token deltas), so we space
+		// the split chunks out to approximate streaming cadence.
+		if i < len(chunks)-1 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(chunkDeliveryDelay):
+			}
+		}
+	}
+}
+
+// streamThoughts streams reasoning deltas as agent_thought_chunk updates (S3).
+func (b *eventBridge) streamThoughts(ctx context.Context, m message.Message) {
+	thinking := m.ReasoningContent().Thinking
+
+	b.mu.Lock()
+	sent := b.thoughts[m.ID]
+	if len(thinking) < sent {
+		sent = 0
+	}
+	b.thoughts[m.ID] = len(thinking)
+	b.mu.Unlock()
+
+	if len(thinking) <= sent {
+		return
+	}
+	delta := thinking[sent:]
+	chunks := splitDelta(delta)
+	for i, chunk := range chunks {
+		update := acp.SessionNotification{
+			SessionId: acp.SessionId(m.SessionID),
+			Update:    withMessageID(acp.UpdateAgentThoughtText(chunk), m.ID),
+		}
+		if err := b.conn.SessionUpdate(ctx, update); err != nil {
+			b.log.Warn("Failed to send streamed session update", "error", err)
+		}
+		if i < len(chunks)-1 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(chunkDeliveryDelay):
+			}
+		}
+	}
+}
+
+// streamToolCalls diffs the tool calls in a message snapshot and emits
+// tool_call / tool_call_update notifications as tools start and finish (S1).
+// Starts carry a human-readable title, tool kind, file locations, and rawInput
+// (S10). The pending status while a tool waits for permission approval is
+// emitted by the permission bridge (see permission.go).
+func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
+	type action struct {
+		id    string
+		name  string
+		input string
+	}
+	var starts, enrichments []action
+
+	b.mu.Lock()
+	seen := b.toolCalls[m.ID]
+	if seen == nil {
+		seen = make(map[string]bool)
+		b.toolCalls[m.ID] = seen
+	}
+	for _, tc := range m.ToolCalls() {
+		// A terminal status reported via the tool-result path wins; skip the
+		// redundant start for this call.
+		if b.finished[tc.ID] {
+			seen[tc.ID] = true
+			continue
+		}
+		if !seen[tc.ID] {
+			seen[tc.ID] = true
+			b.toolInputs[tc.ID] = tc.Input
+			starts = append(starts, action{id: tc.ID, name: tc.Name, input: tc.Input})
+			continue
+		}
+		// A tool call is reported as soon as the model starts emitting it,
+		// before its arguments exist. The arguments that arrive afterwards
+		// are what the client needs to render the call, so re-announce the
+		// title and rawInput once the input shows up.
+		if prev := b.toolInputs[tc.ID]; prev != tc.Input && tc.Input != "" {
+			b.toolInputs[tc.ID] = tc.Input
+			enrichments = append(enrichments, action{id: tc.ID, name: tc.Name, input: tc.Input})
+		}
+	}
+	b.mu.Unlock()
+
+	sessionID := acp.SessionId(m.SessionID)
+	for _, a := range enrichments {
+		opts := []acp.ToolCallUpdateOpt{
+			acp.WithUpdateTitle(toolTitle(a.name, a.input)),
+			acp.WithUpdateRawInput(toolRawInput(a.input)),
+		}
+		if locs := b.toolLocations(a.input); len(locs) > 0 {
+			opts = append(opts, acp.WithUpdateLocations(locs))
+		}
+		note := b.note(sessionID, acp.UpdateToolCall(acp.ToolCallId(a.id), opts...))
+		if err := b.conn.SessionUpdate(ctx, note); err != nil {
+			b.log.Warn("Failed to send tool call input update", "error", err)
+		}
+	}
+	for _, a := range starts {
+		// A tool call is in progress from its first report until its result
+		// arrives. message.ToolCall.Finished means the model finished sending
+		// the arguments, not that the tool ran, so it cannot drive the status.
+		opts := []acp.ToolCallStartOpt{
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
+			acp.WithStartName(a.name),
+			acp.WithStartKind(toolKindFor(a.name)),
+			acp.WithStartRawInput(toolRawInput(a.input)),
+		}
+		if locs := b.toolLocations(a.input); len(locs) > 0 {
+			opts = append(opts, acp.WithStartLocations(locs))
+		}
+		if a.input != "" {
+			opts = append(opts, acp.WithStartContent([]acp.ToolCallContent{
+				acp.ToolContent(acp.TextBlock(a.input)),
+			}))
+		}
+		note := b.note(sessionID, acp.StartToolCall(acp.ToolCallId(a.id), toolTitle(a.name, a.input), opts...))
+		if err := b.conn.SessionUpdate(ctx, note); err != nil {
+			b.log.Warn("Failed to send tool call update", "error", err)
+		}
+	}
+}
+
+// planUpdateFor converts a todos tool result's metadata into a plan update
+// (S4). Every notification carries the full entry list, which clients must
+// replace completely. Returns nil when the result is not a usable todos
+// result. Crush todos carry no priority, so medium is used for all entries.
+func planUpdateFor(tr message.ToolResult) *acp.SessionUpdatePlan {
+	if tr.Name != "todos" || tr.IsError {
+		return nil
+	}
+	var meta struct {
+		Todos []struct {
+			Content string `json:"content"`
+			Status  string `json:"status"`
+		} `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(tr.Metadata), &meta); err != nil || len(meta.Todos) == 0 {
+		return nil
+	}
+	entries := make([]acp.PlanEntry, 0, len(meta.Todos))
+	for _, todo := range meta.Todos {
+		status := acp.PlanEntryStatusPending
+		switch todo.Status {
+		case "in_progress":
+			status = acp.PlanEntryStatusInProgress
+		case "completed":
+			status = acp.PlanEntryStatusCompleted
+		}
+		entries = append(entries, acp.PlanEntry{
+			Content:  todo.Content,
+			Priority: acp.PlanEntryPriorityMedium,
+			Status:   status,
+		})
+	}
+	return &acp.SessionUpdatePlan{Entries: entries}
+}
+
+// diffContentFor builds ACP diff tool-call content for file-modifying tool
+// results (edit/multiedit) from their old/new content metadata. Returns nil
+// when no diff data is available. An empty old content means the file was
+// created, which the protocol represents as a diff without oldText.
+func diffContentFor(b absPather, name, input string, tr message.ToolResult) *acp.ToolCallContent {
+	if tr.IsError || (name != "edit" && name != "multiedit" && name != "lsp_replace_symbol") {
+		return nil
+	}
+	var meta struct {
+		OldContent string `json:"old_content"`
+		NewContent string `json:"new_content"`
+	}
+	if err := json.Unmarshal([]byte(tr.Metadata), &meta); err != nil || meta.NewContent == "" {
+		return nil
+	}
+	var params struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal([]byte(input), &params); err != nil || params.FilePath == "" {
+		return nil
+	}
+	// The diff path must be absolute like every other path on the wire
+	// (overview.md:160). The tool resolves against the same working directory.
+	path := b.absPath(params.FilePath)
+	if meta.OldContent == "" {
+		content := acp.ToolDiffContent(path, meta.NewContent)
+		return &content
+	}
+	content := acp.ToolDiffContent(path, meta.NewContent, meta.OldContent)
+	return &content
+}
+
+// toolTitle derives a human-readable tool_call title from the tool name and
+// its JSON input. The first meaningful argument (path, command, query, ...) is
+// appended so clients can show what the tool is acting on.
+func toolTitle(name, input string) string {
+	arg := toolPrimaryArg(input)
+	if arg == "" {
+		return capitalize(name)
+	}
+	arg = ansi.Truncate(arg, 80, "...")
+	return capitalize(name) + ": " + arg
+}
+
+// toolPrimaryArg extracts the most descriptive string field from a tool input
+// JSON object for display in the tool title.
+func toolPrimaryArg(input string) string {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(input), &obj); err != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "path", "file_path", "pattern", "query", "url", "description"} {
+		if v, ok := obj[key].(string); ok && v != "" {
+			return strings.ReplaceAll(v, "\n", " ")
+		}
+	}
+	return ""
+}
+
+// toolLocations extracts file paths from a tool input JSON object as ACP
+// tool-call locations so clients can follow the agent across files. Paths are
+// resolved to their absolute form, which the spec requires on the wire
+// (overview.md:160).
+func (b *eventBridge) toolLocations(input string) []acp.ToolCallLocation {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(input), &obj); err != nil {
+		return nil
+	}
+	var locs []acp.ToolCallLocation
+	for _, key := range []string{"path", "file_path", "notebook_path"} {
+		if v, ok := obj[key].(string); ok && v != "" {
+			locs = append(locs, acp.ToolCallLocation{Path: b.absPath(v)})
+		}
+	}
+	return locs
+}
+
+// toolRawInput decodes a tool input JSON string into a raw JSON value for the
+// tool_call rawInput field. Non-JSON input is passed through as a string.
+func toolRawInput(input string) any {
+	if input == "" {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal([]byte(input), &v); err != nil {
+		return input
+	}
+	return v
+}
+
+// capitalize uppercases the first rune of s.
+func capitalize(s string) string {
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	return string(unicode.ToUpper(r[0])) + string(r[1:])
+}
+
+func (b *eventBridge) subscribeNotifications(ctx context.Context, broker *pubsub.Broker[notify.Notification]) {
+	ch := broker.Subscribe(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-ch:
+			b.handleNotification(ctx, ev.Payload)
+		}
+	}
+}
+
+func (b *eventBridge) subscribeRunCompletions(ctx context.Context, broker *pubsub.Broker[notify.RunComplete]) {
+	ch := broker.Subscribe(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-ch:
+			b.handleRunComplete(ctx, ev.Payload)
+		}
+	}
+}
+
+// handleNotification converts agent notifications to ACP session updates.
+func (b *eventBridge) handleNotification(ctx context.Context, n notify.Notification) {
+	sessionID := acp.SessionId(n.SessionID)
+	switch n.Type {
+	case notify.TypeAgentError:
+		b.log.Info("ACP: agent error", "sessionId", n.SessionID, "message", n.Message)
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityError, "Agent error", "[Error] "+n.Message)
+	case notify.TypeAgentFinished:
+		b.log.Info("ACP: agent finished", "sessionId", n.SessionID)
+		// No explicit update needed - prompt response handles completion
+	case notify.TypeReAuthenticate:
+		b.log.Info("ACP: re-auth required", "sessionId", n.SessionID, "provider", n.ProviderID)
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityWarning, "Authentication required", "[Auth Required] Please re-authenticate with "+n.ProviderID)
+	default:
+		b.log.Debug("ACP: unknown notification type", "type", n.Type)
+	}
+}
+
+// handleRunComplete sends a final update when a turn completes. On error or
+// cancellation it surfaces a short message; on success the prompt response
+// already signalled completion. It always emits a usage_update (O13) so the
+// client can show token usage and cost for the session.
+func (b *eventBridge) handleRunComplete(ctx context.Context, rc notify.RunComplete) {
+	sessionID := acp.SessionId(rc.SessionID)
+	b.log.Info("ACP: run complete", "sessionId", rc.SessionID, "cancelled", rc.Cancelled)
+
+	switch {
+	case rc.Cancelled:
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityInfo, "Prompt cancelled", "[Cancelled] The operation was cancelled.")
+	case rc.Error != "":
+		b.sendTextOrNotice(ctx, sessionID, acp.NoticeSeverityError, "Agent error", "[Error] "+rc.Error)
+	}
+
+	b.usageUpdate(ctx, rc.SessionID)
+
+	b.mu.Lock()
+	b.pendingText = make(map[string]bool)
+	delete(b.promptMeta, rc.SessionID)
+	b.mu.Unlock()
+}
+
+// sendText emits an agent_message_chunk carrying the given text.
+func (b *eventBridge) sendText(ctx context.Context, sessionID acp.SessionId, text string) {
+	if err := b.conn.SessionUpdate(ctx, b.note(sessionID, acp.UpdateAgentMessageText(text))); err != nil {
+		b.log.Warn("Failed to send session update", "error", err)
+	}
+}
+
+func (b *eventBridge) noticesAllowed() bool {
+	return b.noticesEnabled != nil && b.noticesEnabled()
+}
+
+func (b *eventBridge) compactionAllowed() bool {
+	return b.compactionEnabled != nil && b.compactionEnabled()
+}
+
+func (b *eventBridge) sendNotice(ctx context.Context, sessionID acp.SessionId, severity acp.NoticeSeverity, title, description string) {
+	update := acp.SessionUpdate{Notice: &acp.SessionUpdateNotice{
+		Severity: severity,
+		Title:    title,
+	}}
+	if description != "" {
+		update.Notice.Description = acp.Ptr(description)
+	}
+	if err := b.conn.SessionUpdate(ctx, b.note(sessionID, update)); err != nil {
+		b.log.Warn("Failed to send notice update", "error", err)
+	}
+}
+
+func (b *eventBridge) sendTextOrNotice(ctx context.Context, sessionID acp.SessionId, severity acp.NoticeSeverity, title, fallback string) {
+	if b.noticesAllowed() {
+		b.sendNotice(ctx, sessionID, severity, title, fallback)
+		return
+	}
+	b.sendText(ctx, sessionID, fallback)
+}
+
+// usageUpdate emits a SessionUsageUpdate reporting the session's cumulative
+// token usage against the active model's context window, plus cumulative cost
+// (O13). It is a best-effort signal: missing usage data is simply omitted.
+func (b *eventBridge) usageUpdate(ctx context.Context, sessionID string) {
+	session, err := b.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return
+	}
+
+	used := int64(session.PromptTokens + session.CompletionTokens)
+	cost := &acp.Cost{Amount: session.Cost, Currency: "USD"}
+
+	size := int64(0)
+	if store := b.app.Store(); store != nil {
+		cfg := store.Config()
+		if model := cfg.GetModelByType(cfg.Agents[config.AgentCoder].Model); model != nil {
+			size = int64(model.ContextWindow)
+		}
+	}
+
+	update := acp.SessionNotification{
+		SessionId: acp.SessionId(sessionID),
+		Update: acp.SessionUpdate{
+			UsageUpdate: &acp.SessionUsageUpdate{
+				SessionUpdate: "usage_update",
+				Size:          size,
+				Used:          used,
+				Cost:          cost,
+			},
+		},
+	}
+	if err := b.conn.SessionUpdate(ctx, update); err != nil {
+		b.log.Warn("Failed to send usage update", "error", err)
+	}
+}

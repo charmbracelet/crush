@@ -1,0 +1,274 @@
+{
+  "type": "NewSessionRequest",
+  "cases": [
+    {
+      "name": "minimal",
+      "why": "the baseline: a working directory and an empty server list",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": []
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "mcpServers": []
+      }
+    },
+    {
+      "name": "missing required array with recovery",
+      "why": "x-deserialize-default-on-error recovers from a malformed value, never from an absent one",
+      "input": {
+        "cwd": "/work"
+      },
+      "accepted": false
+    },
+    {
+      "name": "required array malformed",
+      "why": "a required array that cannot be null recovers to an empty array rather than failing",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": "none"
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "mcpServers": []
+      }
+    },
+    {
+      "name": "required array with an invalid item",
+      "why": "x-deserialize-skip-invalid-items drops the item, not the message",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": [
+          {
+            "type": "http",
+            "name": "a",
+            "url": "https://a",
+            "headers": []
+          },
+          {
+            "type": "http",
+            "name": "b"
+          },
+          {
+            "name": "c",
+            "command": "/bin/c",
+            "args": [],
+            "env": []
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "mcpServers": [
+          {
+            "name": "a",
+            "url": "https://a",
+            "headers": [],
+            "type": "http"
+          },
+          {
+            "name": "c",
+            "command": "/bin/c",
+            "args": [],
+            "env": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "optional array absent",
+      "why": "an optional array's absent state is its own, and re-encoding must not invent an empty one",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": []
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "mcpServers": []
+      }
+    },
+    {
+      "name": "optional array malformed",
+      "why": "the same fallback as the required case: an array that cannot be null recovers to empty",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": [],
+        "additionalDirectories": 3
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "additionalDirectories": [],
+        "mcpServers": []
+      }
+    },
+    {
+      "name": "optional array with an invalid item",
+      "why": "item recovery applies to arrays of scalars too",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": [],
+        "additionalDirectories": [
+          "/a",
+          7,
+          "/b"
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "additionalDirectories": [
+          "/a",
+          "/b"
+        ],
+        "mcpServers": []
+      }
+    },
+    {
+      "name": "optional array empty",
+      "why": "empty and absent are different: this one is present",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": [],
+        "additionalDirectories": []
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "additionalDirectories": [],
+        "mcpServers": []
+      }
+    },
+    {
+      "name": "every server arm",
+      "why": "the published stable union has two tagged arms and one untagged arm",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": [
+          {
+            "type": "http",
+            "name": "h",
+            "url": "https://h",
+            "headers": [
+              {
+                "name": "A",
+                "value": "b"
+              }
+            ]
+          },
+          {
+            "type": "sse",
+            "name": "s",
+            "url": "https://s",
+            "headers": []
+          },
+          {
+            "name": "d",
+            "command": "/bin/d",
+            "args": [
+              "--x"
+            ],
+            "env": [
+              {
+                "name": "K",
+                "value": "v"
+              }
+            ]
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "mcpServers": [
+          {
+            "name": "h",
+            "url": "https://h",
+            "headers": [
+              {
+                "name": "A",
+                "value": "b"
+              }
+            ],
+            "type": "http"
+          },
+          {
+            "name": "s",
+            "url": "https://s",
+            "headers": [],
+            "type": "sse"
+          },
+          {
+            "name": "d",
+            "command": "/bin/d",
+            "args": [
+              "--x"
+            ],
+            "env": [
+              {
+                "name": "K",
+                "value": "v"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "server arm with an unknown tag",
+      "why": "no arm claims the tag and the untagged arm does not match, so the item is dropped",
+      "input": {
+        "cwd": "/work",
+        "mcpServers": [
+          {
+            "type": "quantum",
+            "name": "q"
+          },
+          {
+            "name": "d",
+            "command": "/bin/d",
+            "args": [],
+            "env": []
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "/work",
+        "mcpServers": [
+          {
+            "name": "d",
+            "command": "/bin/d",
+            "args": [],
+            "env": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing required string",
+      "why": "a required string is required even though its empty value is valid",
+      "input": {
+        "mcpServers": []
+      },
+      "accepted": false
+    },
+    {
+      "name": "required string empty",
+      "why": "the schema states no minimum length, so the empty string is a value and not an absence",
+      "input": {
+        "cwd": "",
+        "mcpServers": []
+      },
+      "accepted": true,
+      "normalized": {
+        "cwd": "",
+        "mcpServers": []
+      }
+    }
+  ]
+}

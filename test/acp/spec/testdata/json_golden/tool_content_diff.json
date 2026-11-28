@@ -1,0 +1,6 @@
+{
+  "type": "diff",
+  "path": "/home/user/project/src/config.json",
+  "oldText": "{\n  \"debug\": false\n}",
+  "newText": "{\n  \"debug\": true\n}"
+}

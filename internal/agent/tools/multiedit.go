@@ -76,6 +76,32 @@ func NewMultiEditTool(
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
 
+			// A write outside the session's root set needs the user's consent.
+			// This is the escape hatch the spec allows (security.md:451).
+			if OutsideRoots(GetRootsFromContext(ctx), params.FilePath) {
+				sessionID := GetSessionFromContext(ctx)
+				if sessionID == "" {
+					return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
+				}
+				granted, permReqErr := permissions.Request(
+					ctx,
+					permission.CreatePermissionRequest{
+						SessionID:   sessionID,
+						Path:        params.FilePath,
+						ToolCallID:  call.ID,
+						ToolName:    MultiEditToolName,
+						Action:      "write",
+						Description: fmt.Sprintf("Edit file outside the session root set: %s", params.FilePath),
+					},
+				)
+				if permReqErr != nil {
+					return fantasy.ToolResponse{}, permReqErr
+				}
+				if !granted {
+					return NewPermissionDeniedResponse(), nil
+				}
+			}
+
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

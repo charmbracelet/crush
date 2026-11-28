@@ -1,0 +1,296 @@
+{
+  "type": "",
+  "$comment": "The rest of a turn: creating a session, asking permission, ending, and the JSON-RPC error object that any of them may answer with.",
+  "cases": [
+    {
+      "name": "a new session with modes and config options",
+      "type": "NewSessionResponse",
+      "why": "the response a handle cannot absorb: three properties besides the session id",
+      "input": {
+        "sessionId": "sess-1",
+        "modes": {
+          "currentModeId": "ask",
+          "availableModes": [
+            {
+              "id": "ask",
+              "name": "Ask first"
+            },
+            {
+              "id": "code",
+              "name": "Write code",
+              "description": "no questions"
+            }
+          ]
+        },
+        "configOptions": [
+          {
+            "id": "cfg",
+            "name": "Verbose",
+            "type": "boolean",
+            "currentValue": false
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "modes": {
+          "currentModeId": "ask",
+          "availableModes": [
+            {
+              "id": "ask",
+              "name": "Ask first"
+            },
+            {
+              "id": "code",
+              "name": "Write code",
+              "description": "no questions"
+            }
+          ]
+        },
+        "configOptions": [
+          {
+            "currentValue": false,
+            "type": "boolean",
+            "id": "cfg",
+            "name": "Verbose"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a permission request",
+      "type": "RequestPermissionRequest",
+      "why": "its toolCall property is the same payload a SessionUpdate arm carries, untagged here",
+      "input": {
+        "sessionId": "sess-1",
+        "toolCall": {
+          "toolCallId": "call-1",
+          "title": "Delete a file",
+          "kind": "delete"
+        },
+        "options": [
+          {
+            "optionId": "yes",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "no",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "toolCall": {
+          "toolCallId": "call-1",
+          "kind": "delete",
+          "title": "Delete a file"
+        },
+        "options": [
+          {
+            "optionId": "yes",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "no",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a permission granted",
+      "type": "RequestPermissionResponse",
+      "why": "the selected arm carries a payload of its own",
+      "input": {
+        "outcome": {
+          "outcome": "selected",
+          "optionId": "yes"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "outcome": {
+          "optionId": "yes",
+          "outcome": "selected"
+        }
+      }
+    },
+    {
+      "name": "a permission cancelled",
+      "type": "RequestPermissionResponse",
+      "why": "the cancelled arm carries nothing but its discriminant, which is why it needs a generated type",
+      "input": {
+        "outcome": {
+          "outcome": "cancelled"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "outcome": {
+          "outcome": "cancelled"
+        }
+      }
+    },
+    {
+      "name": "a permission outcome with an unknown arm",
+      "type": "RequestPermissionResponse",
+      "why": "the union is closed: an outcome the schema does not define is not an outcome",
+      "input": {
+        "outcome": {
+          "outcome": "deferred"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a turn that ended",
+      "type": "PromptResponse",
+      "why": "the stop reason is a closed enumeration, and a caller's switch over it was promised to be exhaustive",
+      "input": {
+        "stopReason": "end_turn"
+      },
+      "accepted": true,
+      "normalized": {
+        "stopReason": "end_turn"
+      }
+    },
+    {
+      "name": "a turn that was cancelled",
+      "type": "PromptResponse",
+      "why": "the value the protocol requires after session/cancel",
+      "input": {
+        "stopReason": "cancelled"
+      },
+      "accepted": true,
+      "normalized": {
+        "stopReason": "cancelled"
+      }
+    },
+    {
+      "name": "a predefined error code",
+      "type": "Error",
+      "why": "the eight the schema names",
+      "input": {
+        "code": -32000,
+        "message": "Authentication required"
+      },
+      "accepted": true,
+      "normalized": {
+        "code": -32000,
+        "message": "Authentication required"
+      }
+    },
+    {
+      "name": "an unknown in-range error code",
+      "type": "Error",
+      "why": "the ninth arm of the union is an unrestricted int32, so this is valid and must survive",
+      "input": {
+        "code": -32050,
+        "message": "something else"
+      },
+      "accepted": true,
+      "normalized": {
+        "code": -32050,
+        "message": "something else"
+      }
+    },
+    {
+      "name": "an error carrying data",
+      "type": "Error",
+      "why": "data is a property the schema constrains not at all, so any JSON value survives it",
+      "input": {
+        "code": -32603,
+        "message": "boom",
+        "data": {
+          "where": [
+            "a",
+            1,
+            null
+          ],
+          "retry": true
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "code": -32603,
+        "message": "boom",
+        "data": {
+          "where": [
+            "a",
+            1,
+            null
+          ],
+          "retry": true
+        }
+      }
+    },
+    {
+      "name": "an error whose data is null",
+      "type": "Error",
+      "why": "an unconstrained property admits null too, so null is a value rather than an absence",
+      "input": {
+        "code": -32603,
+        "message": "boom",
+        "data": null
+      },
+      "accepted": true,
+      "normalized": {
+        "code": -32603,
+        "message": "boom",
+        "data": null
+      }
+    },
+    {
+      "name": "an error with no code",
+      "type": "Error",
+      "why": "both the code and the message are required",
+      "input": {
+        "message": "boom"
+      },
+      "accepted": false
+    },
+    {
+      "name": "a cancellation",
+      "type": "CancelNotification",
+      "why": "the notification that ends a turn without ending the request",
+      "input": {
+        "sessionId": "sess-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1"
+      }
+    },
+    {
+      "name": "a mode change",
+      "type": "SetSessionModeRequest",
+      "why": "two required identifiers and nothing else",
+      "input": {
+        "sessionId": "sess-1",
+        "modeId": "code"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "modeId": "code"
+      }
+    },
+    {
+      "name": "a fractional error code",
+      "type": "Error",
+      "why": "the same clause, on a property where the reference implementation does check it: the code union's arms are const integers, and a fraction matches none of them",
+      "input": {
+        "code": -32603.5,
+        "message": "boom"
+      },
+      "accepted": false
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "sessionUpdate": "plan",
+  "entries": [
+    {
+      "content": "Check for syntax errors",
+      "priority": "high",
+      "status": "pending"
+    },
+    {
+      "content": "Identify potential type issues",
+      "priority": "medium",
+      "status": "pending"
+    }
+  ]
+}

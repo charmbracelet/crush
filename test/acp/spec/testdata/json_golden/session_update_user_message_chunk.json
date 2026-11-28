@@ -1,0 +1,7 @@
+{
+  "sessionUpdate": "user_message_chunk",
+  "content": {
+    "type": "text",
+    "text": "What's the capital of France?"
+  }
+}

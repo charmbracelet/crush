@@ -132,6 +132,29 @@ func NewViewTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
 			}
 
+			// A path outside the session's root set needs the user's consent,
+			// which is the escape hatch the spec allows (security.md:451).
+			if OutsideRoots(GetRootsFromContext(ctx), absFilePath) {
+				granted, permReqErr := permissions.Request(
+					ctx,
+					permission.CreatePermissionRequest{
+						SessionID:   sessionID,
+						Path:        absFilePath,
+						ToolCallID:  call.ID,
+						ToolName:    ViewToolName,
+						Action:      "read",
+						Description: fmt.Sprintf("Read file outside the session root set: %s", absFilePath),
+						Params:      ViewPermissionsParams(params),
+					},
+				)
+				if permReqErr != nil {
+					return fantasy.ToolResponse{}, permReqErr
+				}
+				if !granted {
+					return NewPermissionDeniedResponse(), nil
+				}
+			}
+
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
 				granted, permReqErr := permissions.Request(
@@ -231,7 +254,18 @@ func NewViewTool(
 			if isSkillFile {
 				maxContentSize = 0
 			}
-			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit, maxContentSize)
+			var content string
+			var hasMore bool
+			if clientFS != nil {
+				// The client can supply its own (possibly unsaved) view.
+				text, readErr := clientFS.ReadTextFile(ctx, filePath)
+				if readErr != nil {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to read file: %s", readErr)), nil
+				}
+				content, hasMore, err = windowClientText(text, params.Offset, params.Limit, maxContentSize)
+			} else {
+				content, hasMore, err = readTextFile(filePath, params.Offset, params.Limit, maxContentSize)
+			}
 			if err != nil {
 				var tooLarge contentTooLargeError
 				if errors.As(err, &tooLarge) {
@@ -359,6 +393,41 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 		hasMore = len(lineText) > 0 || peekErr == nil
 	}
 
+	return strings.Join(lines, "\n"), hasMore, nil
+}
+
+// windowClientText applies the same offset/limit/size window as readTextFile
+// to text supplied by a connected client.
+func windowClientText(text string, offset, limit, maxContentSize int) (string, bool, error) {
+	all := strings.Split(text, "\n")
+	if len(all) > 0 && all[len(all)-1] == "" {
+		all = all[:len(all)-1]
+	}
+	if offset >= len(all) {
+		return "", false, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	end := min(offset+limit, len(all))
+	hasMore := end < len(all)
+	lines := all[offset:end]
+	size := 0
+	for i, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		if len(line) > MaxLineLength {
+			line = strings.ToValidUTF8(line[:MaxLineLength], "") + "..."
+		}
+		projected := size + len(line)
+		if i > 0 {
+			projected++
+		}
+		if maxContentSize > 0 && projected > maxContentSize {
+			return "", false, contentTooLargeError{Size: projected, Max: maxContentSize}
+		}
+		size = projected
+		lines[i] = line
+	}
 	return strings.Join(lines, "\n"), hasMore, nil
 }
 

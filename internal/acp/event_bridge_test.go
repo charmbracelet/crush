@@ -1,0 +1,695 @@
+package acp
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"path/filepath"
+	"testing"
+	"time"
+
+	notify "github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
+	acp "github.com/coder/acp-go-sdk"
+	"github.com/stretchr/testify/require"
+)
+
+func TestEventBridge_StartAndStop(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	srv.StartEventBridge(ctx)
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	time.Sleep(10 * time.Millisecond)
+}
+
+func TestEventBridge_ClientDisconnect(t *testing.T) {
+	// Two pipes, not one. A single io.Pipe used for both directions makes the
+	// client and server read each other's writes, which races their scanners and
+	// hangs the test intermittently.
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	srv.StartEventBridge(ctx)
+	defer cancel()
+
+	clientDone := make(chan struct{})
+	go func() {
+		defer close(clientDone)
+		c := acp.NewClientSideConnection(&testClient{}, c2aW, a2cR)
+		_, _ = c.Initialize(ctx, acp.InitializeRequest{
+			ProtocolVersion:    acp.ProtocolVersionNumber,
+			ClientCapabilities: acp.ClientCapabilities{},
+		})
+		_ = c2aW.Close()
+	}()
+
+	select {
+	case <-clientDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for client")
+	}
+}
+
+func TestEventBridge_CompactionGating(t *testing.T) {
+	summary := message.Message{
+		ID:               "cmp-1",
+		SessionID:        "sess-1",
+		Role:             message.Assistant,
+		Parts:            []message.ContentPart{message.TextContent{Text: "retained"}},
+		IsSummaryMessage: true,
+	}
+	update := compactionUpdateFor(summary)
+	require.NotNil(t, update)
+	require.Equal(t, acp.CompactionId("cmp-1"), update.CompactionId)
+	require.Equal(t, acp.CompactionStatusCompleted, update.Status)
+	summaryText, ok := update.Summary.Value()
+	require.True(t, ok)
+	require.Equal(t, "retained", summaryText[0].Text.Text)
+
+	require.Nil(t, compactionUpdateFor(message.Message{
+		ID:    "plain",
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "plain"}},
+	}))
+}
+
+func TestEventBridge_NoticeGating(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(&app.App{}, log, c2aR, a2cW)
+	bridge := srv.eventBridge
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+	ctx := context.Background()
+
+	bridge.sendTextOrNotice(ctx, "sess-1", acp.NoticeSeverityInfo, "Prompt cancelled", "[Cancelled] done")
+	fallback := <-cc.ch
+	require.NotNil(t, fallback.AgentMessageChunk)
+
+	bridge.noticesEnabled = func() bool { return true }
+	bridge.sendTextOrNotice(ctx, "sess-1", acp.NoticeSeverityInfo, "Prompt cancelled", "[Cancelled] done")
+	notice := <-cc.ch
+	require.NotNil(t, notice.Notice)
+	require.Equal(t, acp.NoticeSeverityInfo, notice.Notice.Severity)
+	require.Equal(t, "Prompt cancelled", notice.Notice.Title)
+}
+
+// TestEventBridge_ToolResultStreaming verifies a tool-role message's results
+// are surfaced on the matching tool_call_update with output content (O9), so a
+// tool-heavy turn no longer appears to stall after the first batch.
+func TestEventBridge_ToolResultStreaming(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 4)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	toolMsg := message.Message{
+		ID:        "msg-tool",
+		SessionID: "sess-1",
+		Role:      message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call-1",
+				Name:       "bash",
+				Content:    "hello world",
+			},
+			message.ToolResult{
+				ToolCallID: "call-2",
+				Name:       "ls",
+				Content:    "boom",
+				IsError:    true,
+			},
+		},
+	}
+
+	b.handleMessage(context.Background(), toolMsg)
+
+	var sawContent map[string]string
+	for i := 0; i < 2; i++ {
+		var u acp.SessionUpdate
+		select {
+		case u = <-cc.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no tool_call_update %d received", i)
+		}
+		if u.ToolCallUpdate == nil {
+			t.Fatalf("expected tool_call_update, got %+v", u)
+		}
+		if sawContent == nil {
+			sawContent = make(map[string]string)
+		}
+		content, _ := u.ToolCallUpdate.Content.Value()
+		for _, c := range content {
+			if c.Content != nil && c.Content.Content.Text != nil {
+				sawContent[string(u.ToolCallUpdate.ToolCallId)] = c.Content.Content.Text.Text
+			}
+		}
+	}
+	if got := sawContent["call-1"]; got != "hello world" {
+		t.Errorf("call-1 content = %q, want %q", got, "hello world")
+	}
+	if got := sawContent["call-2"]; got != "Error: boom" {
+		t.Errorf("call-2 content = %q, want %q", got, "Error: boom")
+	}
+
+	// Re-snapshot must not re-emit identical content.
+	b.handleMessage(context.Background(), toolMsg)
+	select {
+	case u := <-cc.ch:
+		if u.ToolCallUpdate != nil {
+			t.Errorf("duplicate tool_call_update emitted on re-snapshot: %+v", u)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestEventBridge_ToolResultFailedStatus verifies an errored tool result is
+// reported with the failed status (S10), not just error-prefixed content.
+func TestEventBridge_ToolResultFailedStatus(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	toolMsg := message.Message{
+		ID:        "msg-tool-err",
+		SessionID: "sess-1",
+		Role:      message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call-err", Name: "bash", Content: "boom", IsError: true},
+			message.ToolResult{ToolCallID: "call-ok", Name: "view", Content: "fine"},
+		},
+	}
+	b.handleMessage(context.Background(), toolMsg)
+
+	for i := 0; i < 2; i++ {
+		var u acp.SessionUpdate
+		select {
+		case u = <-cc.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no tool_call_update %d received", i)
+		}
+		require.NotNil(t, u.ToolCallUpdate)
+		status, ok := u.ToolCallUpdate.Status.Value()
+		require.True(t, ok, "terminal status must be reported")
+		switch string(u.ToolCallUpdate.ToolCallId) {
+		case "call-err":
+			require.Equal(t, acp.ToolCallStatusFailed, status)
+		case "call-ok":
+			require.Equal(t, acp.ToolCallStatusCompleted, status)
+		}
+	}
+}
+
+// TestEventBridge_ToolCallInputEnrichment is a regression test: a tool call is
+// first reported when the model starts emitting it, before its arguments
+// exist. Without a follow-up update the client keeps the argument-less start
+// and renders the call as a bare "Bash" with no command.
+func TestEventBridge_ToolCallInputEnrichment(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 4)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	msg := message.Message{
+		ID:        "msg-c",
+		SessionID: "sess-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-c", Name: "bash"},
+		},
+	}
+	b.handleMessage(context.Background(), msg)
+
+	var start acp.SessionUpdate
+	select {
+	case start = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call start received")
+	}
+	require.NotNil(t, start.ToolCall)
+	require.Equal(t, "Bash", start.ToolCall.Title, "no arguments yet")
+
+	// The arguments arrive in a later snapshot of the same message.
+	msg.Parts = []message.ContentPart{
+		message.ToolCall{ID: "call-c", Name: "bash", Input: `{"command":"git status"}`, Finished: true},
+	}
+	b.handleMessage(context.Background(), msg)
+
+	var enrich acp.SessionUpdate
+	select {
+	case enrich = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call input update received")
+	}
+	require.NotNil(t, enrich.ToolCallUpdate)
+	require.Equal(t, acp.ToolCallId("call-c"), enrich.ToolCallUpdate.ToolCallId)
+	title, ok := enrich.ToolCallUpdate.Title.Value()
+	require.True(t, ok, "the title must be set")
+	require.Contains(t, title, "git status", "the title must name the command")
+	raw, ok := enrich.ToolCallUpdate.RawInput.Value()
+	require.True(t, ok, "the raw input must be set")
+	require.JSONEq(t, `{"command":"git status"}`, string(raw))
+}
+
+// TestEventBridge_ToolCallStaysInProgressUntilResult is a regression test:
+// message.ToolCall.Finished marks the end of argument streaming, so a call
+// reported with Finished already set must still start in progress. Stamping
+// it completed made a client render the call as done before the tool ran,
+// and the turn then looked stalled while the tool waited.
+func TestEventBridge_ToolCallStaysInProgressUntilResult(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	// Argument streaming is done, but no result has arrived yet.
+	b.handleMessage(context.Background(), message.Message{
+		ID:        "msg-b",
+		SessionID: "sess-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-b", Name: "bash", Input: `{"command":"git status"}`, Finished: true},
+		},
+	})
+
+	var u acp.SessionUpdate
+	select {
+	case u = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call start received")
+	}
+	require.NotNil(t, u.ToolCall)
+	require.Equal(t, acp.ToolCallId("call-b"), u.ToolCall.ToolCallId)
+	require.Equal(t, acp.ToolCallStatusInProgress, u.ToolCall.Status,
+		"a tool call starts in progress; only its result completes it")
+}
+
+// TestEventBridge_ToolCallEnrichment verifies a tool_call start carries a
+// human-readable title, the tool kind, file locations, and rawInput (S10).
+func TestEventBridge_ToolCallEnrichment(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	assistantMsg := message.Message{
+		ID:        "msg-a",
+		SessionID: "sess-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-9", Name: "view", Input: `{"path":"x.go","limit":10}`},
+		},
+	}
+	b.handleMessage(context.Background(), assistantMsg)
+
+	var u acp.SessionUpdate
+	select {
+	case u = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call start received")
+	}
+	require.NotNil(t, u.ToolCall)
+	require.Equal(t, acp.ToolCallId("call-9"), u.ToolCall.ToolCallId)
+	require.Equal(t, acp.ToolKindRead, u.ToolCall.Kind)
+	require.Contains(t, u.ToolCall.Title, "x.go")
+	require.Equal(t, acp.ToolCallStatusInProgress, u.ToolCall.Status)
+	require.NotEmpty(t, u.ToolCall.Locations)
+	// The title echoes the input as the user wrote it, but the location on the
+	// wire must be absolute (overview.md:160).
+	require.True(t, filepath.IsAbs(u.ToolCall.Locations[0].Path))
+	require.NotNil(t, u.ToolCall.RawInput)
+	require.Contains(t, u.ToolCall.Title, "View")
+	// The programmatic tool name is a SHOULD on tool_call (tool-calls.md:167).
+	require.NotNil(t, u.ToolCall.Name)
+	require.Equal(t, "view", *u.ToolCall.Name)
+}
+
+// TestEventBridge_PromptMetaEcho verifies the _meta object captured from a
+// session/prompt request is echoed on outgoing session/update notifications
+// for that turn only (S7).
+func TestEventBridge_PromptMetaEcho(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	meta1, err := acp.NewMeta(map[string]any{"traceparent": "tp"})
+	require.NoError(t, err)
+	b.SetPromptMeta("sess-1", meta1)
+
+	n := b.note("sess-1", acp.UpdateAgentMessageText("hi"))
+	var tp string
+	require.NoError(t, n.Meta.Get("traceparent", &tp))
+	require.Equal(t, "tp", tp)
+
+	n = b.note("sess-2", acp.UpdateAgentMessageText("hi"))
+	require.Empty(t, n.Meta)
+
+	// Run completion clears the recorded meta.
+	meta2, err := acp.NewMeta(map[string]any{"k": "v"})
+	require.NoError(t, err)
+	b.SetPromptMeta("sess-1", meta2)
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 8)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+	b.handleRunComplete(context.Background(), notify.RunComplete{SessionID: "sess-1"})
+	n = b.note("sess-1", acp.UpdateAgentMessageText("hi"))
+	require.Empty(t, n.Meta)
+}
+
+// TestEventBridge_PlanUpdateFromTodos verifies a todos tool result is surfaced
+// as a full-replace plan update with mapped statuses (S4).
+func TestEventBridge_PlanUpdateFromTodos(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 4)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	toolMsg := message.Message{
+		ID:        "msg-todos",
+		SessionID: "sess-1",
+		Role:      message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call-todos",
+				Name:       "todos",
+				Content:    "Todo list updated successfully.",
+				Metadata:   `{"todos":[{"content":"First","status":"completed"},{"content":"Second","status":"in_progress"},{"content":"Third","status":"pending"}]}`,
+			},
+		},
+	}
+	b.handleMessage(context.Background(), toolMsg)
+
+	var sawPlan bool
+	for i := 0; i < 2; i++ {
+		var u acp.SessionUpdate
+		select {
+		case u = <-cc.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("no update received")
+		}
+		if u.Plan == nil {
+			continue
+		}
+		sawPlan = true
+		require.Len(t, u.Plan.Entries, 3)
+		require.Equal(t, acp.PlanEntryStatusCompleted, u.Plan.Entries[0].Status)
+		require.Equal(t, acp.PlanEntryStatusInProgress, u.Plan.Entries[1].Status)
+		require.Equal(t, acp.PlanEntryStatusPending, u.Plan.Entries[2].Status)
+		require.Equal(t, acp.PlanEntryPriorityMedium, u.Plan.Entries[0].Priority)
+		require.Equal(t, "First", u.Plan.Entries[0].Content)
+	}
+	require.True(t, sawPlan, "plan update emitted for todos result")
+
+	// Non-todos results must not produce plan updates.
+	b.handleMessage(context.Background(), message.Message{
+		ID: "msg-other", SessionID: "sess-1", Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call-other", Name: "bash", Content: "out"},
+		},
+	})
+	select {
+	case u := <-cc.ch:
+		require.Nil(t, u.Plan, "plan update emitted for non-todos result")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestEventBridge_DiffContentForEdit verifies an edit tool result carries a
+// diff content block built from its old/new content metadata (S10 diff).
+func TestEventBridge_DiffContentForEdit(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 4)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	assistantMsg := message.Message{
+		ID: "msg-edit", SessionID: "sess-1", Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-edit", Name: "edit", Input: `{"file_path":"` + filepath.ToSlash(filepath.Join(t.TempDir(), "f.go")) + `"}`},
+		},
+	}
+	b.handleMessage(context.Background(), assistantMsg)
+
+	toolMsg := message.Message{
+		ID: "msg-tool", SessionID: "sess-1", Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call-edit",
+				Name:       "edit",
+				Content:    "File updated",
+				Metadata:   `{"old_content":"a\nb","new_content":"a\nc","additions":1,"removals":1}`,
+			},
+		},
+	}
+	b.handleMessage(context.Background(), toolMsg)
+
+	for i := 0; i < 2; i++ {
+		var u acp.SessionUpdate
+		select {
+		case u = <-cc.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("no update received")
+		}
+		if u.ToolCallUpdate == nil {
+			continue
+		}
+		content, _ := u.ToolCallUpdate.Content.Value()
+		if len(content) == 0 {
+			continue
+		}
+		for _, c := range content {
+			if c.Diff == nil {
+				continue
+			}
+			require.True(t, filepath.IsAbs(c.Diff.Path))
+			require.Equal(t, "a\nc", c.Diff.NewText)
+			require.NotNil(t, c.Diff.OldText)
+			require.Equal(t, "a\nb", *c.Diff.OldText)
+			return
+		}
+	}
+	t.Fatal("no diff content block emitted")
+}
+
+func TestSplitDelta_Spaces(t *testing.T) {
+	chunks := splitDelta("alpha bravo charlie delta echo foxtrot golf hotel")
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks for 8 words, got %d", len(chunks))
+	}
+	if chunks[0] != "alpha bravo charlie delta" {
+		t.Errorf("chunk 0 = %q, want %q", chunks[0], "alpha bravo charlie delta")
+	}
+	if chunks[1] != " echo foxtrot golf hotel" {
+		t.Errorf("chunk 1 = %q, want %q", chunks[1], " echo foxtrot golf hotel")
+	}
+}
+
+func TestSplitDelta_ConcatenationPreservesSpaces(t *testing.T) {
+	input := "to analyze the codebase. Let me start by exploring the project structure"
+	chunks := splitDelta(input)
+	joined := ""
+	for _, c := range chunks {
+		joined += c
+	}
+	if joined != input {
+		t.Errorf("concatenated chunks = %q, want %q", joined, input)
+	}
+}
+
+func TestSplitDelta_ContinuationDelta(t *testing.T) {
+	delta := " Let me start by exploring the project structure"
+	chunks := splitDelta(delta)
+	joined := ""
+	for _, c := range chunks {
+		joined += c
+	}
+	if joined != delta {
+		t.Errorf("concatenated chunks = %q, want %q", joined, delta)
+	}
+	if chunks[0] != " Let me start by" {
+		t.Errorf("chunk 0 = %q, want %q", chunks[0], " Let me start by")
+	}
+}
+
+func TestSplitDelta_MixedWhitespace(t *testing.T) {
+	input := "hello   world\t\n  foo bar"
+	chunks := splitDelta(input)
+	joined := ""
+	for _, c := range chunks {
+		joined += c
+	}
+	if joined != input {
+		t.Errorf("concatenated chunks = %q, want %q", joined, input)
+	}
+}
+
+func TestSplitDelta_Newlines(t *testing.T) {
+	chunks := splitDelta("alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel")
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks for 8 newline-separated words, got %d", len(chunks))
+	}
+}
+
+func TestSplitDelta_Empty(t *testing.T) {
+	if chunks := splitDelta(""); chunks != nil {
+		t.Errorf("expected nil for empty input, got %v", chunks)
+	}
+}
+
+func TestSplitDelta_SingleWord(t *testing.T) {
+	chunks := splitDelta("hello")
+	if len(chunks) != 1 || chunks[0] != "hello" {
+		t.Errorf("expected [hello], got %v", chunks)
+	}
+}
+
+func TestTitleChangedSeedsThenReports(t *testing.T) {
+	b := &eventBridge{lastTitles: map[string]string{}}
+
+	// The first observation seeds the baseline silently, so session/new's own
+	// announcement is not duplicated.
+	require.False(t, b.titleChanged(session.Session{ID: "s1", Title: "ACP Session"}))
+	// An unchanged title is not re-announced; usage-only saves republish it.
+	require.False(t, b.titleChanged(session.Session{ID: "s1", Title: "ACP Session"}))
+	// A real rename is reported exactly once.
+	require.True(t, b.titleChanged(session.Session{ID: "s1", Title: "Fix the bug"}))
+	require.False(t, b.titleChanged(session.Session{ID: "s1", Title: "Fix the bug"}))
+	// Sessions are independent baselines.
+	require.False(t, b.titleChanged(session.Session{ID: "s2", Title: "Other"}))
+	// Empty ids or titles are ignored rather than seeding a baseline.
+	require.False(t, b.titleChanged(session.Session{ID: "", Title: "x"}))
+	require.False(t, b.titleChanged(session.Session{ID: "s3", Title: ""}))
+}

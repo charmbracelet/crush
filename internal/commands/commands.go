@@ -237,3 +237,13 @@ func GetMCPPrompt(cfg *config.ConfigStore, clientID, promptID string, args map[s
 	}
 	return strings.Join(result, " "), nil
 }
+
+// SubstituteArgs replaces $NAME placeholders in content with their values.
+// It is the one resolution rule both the TUI dialog path and the ACP prompt
+// path share, so it lives here rather than in either caller.
+func SubstituteArgs(content string, args map[string]string) string {
+	for name, value := range args {
+		content = strings.ReplaceAll(content, "$"+name, value)
+	}
+	return content
+}

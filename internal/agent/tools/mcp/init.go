@@ -476,6 +476,70 @@ func WaitForInitBudget(ctx context.Context, budget time.Duration) error {
 	return nil
 }
 
+// acpServerPrefix marks MCP servers injected by an ACP session rather than
+// loaded from config. Their names are unique per session, so two sessions can
+// each ask for a server called "github" without one overwriting the other.
+const acpServerPrefix = "acp:"
+
+// ACPServerName builds the registry key for a server an ACP session supplied.
+// The session id goes into the key because every registry in this package is
+// keyed by name alone; making the name unique is what keeps one session's
+// connection from replacing another's.
+func ACPServerName(sessionID, serverName string) string {
+	return acpServerPrefix + sessionID + ":" + serverName
+}
+
+// IsACPServer reports whether a registry name belongs to an ACP session's
+// injected server, as opposed to one loaded from config.
+func IsACPServer(name string) bool {
+	return strings.HasPrefix(name, acpServerPrefix)
+}
+
+// ACPSessionOf reports the session that owns an ACP-injected server, and
+// whether the name is one at all. Config-file servers have no owner, so callers
+// treat a false second result as "shared by every session".
+func ACPSessionOf(name string) (sessionID string, isACP bool) {
+	if !IsACPServer(name) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(name, acpServerPrefix)
+	i := strings.Index(rest, ":")
+	if i < 0 {
+		return rest, true
+	}
+	return rest[:i], true
+}
+
+// InitializeSingleWithConfig connects an MCP server described in memory rather
+// than in the config store. It exists for servers an ACP client supplies on
+// session/new, which are never written to disk.
+//
+// The caller is responsible for the name being unique (see ACPServerName) and
+// for tearing the server down with TeardownSession.
+func InitializeSingleWithConfig(ctx context.Context, name string, m config.MCPConfig, cfg *config.ConfigStore) error {
+	if cfg == nil {
+		return fmt.Errorf("mcp '%s': no configuration store", name)
+	}
+	if m.Disabled {
+		updateState(name, StateDisabled, nil, nil, Counts{})
+		return nil
+	}
+	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())
+}
+
+// TeardownSession closes every MCP server an ACP session injected, identified
+// by the session id embedded in its registry name. It is safe to call for a
+// session that never had any: the iteration simply finds nothing.
+func TeardownSession(sessionID string) {
+	prefix := acpServerPrefix + sessionID + ":"
+	for name := range GetStates() {
+		if strings.HasPrefix(name, prefix) {
+			slog.Debug("Tearing down ACP MCP server", "name", name)
+			teardown(name)
+		}
+	}
+}
+
 // InitializeSingle initializes a single MCP client by name.
 func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore) error {
 	m, exists := cfg.Config().MCP[name]

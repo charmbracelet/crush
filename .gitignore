@@ -55,3 +55,6 @@ completions/crush.*sh
 .prettierignore
 .task
 /docs-site
+
+# ACP protocol docs fetched for local reference (scripts/fetch_acp_docs.go)
+/docs/acp/

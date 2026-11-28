@@ -45,8 +45,14 @@ const (
 func reconcile(current config.MCPs, running map[string]ClientInfo) map[string]reinitAction {
 	actions := map[string]reinitAction{}
 
-	// Servers no longer in config are removed entirely.
+	// Servers no longer in config are removed entirely — except servers an ACP
+	// session injected. Those are not in the config store by design, so a
+	// config reload must not tear down connections a live session depends on.
+	// Their lifetime is the session's: TeardownSession closes them.
 	for name := range running {
+		if IsACPServer(name) {
+			continue
+		}
 		if _, exists := current[name]; !exists {
 			actions[name] = reinitRemove
 		}

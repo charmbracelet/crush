@@ -40,7 +40,7 @@ func TestPlanPromptListsConfiguredTools(t *testing.T) {
 	// that decides which tools are attached.
 	buildPrompt := func(t *testing.T, interactive bool) string {
 		t.Helper()
-		c := &coordinator{interactive: interactive}
+		c := &coordinator{cfg: cfg, interactive: interactive}
 		planCfg := cfg.Config().Agents[config.AgentPlan]
 		p, err := loadPrompt(cfg, "plan",
 			prompt.WithWorkingDir(env.workingDir),

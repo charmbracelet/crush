@@ -60,6 +60,16 @@ type PromptDat struct {
 	ToolNames []string
 }
 
+// HasTool reports whether the agent is given the named tool.
+func (d PromptDat) HasTool(name string) bool {
+	return slices.Contains(d.ToolNames, name)
+}
+
+// Tools returns the subset of names the agent is given, in the order asked.
+func (d PromptDat) Tools(names ...string) []string {
+	return slices.DeleteFunc(slices.Clone(names), func(name string) bool { return !d.HasTool(name) })
+}
+
 type ContextFile struct {
 	Path    string
 	Content string
@@ -121,7 +131,7 @@ func WithSkillOverrides(disabled, enabled func(ctx context.Context) []string) Op
 // NewPrompt parses promptTemplate up front, so a malformed template fails
 // here instead of on every turn that builds it.
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
-	t, err := template.New(name).Parse(promptTemplate)
+	t, err := template.New(name).Funcs(template.FuncMap{"join": strings.Join}).Parse(promptTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s prompt template: %w", name, err)
 	}

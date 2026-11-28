@@ -295,7 +295,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.promptTexts = promptTexts
 
-	coderPrompt, err := c.newPrompt("coder", c.skillOverrideOptions()...)
+	coderPrompt, err := c.newPrompt("coder", append(
+		c.skillOverrideOptions(),
+		prompt.WithToolNames(c.effectiveToolNames(agentCfg, false)),
+	)...)
 	if err != nil {
 		return nil, err
 	}
@@ -1072,10 +1075,14 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 // reports back: a TUI can receive a subagent's report as a later turn, a
 // headless run exits before one could arrive, so delegation blocks there and
 // detaches here. Subagents get neither, since they can neither fan out nor
-// ask questions.
+// ask questions. LSP tools exist only while LSP is configured or automatic.
 func (c *coordinator) effectiveToolNames(agentCfg config.Agent, isSubAgent bool) []string {
 	return slices.DeleteFunc(slices.Clone(agentCfg.AllowedTools), func(name string) bool {
 		switch name {
+		case tools.DiagnosticsToolName, tools.ReferencesToolName, tools.LSPRestartToolName,
+			tools.SymbolsToolName, tools.DefinitionToolName, tools.CallHierarchyToolName,
+			tools.RenameToolName, tools.ReplaceSymbolToolName:
+			return !c.lspEnabled()
 		case tools.QuestionToolName:
 			return isSubAgent || !c.interactive
 		case AgentToolName:
@@ -1085,6 +1092,12 @@ func (c *coordinator) effectiveToolNames(agentCfg config.Agent, isSubAgent bool)
 		}
 		return false
 	})
+}
+
+// lspEnabled reports whether LSPs are configured or auto_lsp is on (nil or true).
+func (c *coordinator) lspEnabled() bool {
+	cfg := c.cfg.Config()
+	return len(cfg.LSP) > 0 || cfg.Options.AutoLSP == nil || *cfg.Options.AutoLSP
 }
 
 // buildTools builds an agent's tools. parentModel reports the model the
@@ -1161,20 +1174,17 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
 	}
 
-	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
-	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(
-			allTools,
-			tools.NewDiagnosticsTool(c.lspManager),
-			tools.NewReferencesTool(c.lspManager),
-			tools.NewLSPRestartTool(c.lspManager),
-			tools.NewSymbolsTool(c.lspManager),
-			tools.NewDefinitionTool(c.lspManager),
-			tools.NewCallHierarchyTool(c.lspManager),
-			tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker),
-			tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker),
-		)
-	}
+	allTools = append(
+		allTools,
+		tools.NewDiagnosticsTool(c.lspManager),
+		tools.NewReferencesTool(c.lspManager),
+		tools.NewLSPRestartTool(c.lspManager),
+		tools.NewSymbolsTool(c.lspManager),
+		tools.NewDefinitionTool(c.lspManager),
+		tools.NewCallHierarchyTool(c.lspManager),
+		tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker),
+		tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker),
+	)
 
 	if len(c.cfg.Config().MCP) > 0 {
 		allTools = append(

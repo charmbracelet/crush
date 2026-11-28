@@ -22,7 +22,7 @@ type Querier interface {
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	DeleteSkillsDisabled(ctx context.Context, name string) error
 	DeleteSkillsEnabled(ctx context.Context, name string) error
-	GetAverageResponseTime(ctx context.Context) (int64, error)
+	GetAverageResponseTime(ctx context.Context) (GetAverageResponseTimeRow, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)

@@ -12,18 +12,24 @@ import (
 
 const getAverageResponseTime = `-- name: GetAverageResponseTime :one
 SELECT
-    CAST(COALESCE(AVG(finished_at - created_at), 0) AS INTEGER) as avg_response_seconds
+    CAST(COALESCE(AVG(finished_at - created_at), 0) AS INTEGER) as avg_response_seconds,
+    COUNT(*) as response_count
 FROM messages
 WHERE role = 'assistant'
   AND finished_at IS NOT NULL
   AND finished_at > created_at
 `
 
-func (q *Queries) GetAverageResponseTime(ctx context.Context) (int64, error) {
+type GetAverageResponseTimeRow struct {
+	AvgResponseSeconds int64 `json:"avg_response_seconds"`
+	ResponseCount      int64 `json:"response_count"`
+}
+
+func (q *Queries) GetAverageResponseTime(ctx context.Context) (GetAverageResponseTimeRow, error) {
 	row := q.queryRow(ctx, q.getAverageResponseTimeStmt, getAverageResponseTime)
-	var avg_response_seconds int64
-	err := row.Scan(&avg_response_seconds)
-	return avg_response_seconds, err
+	var i GetAverageResponseTimeRow
+	err := row.Scan(&i.AvgResponseSeconds, &i.ResponseCount)
+	return i, err
 }
 
 const getHourDayHeatmap = `-- name: GetHourDayHeatmap :many

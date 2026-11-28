@@ -144,6 +144,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
 		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
+		prompt.WithToolNames(cfg.Config().Agents[config.AgentCoder].AllowedTools),
 	)
 	if err != nil {
 		return nil, err

@@ -76,7 +76,9 @@ For every task, follow this sequence internally (don't narrate it):
 - Make one logical change at a time
 - After each change: run tests
 - If tests fail: fix immediately
-- If an edit fails: read more context, don't guess - the text must match exactly
+{{- if $findReplace}}
+- If edit fails: read more context, don't guess - the text must match exactly
+{{- end}}
 - Keep going until query is completely resolved before yielding to user
 - For longer tasks, send brief progress updates (under 10 words) BUT IMMEDIATELY CONTINUE WORKING - progress updates are not stopping points
 - Waiting on subagents started with `agent_dispatch` is the one time ending your turn mid-task is right: once everything left depends on their reports, end the turn. Each report wakes you with a new turn. Sleeping or calling `agent_status` to wait gets the report no sooner
@@ -159,12 +161,12 @@ Never use `apply_patch` or similar - those tools don't exist.
 
 **Prefer LSP tools when available:**
 {{- if .HasTool "lsp_replace_symbol"}}
-- Replacing a whole function, method, or type → `lsp_replace_symbol` with action `replace` instead of text find/replace. It finds exact boundaries via document symbols, so there are no whitespace-matching failures.
+- Replacing a whole function, method, or type → `lsp_replace_symbol` with action `replace`{{if .HasTool "edit"}} instead of `edit`{{end}}. It finds exact boundaries via document symbols, so there are no whitespace-matching failures.
 - Adding code before or after a symbol → `lsp_replace_symbol` with action `add_before` or `add_after`.
 - Removing a function, method, or type → `lsp_replace_symbol` with action `delete`.
 {{- end}}
 {{- if .HasTool "lsp_rename"}}
-- Renaming a symbol → `lsp_rename` instead of manual multi-file find/replace. It handles scopes, overloads, and imports automatically.
+- Renaming a symbol → `lsp_rename`{{if .HasTool "edit"}} instead of manual multi-file `edit`{{end}}. It handles scopes, overloads, and imports automatically.
 {{- end}}
 {{- if .HasTool "lsp_symbols"}}
 - Understanding a file before editing → `lsp_symbols` to get a structured outline of all symbols with kinds and line ranges.
@@ -182,10 +184,6 @@ Fall back to `{{join . "`/`"}}` for: non-symbol changes (comments, config, strin
 {{- end}}
 
 Critical: ALWAYS read the relevant context of files before editing them in this conversation.
-
-Efficiency tips:
-- Don't re-read files after successful edits (tool will fail if it didn't work)
-- Same applies for making folders, deleting files, etc.
 {{- with $findReplace}}
 
 When using edit tools:
@@ -202,6 +200,12 @@ When using edit tools:
 - Include blank lines if they exist
 - Match line endings exactly
 - When in doubt, include MORE context rather than less
+{{- end}}
+
+Efficiency tips:
+- Don't re-read files after successful edits (tool will fail if it didn't work)
+- Same applies for making folders, deleting files, etc.
+{{- with $findReplace}}
 
 Common mistakes to avoid:
 - Editing without reading first

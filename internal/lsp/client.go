@@ -420,25 +420,32 @@ func (c *Client) HandlesFile(path string) bool {
 
 // OpenFile opens a file in the LSP server.
 func (c *Client) OpenFile(ctx context.Context, filepath string) error {
+	_, err := c.EnsureFileOpen(ctx, filepath)
+	return err
+}
+
+// EnsureFileOpen opens a file in the LSP server if it handles the file and
+// the file is not open yet. It reports whether this call opened the file.
+func (c *Client) EnsureFileOpen(ctx context.Context, filepath string) (bool, error) {
 	if !c.HandlesFile(filepath) {
-		return nil
+		return false, nil
 	}
 
 	uri := string(protocol.URIFromPath(filepath))
 
 	if _, exists := c.openFiles.Get(uri); exists {
-		return nil // Already open
+		return false, nil // Already open
 	}
 
 	// Skip files that do not exist or cannot be read
 	content, err := os.ReadFile(filepath)
 	if err != nil {
-		return fmt.Errorf("error reading file: %w", err)
+		return false, fmt.Errorf("error reading file: %w", err)
 	}
 
 	// Notify the server about the opened document
 	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
-		return err
+		return false, err
 	}
 
 	c.openFiles.Set(uri, &OpenFileInfo{
@@ -446,7 +453,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 		URI:     protocol.DocumentURI(uri),
 	})
 
-	return nil
+	return true, nil
 }
 
 // NotifyChange notifies the server about a file change.

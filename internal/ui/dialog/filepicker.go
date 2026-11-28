@@ -178,10 +178,11 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 
 	var cmd tea.Cmd
 	f.fp, cmd = f.fp.Update(msg)
-	// The UI drops the actions returned for mouse messages, so a load
-	// scheduled there would never run. The file list ignores the mouse, so
-	// nothing about the preview changes on those anyway.
-	if _, isMouse := msg.(tea.MouseMsg); !isMouse {
+	// The UI discards the actions returned for these messages, so a load
+	// scheduled there would never run while its key stayed recorded,
+	// leaving the preview stuck. The file list ignores them, so nothing
+	// about the preview changes on those anyway.
+	if !actionDiscarded(msg) {
 		if loadCmd := f.updatePreview(); loadCmd != nil {
 			cmds = append(cmds, loadCmd)
 		}
@@ -195,6 +196,17 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 	}
 
 	return ActionCmd{tea.Batch(cmds...)}
+}
+
+// actionDiscarded reports whether the UI drops the action a dialog returns
+// for msg: it routes mouse motion, mouse release and coalesced wheel
+// messages to dialogs without dispatching what they return.
+func actionDiscarded(msg tea.Msg) bool {
+	switch msg.(type) {
+	case tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
+		return true
+	}
+	return false
 }
 
 const (
@@ -220,16 +232,16 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	avail := max(0, area.Dy()-rc.ChromeHeight())
 	height := min(filePickerMinHeight, avail)
 
-	// Preview in the height left, hidden when there is nothing or too little room.
-	imgPrevHeight := 0
-	if f.fp.HighlightedPath() != "" {
-		imgPrevHeight = min(
-			filePickerMinHeight*2-t.Dialog.ImagePreview.GetVerticalFrameSize(),
-			avail-height-gap-t.Dialog.ImagePreview.GetVerticalFrameSize(),
-		)
-		if imgPrevHeight < filePickerMinPreviewHeight {
-			imgPrevHeight = 0
-		}
+	// Preview in the height left, hidden when there is too little room.
+	// The size is recorded even before the directory has loaded, so the
+	// message that lists it already schedules the preview load: no later
+	// message is guaranteed to follow.
+	imgPrevHeight := min(
+		filePickerMinHeight*2-t.Dialog.ImagePreview.GetVerticalFrameSize(),
+		avail-height-gap-t.Dialog.ImagePreview.GetVerticalFrameSize(),
+	)
+	if imgPrevHeight < filePickerMinPreviewHeight {
+		imgPrevHeight = 0
 	}
 	imgPrevWidth := innerWidth - t.Dialog.ImagePreview.GetHorizontalFrameSize()
 	f.imgPrevWidth = imgPrevWidth
@@ -243,7 +255,8 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	styles.DisabledSelected = styles.DisabledSelected.PaddingLeft(1).Width(innerWidth)
 	f.fp.Styles = styles
 
-	if imgPrevHeight > 0 {
+	// Show the preview only once there is something highlighted.
+	if imgPrevHeight > 0 && f.fp.HighlightedPath() != "" {
 		imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))
 		rc.AddPart(imgPreview)
 	}

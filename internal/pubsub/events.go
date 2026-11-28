@@ -38,6 +38,9 @@ const (
 	PayloadTypeSSHNotification        PayloadType = "ssh_prompt_notification"
 	PayloadTypePermissionModeChanged  PayloadType = "permission_mode_changed"
 	PayloadTypeToolProgress           PayloadType = "tool_progress"
+	// PayloadTypeResync tells a client resuming its event stream that the
+	// events it missed cannot be replayed, so it must re-read its state.
+	PayloadTypeResync PayloadType = "resync"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.

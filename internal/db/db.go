@@ -126,6 +126,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
 	}
+	if q.listDescendantSessionIDsStmt, err = db.PrepareContext(ctx, listDescendantSessionIDs); err != nil {
+		return nil, fmt.Errorf("error preparing query ListDescendantSessionIDs: %w", err)
+	}
 	if q.listFilesBySessionStmt, err = db.PrepareContext(ctx, listFilesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySession: %w", err)
 	}
@@ -355,6 +358,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
 		}
 	}
+	if q.listDescendantSessionIDsStmt != nil {
+		if cerr := q.listDescendantSessionIDsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listDescendantSessionIDsStmt: %w", cerr)
+		}
+	}
 	if q.listFilesBySessionStmt != nil {
 		if cerr := q.listFilesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listFilesBySessionStmt: %w", cerr)
@@ -518,6 +526,7 @@ type Queries struct {
 	insertSkillsDisabledStmt             *sql.Stmt
 	insertSkillsEnabledStmt              *sql.Stmt
 	listAllUserMessagesStmt              *sql.Stmt
+	listDescendantSessionIDsStmt         *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
 	listLatestSessionFilesStmt           *sql.Stmt
 	listMCPDisabledServersStmt           *sql.Stmt
@@ -576,6 +585,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		insertSkillsDisabledStmt:             q.insertSkillsDisabledStmt,
 		insertSkillsEnabledStmt:              q.insertSkillsEnabledStmt,
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
+		listDescendantSessionIDsStmt:         q.listDescendantSessionIDsStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:           q.listLatestSessionFilesStmt,
 		listMCPDisabledServersStmt:           q.listMCPDisabledServersStmt,

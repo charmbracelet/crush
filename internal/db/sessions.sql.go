@@ -137,6 +137,44 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 	return i, err
 }
 
+const listDescendantSessionIDs = `-- name: ListDescendantSessionIDs :many
+WITH RECURSIVE descendants(id) AS (
+    SELECT s.id
+    FROM sessions s
+    WHERE s.parent_session_id = ?
+    UNION
+    SELECT c.id
+    FROM sessions c
+    INNER JOIN descendants d ON c.parent_session_id = d.id
+)
+SELECT id FROM descendants
+`
+
+// Returns the IDs of every session below the given one (sub-agent and
+// title sessions, and their own children), excluding the session itself.
+func (q *Queries) ListDescendantSessionIDs(ctx context.Context, parentSessionID sql.NullString) ([]string, error) {
+	rows, err := q.query(ctx, q.listDescendantSessionIDsStmt, listDescendantSessionIDs, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessions = `-- name: ListSessions :many
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, channel
 FROM sessions

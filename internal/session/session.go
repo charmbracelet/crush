@@ -157,21 +157,44 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err = qtx.DeleteSessionMessages(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session messages: %w", err)
+
+	// Sub-agent sessions point at their parent without a foreign key, so
+	// they have to be removed explicitly or they (and their messages and
+	// file history) would stay in the database with nothing referencing
+	// them.
+	descendants, err := qtx.ListDescendantSessionIDs(ctx, sql.NullString{String: dbSession.ID, Valid: true})
+	if err != nil {
+		return fmt.Errorf("listing child sessions: %w", err)
 	}
-	if err = qtx.DeleteSessionFiles(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session files: %w", err)
+	ids := make([]string, 0, len(descendants)+1)
+	ids = append(ids, dbSession.ID)
+	for _, childID := range descendants {
+		if childID != dbSession.ID {
+			ids = append(ids, childID)
+		}
 	}
-	if err = qtx.DeleteSession(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session: %w", err)
+
+	for _, sessionID := range ids {
+		if err = qtx.DeleteSessionMessages(ctx, sessionID); err != nil {
+			return fmt.Errorf("deleting session messages: %w", err)
+		}
+		if err = qtx.DeleteSessionFiles(ctx, sessionID); err != nil {
+			return fmt.Errorf("deleting session files: %w", err)
+		}
+		if err = qtx.DeleteSession(ctx, sessionID); err != nil {
+			return fmt.Errorf("deleting session: %w", err)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	session := s.fromDBItem(dbSession)
-	s.clearEstimatedUsageState(dbSession.ID)
+	for _, sessionID := range ids {
+		s.clearEstimatedUsageState(sessionID)
+	}
+	// Only the requested session is announced, as before; its child
+	// sessions are only ever reached through it.
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()
 	return nil

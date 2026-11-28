@@ -281,13 +281,18 @@ func (c *Client) Restart() error {
 	// don't crash on an unhandled response.
 	c.registerHandlers()
 
+	// On failure, kill the new server process so it does not outlive the
+	// failed restart. The client context is left alone so a later Restart
+	// can still recover.
 	if err := c.client.Initialize(initCtx, false); err != nil {
+		c.client.Kill()
 		c.SetServerState(StateError)
 		return fmt.Errorf("failed to initialize lsp client: %w", err)
 	}
 
 	if err := c.WaitForServerReady(initCtx); err != nil {
 		slog.Error("Server failed to become ready after restart", "name", c.name, "error", err)
+		c.client.Kill()
 		c.SetServerState(StateError)
 		return err
 	}

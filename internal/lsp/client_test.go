@@ -3,6 +3,8 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -209,4 +211,45 @@ func TestWaitForDiagnostics_NilClient(t *testing.T) {
 	var c *Client
 	// Should not panic.
 	c.WaitForDiagnostics(context.Background(), time.Second)
+}
+
+// newUnstartedClient returns a Client whose underlying powernap client points at
+// a command that is not a language server, so every notification to it fails.
+// That is the state a client is in when its server has died - which is exactly
+// when a restart is asked for.
+func newUnstartedClient(t *testing.T) *Client {
+	t.Helper()
+
+	cfg := config.LSPConfig{
+		Command:   "$THE_CMD",
+		Args:      []string{"hello"},
+		FileTypes: []string{"go"},
+		Env:       map[string]string{},
+	}
+	client, err := New("test", cfg, config.NewShellVariableResolver(env.NewFromMap(map[string]string{
+		"THE_CMD": "echo",
+	})), ".", false)
+	require.NoError(t, err, "the dummy command should still yield a client")
+	return client
+}
+
+// TestCloseAllFilesDropsFileWhoseNotificationFailed pins that a file is no
+// longer tracked once we have tried to close it, even if the notification
+// failed. Restart re-opens every tracked file, and OpenFile returns early for
+// a file that is still tracked, so a leftover entry means the file silently
+// never reaches the new server.
+func TestCloseAllFilesDropsFileWhoseNotificationFailed(t *testing.T) {
+	t.Parallel()
+
+	c := newUnstartedClient(t)
+	path := filepath.Join(t.TempDir(), "main.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o600))
+
+	uri := string(protocol.URIFromPath(path))
+	c.openFiles.Set(uri, &OpenFileInfo{Version: 1, URI: protocol.DocumentURI(uri)})
+	require.True(t, c.IsFileOpen(path))
+
+	c.CloseAllFiles(context.Background())
+
+	require.False(t, c.IsFileOpen(path), "a file we tried to close must not stay marked as open")
 }

@@ -6,14 +6,23 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/diffview"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 
+// plainDiffFormatter returns a diff formatter without syntax highlighting.
+// Chroma gives each regex match a time limit, so under load the same line
+// can come out plain in one render and highlighted in another. Row cutting
+// does not depend on colors.
+func plainDiffFormatter(sty *styles.Styles, file, before, after string, bodyWidth int) *diffview.DiffView {
+	return common.DiffFormatter(sty).ChromaStyle(nil).Before(file, before).After(file, after).Width(bodyWidth)
+}
+
 // renderToolDiffFull is the collapse renderToolDiff replaced: render the
 // whole diff, then keep the rows a collapsed view shows.
 func renderToolDiffFull(sty *styles.Styles, file, before, after string, bodyWidth int, split, expanded bool) (string, int) {
-	formatter := common.DiffFormatter(sty).Before(file, before).After(file, after).Width(bodyWidth)
+	formatter := plainDiffFormatter(sty, file, before, after, bodyWidth)
 	if split {
 		formatter = formatter.Split()
 	}
@@ -68,7 +77,7 @@ func TestRenderToolDiffMatchesFullRender(t *testing.T) {
 			for _, split := range []bool{false, true} {
 				for _, expanded := range []bool{false, true} {
 					wantOut, wantHidden := renderToolDiffFull(&sty, "main.go", p.before, p.after, width, split, expanded)
-					formatter := common.DiffFormatter(&sty).Before("main.go", p.before).After("main.go", p.after).Width(width)
+					formatter := plainDiffFormatter(&sty, "main.go", p.before, p.after, width)
 					if split {
 						formatter = formatter.Split()
 					}

@@ -1301,10 +1301,19 @@ func (c *coordinator) hyperAPIKey() string {
 	return config.ResolveHyperAPIKey(c.cfg.Config())
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, isSubAgent bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
+	var httpClient *http.Client
 
 	switch {
+	case providerID == string(catwalk.InferenceProviderCopilot):
+		// Copilot's Messages endpoint authenticates with a bearer token and
+		// derives billing from the X-Initiator header, which the Copilot
+		// client sets.
+		// NOTE: Prevent the SDK from picking up the API key from env.
+		os.Setenv("ANTHROPIC_API_KEY", "")
+		headers["Authorization"] = "Bearer " + apiKey
+		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 	case strings.HasPrefix(apiKey, "Bearer "):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
@@ -1326,8 +1335,10 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
+	if httpClient == nil && c.cfg.Config().Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
 	return anthropic.New(opts...)
@@ -1600,7 +1611,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		// prefix the chat completions and responses endpoints use.
 		if wireType == catwalk.TypeMessages {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, isSubAgent)
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
 	case string(catwalk.InferenceProviderOpenAI):
@@ -1620,7 +1631,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch wireType {
 	case catwalk.TypeMessages:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, isSubAgent)
 	case catwalk.TypeResponses:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType)
 	case catwalk.TypeCompletions, catwalk.Type(hyper.Name):

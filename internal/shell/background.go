@@ -49,9 +49,16 @@ type BackgroundShell struct {
 	stderr      *cappedBuffer
 	done        chan struct{}
 	exitErr     error
-	completedAt atomic.Int64 // Unix timestamp when job completed (0 if still running)
+	completedAt atomic.Int64 // UnixNano when the job completed (0 if still running)
 	background  atomic.Bool
 	killed      atomic.Bool // Kill was called; forget the shell once it exits
+
+	// A finished job reports itself once, unless it was killed or a
+	// reader saw it finish first.
+	reportMu sync.Mutex
+	report   func()
+	readers  int  // callers reading the result directly
+	claimed  bool // the result was delivered, by a report or a reader
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -129,6 +136,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, scope JobScope, work
 	go func() {
 		defer func() {
 			close(bgShell.done)
+			bgShell.maybeReport()
 			if bgShell.killed.Load() {
 				m.forget(bgShell)
 			}
@@ -137,7 +145,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, scope JobScope, work
 		err := shell.ExecStream(shellCtx, command, bgShell.stdout, bgShell.stderr)
 
 		bgShell.exitErr = err
-		bgShell.completedAt.Store(time.Now().Unix())
+		bgShell.completedAt.Store(time.Now().UnixNano())
 	}()
 
 	return bgShell, nil
@@ -173,7 +181,7 @@ func (m *BackgroundShellManager) runningTotal() int {
 // prune drops finished jobs that are past retention or beyond
 // MaxFinishedJobs. Callers must hold m.mu.
 func (m *BackgroundShellManager) prune() {
-	cutoff := time.Now().Add(-CompletedJobRetention).Unix()
+	cutoff := time.Now().Add(-CompletedJobRetention).UnixNano()
 	var finished []*BackgroundShell
 	for id, shell := range m.shells {
 		switch at := shell.completedAt.Load(); {
@@ -353,6 +361,7 @@ func killShells(ctx context.Context, shells map[string]*BackgroundShell) {
 	var wg sync.WaitGroup
 	for _, shell := range shells {
 		wg.Go(func() {
+			shell.killed.Store(true)
 			shell.cancel()
 			select {
 			case <-shell.done:
@@ -401,7 +410,7 @@ func (bs *BackgroundShell) listed(scope JobScope) bool {
 // while it is still running.
 func (bs *BackgroundShell) CompletedAt() time.Time {
 	if at := bs.completedAt.Load(); at != 0 {
-		return time.Unix(at, 0)
+		return time.Unix(0, at)
 	}
 	return time.Time{}
 }
@@ -424,6 +433,54 @@ func (bs *BackgroundShell) Done() <-chan struct{} {
 // Wait blocks until the background shell completes.
 func (bs *BackgroundShell) Wait() {
 	<-bs.done
+}
+
+// ReportWhenDone arranges for report to run once, on its own goroutine,
+// after the shell exits. It does not run if the shell was killed, or if a
+// reader holding [BackgroundShell.Read] saw the shell finish, since the
+// caller already knows the result either way. Two narrow races can still
+// show the caller the result twice, both harmless: a reader that starts
+// just after the report fires, and a kill that lands just after the shell
+// exited on its own.
+func (bs *BackgroundShell) ReportWhenDone(report func()) {
+	bs.reportMu.Lock()
+	bs.report = report
+	bs.reportMu.Unlock()
+	if bs.IsDone() {
+		bs.maybeReport()
+	}
+}
+
+// Read marks the caller as reading the shell's result directly, holding
+// back the completion report while it does. The returned func ends the
+// read; pass true if the caller saw the shell finish, so the report is
+// dropped. A shell that finished after the caller looked still reports.
+func (bs *BackgroundShell) Read() (done func(sawFinish bool)) {
+	bs.reportMu.Lock()
+	bs.readers++
+	bs.reportMu.Unlock()
+	return func(sawFinish bool) {
+		bs.reportMu.Lock()
+		bs.readers--
+		bs.claimed = bs.claimed || sawFinish
+		bs.reportMu.Unlock()
+		if bs.IsDone() {
+			bs.maybeReport()
+		}
+	}
+}
+
+// maybeReport runs the completion report if the shell has one, was not
+// killed, nobody is reading the result, and it has not been delivered yet.
+// Callers check the shell is done.
+func (bs *BackgroundShell) maybeReport() {
+	bs.reportMu.Lock()
+	defer bs.reportMu.Unlock()
+	if bs.report == nil || bs.killed.Load() || bs.readers > 0 || bs.claimed {
+		return
+	}
+	bs.claimed = true
+	go bs.report()
 }
 
 func (bs *BackgroundShell) WaitContext(ctx context.Context) bool {

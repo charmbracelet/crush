@@ -183,7 +183,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				}, label)
 			}
 		}
-		for _, report := range msg.SubAgentReports() {
+		for _, report := range msg.DispatchReports() {
 			if record, ok := records.byLabel[report.Label]; ok {
 				record.Open = false
 				record.LastReport = &report
@@ -219,7 +219,7 @@ func (c *coordinator) reconcileDispatches(ctx context.Context, agent SessionAgen
 		if _, live := c.dispatched.Get(dispatchKey(sessionID, label)); live {
 			continue
 		}
-		c.recordDispatchReport(sessionID, message.SubAgentReport{
+		c.recordReport(sessionID, message.SubAgentReport{
 			Label:  label,
 			Output: "Interrupted: Crush exited while this subagent was running. Its session is kept; agent_send resumes it with its work in context.",
 			Failed: true,

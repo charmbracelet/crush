@@ -20,6 +20,40 @@ type BackgroundJobs struct {
 	owner    any
 	sessions session.Getter
 	roots    *session.Roots
+	report   JobReporter
+}
+
+// JobReporter tells sessionID that one of its background jobs finished.
+type JobReporter func(sessionID string, job *shell.BackgroundShell)
+
+// WithReports returns b with finished jobs reported through report. Only
+// an interactive top-level agent should have them: a subagent's session is
+// not driven by the agent that delivers reports, and a headless run exits,
+// killing its jobs, before a report could arrive.
+func (b BackgroundJobs) WithReports(report JobReporter) BackgroundJobs {
+	b.report = report
+	return b
+}
+
+// Reports reports whether finished jobs report back.
+func (b BackgroundJobs) Reports() bool { return b.report != nil }
+
+// nextSteps tells the agent what to do now that a job runs in the
+// background.
+func (b BackgroundJobs) nextSteps() string {
+	if !b.Reports() {
+		return "Use job_output tool to view output or job_kill to terminate."
+	}
+	return "You will get a <job-report> when it finishes, so keep working, or end your turn if the rest of your work needs its result. Use job_output to check on it sooner or job_kill to terminate."
+}
+
+// watch arranges for job to be reported to the session in scope once it
+// finishes.
+func (b BackgroundJobs) watch(scope shell.JobScope, job *shell.BackgroundShell) {
+	if !b.Reports() || scope.Session == "" {
+		return
+	}
+	job.ReportWhenDone(func() { b.report(scope.Session, job) })
 }
 
 // NewBackgroundJobs returns a scope for jobs started on behalf of owner.

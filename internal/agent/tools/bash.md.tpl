@@ -32,9 +32,16 @@ Common shell builtins and core utils available on Windows.
 - Returns a shell ID for managing the background process
 - Backgrounding buys you the time the command takes, so spend it: start the job, then keep working
 - Do NOT call job_output right after starting a job. It returns the output so far, and a job that just started has printed nothing
+{{- if .JobReports}}
+- When a background job finishes you get a `<job-report>` with its exit status and output, starting a new turn if you are idle. When the rest of your work needs the job's result, end your turn instead of waiting on it
+- Use job_output to check on a job before it finishes, such as a server's startup log, not to collect its final result
+- A command that auto-backgrounds on the timeout behaves the same way: it is still running and will report when it ends
+- No report comes for a job you stopped with job_kill, one whose finish job_output already showed you, or one that never exits, like a server; check those with job_output
+{{- else}}
 - Call job_output once the job's result is the next thing you need, or once you have run out of other work
 - job_output with wait=true blocks until the job finishes or 2 minutes pass, giving back the time you just bought; only wait when waiting is the useful thing to do
 - A command that auto-backgrounds on the timeout behaves the same way: it is still running, so keep working unless you need its result now
+{{- end}}
 - Use job_kill tool to terminate a background shell
 - Use job_list to find the ID of a background shell you no longer have
 - IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead

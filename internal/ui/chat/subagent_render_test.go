@@ -22,7 +22,7 @@ func renderPlain(t *testing.T, item MessageItem) []string {
 func TestSubagentReportAlignsWithHeader(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
-	item := NewSubAgentReportItem(&sty, "bjorn-date-impl", "hyper/glm-5", "All done.", false)
+	item := NewSubAgentReportItem(&sty, message.SubAgentReport{Label: "bjorn-date-impl", Model: "hyper/glm-5", Output: "All done."})
 	lines := renderPlain(t, item)
 
 	require.Contains(t, lines[0], "Subagent Report → Björn date-impl (model=hyper/glm-5)")
@@ -116,7 +116,7 @@ func TestSubagentReportHasNoBlankTail(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
 	for _, out := range []string{"Done.\n\nAll good.", "Contents:\n\n```\na\nb\n```"} {
-		lines := renderPlain(t, NewSubAgentReportItem(&sty, "x", "", out, false))
+		lines := renderPlain(t, NewSubAgentReportItem(&sty, message.SubAgentReport{Label: "x", Output: out}))
 		require.NotEmpty(t, strings.TrimSpace(lines[len(lines)-1]), "%q", out)
 	}
 }
@@ -169,4 +169,23 @@ func TestDispatchCollapsesOlderToolCalls(t *testing.T) {
 	out = strings.Join(renderPlain(t, item), "\n")
 	require.NotContains(t, out, "earlier tool calls")
 	require.Contains(t, out, "f00.go")
+}
+
+// A job report names the job rather than a subagent, and shows its output
+// as the shell printed it rather than as markdown.
+func TestJobReportRendersPlainOutput(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	report := message.SubAgentReport{Job: "07A", Label: "build-it now", Output: "Command: make\nExit code 2\n\n# not a heading"}
+	items := ExtractMessageItems(&sty, &message.Message{Role: message.User, Parts: []message.ContentPart{report}}, nil, "")
+	require.Len(t, items, 1)
+	require.IsType(t, &JobReportItem{}, items[0])
+	lines := renderPlain(t, items[0])
+	require.Contains(t, lines[0], "Job Report")
+	require.Contains(t, lines[0], "build-it now", "the label is not split into a subagent name")
+	require.Contains(t, strings.Join(lines, "\n"), "# not a heading")
+
+	title := ansi.Strip(ReportTitle(&sty, report))
+	require.Contains(t, title, "Job Report")
+	require.Contains(t, title, "build-it now")
 }

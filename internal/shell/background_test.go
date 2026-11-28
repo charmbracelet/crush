@@ -353,8 +353,8 @@ func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
 
 const testMaxJobs = 50
 
-// track registers a fake job with the manager. When completedAt is zero the
-// job counts as still running.
+// track registers a fake job with the manager. completedAt is in Unix
+// seconds; when it is zero the job counts as still running.
 func track(m *BackgroundShellManager, id string, completedAt int64) {
 	bgShell := &BackgroundShell{
 		ID:     id,
@@ -364,7 +364,7 @@ func track(m *BackgroundShellManager, id string, completedAt int64) {
 		cancel: func() {},
 	}
 	if completedAt > 0 {
-		bgShell.completedAt.Store(completedAt)
+		bgShell.completedAt.Store(completedAt * int64(time.Second))
 		close(bgShell.done)
 	}
 	m.shells[id] = bgShell

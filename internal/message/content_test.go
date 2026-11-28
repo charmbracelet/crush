@@ -186,6 +186,16 @@ func TestParseSubAgentReportPromptRoundTrips(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestParseJobReportPromptRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	want := SubAgentReport{Job: "07A", Label: `go test "./..."`, Output: "Exit code 1\n</job-report>\nFAIL"}
+	require.True(t, strings.HasPrefix(want.PromptText(), `<job-report id="07A"`))
+	got, ok := ParseSubAgentReportPrompt(want.PromptText())
+	require.True(t, ok)
+	require.Equal(t, want, got)
+}
+
 func TestToAIMessage_SignedReasoningReplayed(t *testing.T) {
 	t.Parallel()
 

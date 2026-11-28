@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"strings"
 	"time"
 
@@ -17,12 +18,14 @@ const (
 
 	// jobOutputWaitLimit caps how long a wait=true call blocks, so a long
 	// job hands control back to the agent instead of stalling the turn.
-	// Keep job_output.md, bash.md.tpl, and the wait param in sync.
+	// Keep job_output.md.tpl, bash.md.tpl, and the wait param in sync.
 	jobOutputWaitLimit = 2 * time.Minute
 )
 
-//go:embed job_output.md
-var jobOutputDescription string
+//go:embed job_output.md.tpl
+var jobOutputDescriptionTmpl string
+
+var jobOutputDescriptionTpl = template.Must(template.New("jobOutputDescription").Parse(jobOutputDescriptionTmpl))
 
 type JobOutputParams struct {
 	ShellID string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
@@ -46,7 +49,7 @@ func NewJobOutputTool(spillDir string, jobs BackgroundJobs, progress pubsub.Publ
 func newJobOutputTool(spillDir string, jobs BackgroundJobs, progress pubsub.Publisher[ToolProgress], waitLimit time.Duration) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
-		jobOutputDescription,
+		jobOutputToolDescription(jobs.Reports()),
 		func(ctx context.Context, params JobOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ShellID == "" {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil
@@ -62,50 +65,38 @@ func newJobOutputTool(spillDir string, jobs BackgroundJobs, progress pubsub.Publ
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
 			}
 
+			// Reading the result here stands in for the completion report,
+			// so hold it back and drop it if this call sees the finish.
+			endRead := bgShell.Read()
 			if params.Wait {
 				waitCtx, cancel := context.WithTimeout(ctx, waitLimit)
 				waitWithProgress(waitCtx, bgShell, newProgressReporter(progress, GetSessionFromContext(ctx), call.ID))
 				cancel()
 			}
 
-			stdout, stderr, done, err := bgShell.GetOutput()
-
-			var outputParts []string
-			if stdout != "" {
-				outputParts = append(outputParts, stdout)
-			}
-			if stderr != "" {
-				outputParts = append(outputParts, stderr)
-			}
+			result := ReadJobResult(bgShell, spillDir)
+			// A cancelled call's result may never reach the model, so it
+			// does not stand in for the report.
+			endRead(result.Done && ctx.Err() == nil)
 
 			status := "running"
-			if done {
+			if result.Done {
 				status = "completed"
-				if msg := shell.Describe(err); msg != "" {
-					outputParts = append(outputParts, msg)
-				}
 			}
-
-			output := strings.Join(outputParts, "\n")
-			output = TruncateOutput(output, spillDir)
 
 			metadata := JobOutputResponseMetadata{
 				ShellID:          params.ShellID,
 				Command:          bgShell.Command,
 				Description:      bgShell.Description,
-				Done:             done,
+				Done:             result.Done,
 				WorkingDirectory: bgShell.WorkingDir,
 			}
 
-			if output == "" {
-				output = BashNoOutput
+			text := fmt.Sprintf("Status: %s\n\n%s", status, result.Text)
+			if params.Wait && !result.Done && ctx.Err() == nil {
+				text += stoppedWaitingNote(jobs.Reports())
 			}
-
-			result := fmt.Sprintf("Status: %s\n\n%s", status, output)
-			if params.Wait && !done && ctx.Err() == nil {
-				result += "\n\nStopped waiting: the job is still running and the output above is what it has printed so far. Keep working on other things and check back; wait again only if nothing else is left to do."
-			}
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text), metadata), nil
 		},
 	)
 }
@@ -134,4 +125,24 @@ func waitWithProgress(ctx context.Context, bgShell *shell.BackgroundShell, progr
 			progress.report(bgShell)
 		}
 	}
+}
+
+// jobOutputToolDescription is the tool's description, which points the
+// agent at job reports when they are on.
+func jobOutputToolDescription(jobReports bool) string {
+	var out strings.Builder
+	if err := jobOutputDescriptionTpl.Execute(&out, struct{ JobReports bool }{jobReports}); err != nil {
+		// The template is embedded, so this only fails on a broken build.
+		panic("failed to execute job_output description template: " + err.Error())
+	}
+	return out.String()
+}
+
+// stoppedWaitingNote tells the agent a wait ran out with the job still
+// going, and what to do instead of waiting again.
+func stoppedWaitingNote(reports bool) string {
+	if reports {
+		return "\n\nStopped waiting: the job is still running and the output above is what it has printed so far. It will report back when it finishes, so keep working on other things or end your turn."
+	}
+	return "\n\nStopped waiting: the job is still running and the output above is what it has printed so far. Keep working on other things and check back; wait again only if nothing else is left to do."
 }

@@ -92,7 +92,7 @@ type SessionAgentCall struct {
 	// session Run returns ErrSessionIdle instead of starting one.
 	QueueOnly bool
 	Prompt    string
-	// Report is a subagent report this call delivers. It is written to
+	// Report is a subagent or job report this call delivers. It is written to
 	// the transcript only when delivered, so it lands where the model
 	// reads it. Prompt is still what the model reads for it.
 	Report *message.SubAgentReport
@@ -571,7 +571,7 @@ func (a *sessionAgent) settleDroppedCalls(drops []SessionAgentCall) {
 	for _, d := range drops {
 		if d.Report != nil {
 			if _, err := a.createUserMessage(ctx, d, ""); err != nil {
-				slog.Error("Failed to record a dropped subagent report", "session_id", d.SessionID, "error", err)
+				slog.Error("Failed to record a dropped report", "session_id", d.SessionID, "error", err)
 			}
 		}
 		if d.RunID == "" {

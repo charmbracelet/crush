@@ -264,6 +264,24 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedFiles, maxItems, t.Files.TruncationHint)...)
 }
 
+// newSessionFilePaths returns the paths in updated that are not in previous.
+// LSPs were already started for the previous files, so only the new ones
+// need a start.
+func newSessionFilePaths(previous, updated []SessionFile) []string {
+	known := make(map[string]struct{}, len(previous))
+	for _, f := range previous {
+		known[f.LatestVersion.Path] = struct{}{}
+	}
+	var paths []string
+	for _, f := range updated {
+		if _, ok := known[f.LatestVersion.Path]; ok {
+			continue
+		}
+		paths = append(paths, f.LatestVersion.Path)
+	}
+	return paths
+}
+
 // startLSPs starts LSP servers for the given file paths.
 func (m *UI) startLSPs(paths []string) tea.Cmd {
 	if len(paths) == 0 {

@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -317,6 +318,25 @@ func (m *UI) pillsAreaHeight() int {
 	return pillsAreaHeight
 }
 
+// todoSpinnerFrame returns the in-progress todo icon frame for the given
+// moment. Like the subagent spinner it is derived from the time, so the
+// shared animation clock is all it needs to move.
+func todoSpinnerFrame(now time.Time) int {
+	return spinnerFrameIndex(now)
+}
+
+// todoSpinnerVisible reports whether the pills show a spinning in-progress
+// todo, so the animation clock must keep ticking for it.
+func (m *UI) todoSpinnerVisible() bool {
+	return m.todoIsSpinning &&
+		m.state == uiChat &&
+		m.hasSession() &&
+		hasInProgressTodo(m.session.Todos) &&
+		m.activeInline == nil &&
+		m.layout.pills.Dx() > 0 &&
+		(m.dialog == nil || !m.dialog.HasDialogs())
+}
+
 // renderPills renders the pills panel and stores it in m.pillsView.
 func (m *UI) renderPills() {
 	m.pillsView = ""
@@ -350,7 +370,8 @@ func (m *UI) renderPills() {
 
 	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 	if m.todoIsSpinning {
-		inProgressIcon = m.todoSpinner.View()
+		m.todoSpinnerFrame = todoSpinnerFrame(m.animClock.clock())
+		inProgressIcon = t.Pills.TodoSpinner.Render(subAgentSpinnerFrames[m.todoSpinnerFrame])
 	}
 
 	var pills []string

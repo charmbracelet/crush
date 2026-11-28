@@ -23,6 +23,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRunNonInteractiveOffersBlockingDelegation(t *testing.T) {
+	var sawBlocking, sawDetached atomic.Bool
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req scriptedRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		if req.offers(agent.AgentToolName) {
+			sawBlocking.Store(true)
+		}
+		if req.offers(agent.AgentDispatchToolName) {
+			sawDetached.Store(true)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if err := streamReply(w, scriptedDelta{Role: "assistant", Content: "done"}, "stop"); err != nil {
+			t.Errorf("stream reply: %v", err)
+		}
+	}))
+	t.Cleanup(provider.Close)
+
+	app := newRunTestApp(t, provider.URL)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, app.RunNonInteractive(ctx, io.Discard, "go", "", "", "", true, "", false))
+	require.True(t, sawBlocking.Load(), "the headless run never offered blocking delegation")
+	require.False(t, sawDetached.Load(), "the headless run offered detached delegation")
+}
+
 // Nobody can answer a permission prompt in crush run, so a subagent that asks
 // one waits forever. Listing a directory outside the working directory always
 // asks, which makes it a reliable way to provoke that prompt.
@@ -117,7 +146,7 @@ func newRunTestApp(t *testing.T, baseURL string) *App {
 	require.NoError(t, err)
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	app, err := New(t.Context(), conn, store, skills.NewManager(nil, nil, nil))
+	app, err := New(t.Context(), conn, store, skills.NewManager(nil, nil, nil), false)
 	require.NoError(t, err)
 	t.Cleanup(app.Shutdown)
 	return app

@@ -438,7 +438,7 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	if clientServer {
 		return setupClientServerWorkspace(cmd)
 	}
-	return setupLocalWorkspace(cmd, store)
+	return setupLocalWorkspace(cmd, store, true)
 }
 
 // sysadminModeWarning is printed to stderr whenever -yy puts a session in
@@ -448,7 +448,7 @@ const sysadminModeWarning = "Warning: sysadmin mode is active. Every command is 
 
 // setupLocalWorkspace creates an in-process app.App and wraps it in an
 // AppWorkspace. A nil store is loaded here.
-func setupLocalWorkspace(cmd *cobra.Command, store *config.ConfigStore) (workspace.Workspace, func(), error) {
+func setupLocalWorkspace(cmd *cobra.Command, store *config.ConfigStore, interactive bool) (workspace.Workspace, func(), error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yoloCount, _ := cmd.Flags().GetCount("yolo")
 	channels, _ := cmd.Flags().GetStringSlice("channels")
@@ -512,7 +512,7 @@ func setupLocalWorkspace(cmd *cobra.Command, store *config.ConfigStore) (workspa
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	appInstance, err := app.New(ctx, conn, store, skillsMgr)
+	appInstance, err := app.New(ctx, conn, store, skillsMgr, interactive)
 	if err != nil {
 		_ = conn.Close()
 		slog.Error("Failed to create app instance", "error", err)

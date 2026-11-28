@@ -116,7 +116,7 @@ type App struct {
 // per-workspace skill discovery results computed by the caller; the
 // caller is responsible for constructing it (typically via
 // skills.NewManager + skills.DiscoverFromConfig).
-func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, interactive bool) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
@@ -263,7 +263,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		slog.Warn("No agent configuration found")
 		return app, nil
 	}
-	if err := app.InitCoderAgent(ctx); err != nil {
+	if err := app.initCoderAgent(ctx, interactive); err != nil {
 		// A failed app is never shut down, so release its MCP reference.
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = mcp.Close(closeCtx)
@@ -368,7 +368,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// let it fail instead.
 	sshaskpass.DisableIntegration()
 
-	// Re-initialize the coder agent without interactive-only tools.
+	// Initialize the coder agent if the app did not already have a configured provider.
 	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
 		return fmt.Errorf("failed to reinitialize agent for non-interactive mode: %w", err)
 	}

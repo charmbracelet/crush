@@ -187,8 +187,9 @@ func badgeInk(fill, ink, alt color.Color) color.Color {
 // built-in: the ones that skip the built-in overrides.
 func legibleBadges(s Styles, o quickStyleOpts) Styles {
 	ink := badgeInk(o.primary, o.fgBase, o.onPrimary)
-	s.Status.ModeBadgePlan = s.Status.ModeBadgePlan.Foreground(ink)
+	s.Status.ModeBadgePlan = s.Status.ModeBadgePlan.Foreground(badgeInk(o.plan, o.fgBase, o.onPrimary))
 	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
+	s.Editor.PromptPlanIconFocused = s.Editor.PromptPlanIconFocused.Foreground(badgeInk(o.plan, o.fgBase, o.onPrimary))
 	s.Status.ModeBannerPlan = s.Status.ModeBannerPlan.Foreground(badgeInk(o.planMoreSubtle, o.fgBase, o.onPrimary))
 	s.Editor.PromptQuestionIconFocused = s.Editor.PromptQuestionIconFocused.Foreground(ink)
 	s.FilePicker.Selected = s.FilePicker.Selected.Foreground(ink)
@@ -931,9 +932,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	// The bullet is 1 cell everywhere (unlike ⏸, whose rendered width is
 	// terminal-dependent), so the badge fills the 4-cell prompt column
 	// exactly and stays flush with the ":::" continuation dots.
-	s.Editor.PromptPlanIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ⏸ ")
+	s.Editor.PromptPlanIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(badgeInk(o.plan, o.fgBase, o.onPrimary)).Background(o.plan).Bold(true).SetString(" ⏸ ")
 	s.Editor.PromptPlanIconBlurred = s.Editor.PromptPlanIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
-	s.Editor.PromptPlanDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
+	s.Editor.PromptPlanDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.plan).SetString(":::")
 	s.Editor.PromptPlanDotsBlurred = s.Editor.PromptPlanDotsFocused.Foreground(o.fgMoreSubtle)
 	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(badgeInk(o.busy, o.bgBase, o.fgBase)).Background(o.busy).Bold(true).SetString(" ! ")
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
@@ -1259,11 +1260,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
-	s.Status.ModeBadgePlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.primary).Padding(0, 1).Bold(true).SetString("PLAN MODE")
+	s.Status.ModeBadgePlan = lipgloss.NewStyle().Foreground(badgeInk(o.plan, o.fgBase, o.onPrimary)).Background(o.plan).Padding(0, 1).Bold(true).SetString("PLAN MODE")
 	s.Status.ModeBadgeYolo = lipgloss.NewStyle().Foreground(badgeInk(o.busy, o.bgBase, o.fgBase)).Background(o.busy).Padding(0, 1).Bold(true).SetString("YOLO MODE")
 	s.Status.ModeBadgeSysadmin = lipgloss.NewStyle().Foreground(badgeInk(o.destructive, o.bgBase, o.fgBase)).Background(o.destructive).Padding(0, 1).Bold(true).SetString("SYSADMIN MODE")
 	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
-	s.Status.ModeBannerPlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.planMoreSubtle).Padding(0, 1)
+	s.Status.ModeBannerPlan = lipgloss.NewStyle().Foreground(badgeInk(o.planMoreSubtle, o.fgBase, o.onPrimary)).Background(o.planMoreSubtle).Padding(0, 1)
 	s.Status.ModeBannerYoloBadge = s.Status.ModeBadgeYolo
 	s.Status.ModeBannerYolo = lipgloss.NewStyle().Foreground(badgeInk(o.yolo, o.bgBase, o.fgBase)).Background(o.yolo).Padding(0, 1)
 	s.Status.ModeBannerSysadminBadge = s.Status.ModeBadgeSysadmin

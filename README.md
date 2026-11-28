@@ -399,15 +399,16 @@ dialog.
 
 #### Built-In Themes
 
-| Theme             | Name                          |
-| ----------------- | ----------------------------- |
-| Charmtone Pantera | `charmtone-panther` (default) |
-| Gruvbox Dark      | `gruvbox-dark`                |
-| Keanu             | `keanu`                       |
-| Rosé Pine         | `rose-pine`                   |
-| Rosé Pine Moon    | `rose-pine-moon`              |
-| Rosé Pine Dawn    | `rose-pine-dawn`              |
-| KITT              | `kitt`                        |
+| Theme                  | Name                          |
+| ---------------------- | ----------------------------- |
+| Charmtone Pantera      | `charmtone-panther` (default) |
+| Charmtone Tigra Blanca | `charmtone-tigra-blanca`      |
+| Gruvbox Dark           | `gruvbox-dark`                |
+| Keanu                  | `keanu`                       |
+| Rosé Pine              | `rose-pine`                   |
+| Rosé Pine Moon         | `rose-pine-moon`              |
+| Rosé Pine Dawn         | `rose-pine-dawn`              |
+| KITT                   | `kitt`                        |
 
 ### LSPs
 

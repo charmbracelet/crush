@@ -755,26 +755,124 @@ func kittOverrides(s Styles) Styles {
 	return s
 }
 
+// tigraBlancaOpts returns the quickStyleOpts for the Tigra Blanca theme,
+// a light theme built on Charmtone colors.
+func tigraBlancaOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   tone.Hazy,
+		secondary: tone.Macaron,
+		accent:    tone.Zinc,
+		keyword:   tone.Grape,
+
+		fgBase:       tone.Char,
+		fgMoreSubtle: tone.Squid,
+		fgSubtle:     tone.Iron,
+		fgMostSubtle: tone.Steam,
+
+		onPrimary: tone.Iron,
+
+		bgBase:         tone.Soda,
+		bgLeastVisible: tone.Sash,
+		bgLessVisible:  tone.Steep,
+		bgMostVisible:  tone.Char,
+
+		separator: tone.Steep,
+
+		destructive:       tone.Chili,
+		destructiveSubtle: tone.Cherry,
+		error:             tone.Pom,
+		warningSubtle:     tone.Yam,
+		warning:           tone.Zest,
+		attention:         tone.Chili,
+		busy:              tone.Uni,
+		info:              tone.Sardine,
+		infoMoreSubtle:    tone.Anchovy,
+		infoMostSubtle:    tone.Malibu,
+		success:           tone.Bok,
+		successMoreSubtle: tone.Julep,
+		successMostSubtle: tone.Zinc,
+		yolo:              tone.Yam,
+		plan:              tone.Charple,
+		planMoreSubtle:    tone.Hazy,
+
+		diffInsertFg:       tone.Gator,
+		diffInsertCodeBg:   tone.Bok,
+		diffInsertGutterBg: tone.Bok,
+		diffDeleteFg:       tone.Pom,
+		diffDeleteCodeBg:   tone.Salmon,
+		diffDeleteGutterBg: tone.Salmon,
+
+		button:         tone.Macaron,
+		buttonSubtle:   tone.Steep,
+		buttonInactive: tone.Smoke,
+		buttonHovered:  tone.Squid,
+
+		ansiBlack:   tone.Salt,
+		ansiRed:     tone.Sriracha,
+		ansiGreen:   tone.Pickle,
+		ansiYellow:  tone.Cumin,
+		ansiBlue:    tone.Charple,
+		ansiMagenta: tone.Macaron,
+		ansiCyan:    tone.Damson,
+		ansiWhite:   tone.Oyster,
+
+		ansiBrightBlack:   tone.Squid,
+		ansiBrightRed:     tone.Pom,
+		ansiBrightGreen:   tone.Gator,
+		ansiBrightYellow:  tone.Paprika,
+		ansiBrightBlue:    tone.Jelly,
+		ansiBrightMagenta: tone.Urchin,
+		ansiBrightCyan:    tone.Oceania,
+		ansiBrightWhite:   tone.Pepper,
+	}
+}
+
+// tigraBlancaOverrides applies Tigra Blanca tweaks that don't fit the
+// token model of [quickStyleOpts].
+func tigraBlancaOverrides(s Styles) Styles {
+	if chroma := s.Markdown.CodeBlock.Chroma; chroma != nil {
+		chroma.Comment.Color = hex(tone.Oyster)
+	}
+
+	s.Editor.PromptNormalIconFocused = s.Editor.PromptNormalIconFocused.
+		Foreground(tone.Turtle)
+
+	s.Status.ModeBadgePlan = s.Status.ModeBadgePlan.
+		Foreground(tone.Salt)
+	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
+	s.Status.ModeBannerPlan = s.Status.ModeBannerPlan.
+		Foreground(tone.Salt)
+	s.Editor.PromptPlanIconFocused = s.Editor.PromptPlanIconFocused.
+		Foreground(tone.Salt)
+
+	s.Status.ModeBannerSysadmin = s.Status.ModeBannerSysadmin.
+		Foreground(tone.Salt)
+
+	return s
+}
+
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
-	"charmtone-panther": charmtoneOpts,
-	"gruvbox-dark":      gruvboxDarkOpts,
-	"keanu":             keanuOpts,
-	"rose-pine":         rosePineOpts,
-	"rose-pine-moon":    rosePineMoonOpts,
-	"rose-pine-dawn":    rosePineDawnOpts,
-	"kitt":              kittOpts,
+	"charmtone-panther":      charmtoneOpts,
+	"gruvbox-dark":           gruvboxDarkOpts,
+	"keanu":                  keanuOpts,
+	"rose-pine":              rosePineOpts,
+	"rose-pine-moon":         rosePineMoonOpts,
+	"rose-pine-dawn":         rosePineDawnOpts,
+	"kitt":                   kittOpts,
+	"charmtone-tigra-blanca": tigraBlancaOpts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply
 // theme-specific style tweaks on top of the styles produced by
 // [quickStyle]. Themes without overrides are absent from the map.
 var builtinThemeOverrides = map[string]func(Styles) Styles{
-	"charmtone-panther": charmtoneOverrides,
-	"gruvbox-dark":      gruvboxDarkOverrides,
-	"keanu":             keanuOverrides,
-	"rose-pine-dawn":    rosePineDawnOverrides,
-	"kitt":              kittOverrides,
+	"charmtone-panther":      charmtoneOverrides,
+	"gruvbox-dark":           gruvboxDarkOverrides,
+	"keanu":                  keanuOverrides,
+	"rose-pine-dawn":         rosePineDawnOverrides,
+	"kitt":                   kittOverrides,
+	"charmtone-tigra-blanca": tigraBlancaOverrides,
 }
 
 // deprecatedThemeNames maps legacy built-in theme names to their current

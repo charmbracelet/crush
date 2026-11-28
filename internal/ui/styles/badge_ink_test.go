@@ -78,6 +78,24 @@ var badgeInkExceptions = map[string]map[string]string{
 		"Status.ModeBannerYolo":        "#575279",
 		"Editor.PromptYoloIconFocused": "#575279",
 	},
+	// Tigra Blanca is a light theme: its pale background roles read worse
+	// than the dark text on the bright fills, so badgeInk swaps them.
+	"charmtone-tigra-blanca": {
+		"Status.SuccessIndicator":      "#3a3943",
+		"Status.InfoIndicator":         "#3a3943",
+		"Status.UpdateIndicator":       "#3a3943",
+		"Status.SuccessMessage":        "#3a3943",
+		"Status.InfoMessage":           "#3a3943",
+		"Status.UpdateMessage":         "#3a3943",
+		"Status.ModeBadgeYolo":         "#3a3943",
+		"Status.ModeBannerYolo":        "#3a3943",
+		"Editor.PromptYoloIconFocused": "#3a3943",
+		"Button.Hovered":               "#3a3943",
+		"Attachments.Image":            "#3a3943",
+		"Attachments.Text":             "#3a3943",
+		"Attachments.Skill":            "#3a3943",
+		"Tool.AgenticFetchPromptTag":   "#3a3943",
+	},
 }
 
 // TestBadgeInk_BuiltinsKeepTheirInk pins the built-in themes' look: each
@@ -208,9 +226,9 @@ func TestLegibleBadges_BuiltinsKeepTheirLook(t *testing.T) {
 			require.Equal(t, rgbHex(c[0]), rgbHex(got[style][0]), "%s: %s", name, style)
 		}
 	}
-	// The default theme's plan banner keeps fgBase although it is below
-	// 3:1 there.
-	require.Equal(t, rgbHex(charmtoneOpts().fgBase), rgbHex(CharmtonePantera().Status.ModeBannerPlan.GetForeground()))
+	// The default theme's plan banner keeps the ink badgeInk resolves
+	// from its planMoreSubtle fill (the pale Sash), not fgBase.
+	require.Equal(t, rgbHex(badgeInk(charmtoneOpts().planMoreSubtle, charmtoneOpts().fgBase, charmtoneOpts().onPrimary)), rgbHex(CharmtonePantera().Status.ModeBannerPlan.GetForeground()))
 }
 
 func TestBadgeInk(t *testing.T) {

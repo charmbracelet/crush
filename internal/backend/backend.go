@@ -557,6 +557,8 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
+	// A failed app.New has already released conn, so it is not released
+	// again here.
 	appWorkspace, err := app.New(b.ctx, conn, cfg, skillsMgr)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create app workspace: %w", err)

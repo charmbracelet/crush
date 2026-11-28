@@ -249,7 +249,6 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	if m.hasSession() && hasInProgressTodo(m.session.Todos) && busy && !m.todoIsSpinning {
 		m.todoIsSpinning = true
-		cmds = append(cmds, m.todoSpinner.Tick)
 	}
 	if m.todoIsSpinning && !busy {
 		m.todoIsSpinning = false

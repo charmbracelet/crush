@@ -493,9 +493,11 @@ type UI struct {
 	probedSessionBusy bool
 	pillsView         string
 
-	// Todo spinner
-	todoSpinner    spinner.Model
-	todoIsSpinning bool
+	// todoIsSpinning animates the in-progress todo icon in the pills. Its
+	// frame is derived from the shared animation clock; lastTodoSpinnerFrame
+	// is the frame the pills were last rendered with.
+	todoIsSpinning       bool
+	lastTodoSpinnerFrame int
 
 	// pending is the turn this client sent; the placeholder items in the
 	// chat are derived from it by syncPendingItem.
@@ -602,11 +604,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		com.Styles.Completions.Match,
 	)
 
-	todoSpinner := spinner.New(
-		spinner.WithSpinner(spinner.MiniDot),
-		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
-	)
-
 	// Attachments component
 	attachments := attachments.New(
 		attachments.NewRenderer(com.Styles.Attachments),
@@ -628,7 +625,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		header:              header,
 		completions:         comp,
 		attachments:         attachments,
-		todoSpinner:         todoSpinner,
 		frames:              newFrameCache(frameCacheTTL, frameCacheMaxEntries),
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
@@ -1051,7 +1047,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// only start spinner if there is an in-progress todo
 			if m.isAgentBusy() {
 				m.todoIsSpinning = true
-				cmds = append(cmds, m.todoSpinner.Tick)
 			}
 			m.updateLayoutAndSize()
 		}
@@ -1151,7 +1146,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
-				cmds = append(cmds, m.todoSpinner.Tick)
 			}
 			// The pills panel reserves vertical space that the chat area
 			// must yield. Recompute the layout whenever that footprint
@@ -1204,7 +1198,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// start the spinner if there is a new message
 		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
 			m.todoIsSpinning = true
-			cmds = append(cmds, m.todoSpinner.Tick)
 		}
 		// stop the spinner if the agent is not busy anymore
 		if m.todoIsSpinning && !m.isAgentBusy() {
@@ -1584,14 +1577,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.state == uiChat && m.hasSession() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
-			var cmd tea.Cmd
-			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
-			if cmd != nil {
-				m.renderPills()
-				cmds = append(cmds, cmd)
-			}
-		}
 
 	case tea.KeyPressMsg:
 		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
@@ -1809,10 +1794,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // ensureAnimating arms the shared clock while a visible transcript item is
-// spinning or a subagent is running, whose spinners live in the chrome.
+// spinning, a subagent is running or the todo pill is spinning. The latter
+// two spinners live in the chrome.
 func (m *UI) ensureAnimating() tea.Cmd {
 	return m.animClock.ensure(func() bool {
-		return m.subAgentsRunning > 0 || m.chat.hasVisibleAnimation()
+		return m.subAgentsRunning > 0 || m.chat.hasVisibleAnimation() || m.todoSpinnerVisible()
 	})
 }
 
@@ -1825,10 +1811,11 @@ func (m *UI) handleAnimTick(msg animTickMsg) {
 		m.markScrollOnly()
 		return
 	}
-	if !m.chat.advanceVisible() && m.subAgentsRunning == 0 {
+	todoMoved := m.todoSpinnerVisible() && spinnerFrameIndex(m.animClock.clock()) != m.lastTodoSpinnerFrame
+	if !m.chat.advanceVisible() && m.subAgentsRunning == 0 && !todoMoved {
 		// Nothing moved on screen, so the frame can be reused. It cannot be
-		// when the header is spinning: that spinner is outside the list and
-		// reusing the frame would freeze it.
+		// when the header or the todo pill is spinning: those spinners are
+		// outside the list and reusing the frame would freeze them.
 		m.markScrollOnly()
 		return
 	}
@@ -5524,7 +5511,6 @@ func (m *UI) refreshStyles() {
 	m.textarea.SetStyles(t.Editor.Textarea)
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
 	m.attachments.SetStyles(t.Attachments)
-	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	m.dialog.RefreshStyles()
 	if r, ok := m.activeInline.(dialog.StyleRefresher); ok {

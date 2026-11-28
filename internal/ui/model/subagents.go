@@ -16,12 +16,17 @@ import (
 // frame from the clock is enough to make it move without its own ticker.
 var subAgentSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// subAgentSpinner returns the frame for the given moment. The glyph period
-// is a whole number of animation frames so every glyph holds equally long.
+// subAgentSpinner returns the frame for the given moment.
 func subAgentSpinner(now time.Time) string {
+	return subAgentSpinnerFrames[spinnerFrameIndex(now)]
+}
+
+// spinnerFrameIndex returns the index into subAgentSpinnerFrames for the
+// given moment. The glyph period is a whole number of animation frames so
+// every glyph holds equally long.
+func spinnerFrameIndex(now time.Time) int {
 	frameEvery := 2 * anim.FrameInterval()
-	i := (now.UnixNano() / int64(frameEvery)) % int64(len(subAgentSpinnerFrames))
-	return subAgentSpinnerFrames[i]
+	return int((now.UnixNano() / int64(frameEvery)) % int64(len(subAgentSpinnerFrames)))
 }
 
 // subAgentIdleRetention is how long a finished subagent stays in the

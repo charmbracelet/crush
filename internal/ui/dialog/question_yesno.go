@@ -48,37 +48,34 @@ func NewYesNo(sty *styles.Styles, req question.Question) *YesNo {
 	}
 }
 
-// HandleKey processes a key press. Returns true when the user has
-// made a choice or dismissed the question.
-func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+// HandleKey processes a key press. done reports the user made a
+// choice; handled reports the key was used.
+func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (done, handled bool, cmd tea.Cmd) {
 	// Note editor takes priority when active.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
 		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() { d.closeNote(question.QuestionNoteKey) })
 		if handled {
-			return false, cmd
+			return false, true, cmd
 		}
 	}
 
 	switch {
-	case key.Matches(msg, CloseKey):
-		d.answer(question.Answer{QuestionID: d.Request.ID})
-		return true, nil
 	case key.Matches(msg, d.keyLeftRight):
 		d.selectedNo = !d.selectedNo
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, d.keyEnter):
 		d.answer(d.respond(!d.selectedNo))
-		return true, nil
+		return true, true, nil
 	case key.Matches(msg, d.keyYes):
 		d.answer(d.respond(true))
-		return true, nil
+		return true, true, nil
 	case key.Matches(msg, d.keyNo):
 		d.answer(d.respond(false))
-		return true, nil
+		return true, true, nil
 	case key.Matches(msg, d.keyNote):
-		return false, d.openNote(question.QuestionNoteKey)
+		return false, true, d.openNote(question.QuestionNoteKey)
 	}
-	return false, nil
+	return false, false, nil
 }
 
 func (d *YesNo) answer(resp question.Answer) {
@@ -99,7 +96,7 @@ func (d *YesNo) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
 		return []key.Binding{backKey, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
 	}
-	return []key.Binding{d.keyLeftRight, d.keyEnter, d.keyYes, d.keyNo, d.keyNote, cancelKey}
+	return []key.Binding{d.keyLeftRight, d.keyEnter, d.keyYes, d.keyNo, d.keyNote}
 }
 
 func (d *YesNo) respond(yes bool) question.Answer {

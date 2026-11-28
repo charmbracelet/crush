@@ -158,7 +158,7 @@ func TestSingleChoiceEnterAdoptsHover(t *testing.T) {
 	d.mouseActive = true
 	d.hoveredChoice = 2 // hovering Gamma
 
-	done, _ := d.HandleKey(enterKey)
+	done, _, _ := d.HandleKey(enterKey)
 
 	require.True(t, done, "Enter should submit the selection")
 	require.Equal(t, []string{"c"}, d.Response().SelectedIDs,

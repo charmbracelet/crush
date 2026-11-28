@@ -33,9 +33,9 @@ func NewSingleChoice(sty *styles.Styles, req question.Question) *SingleChoice {
 	}
 }
 
-// HandleKey processes key events. Returns true when the user has
-// made a selection or dismissed the question.
-func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+// HandleKey processes key events. done reports the user made a
+// selection; handled reports the key was used.
+func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (done, handled bool, cmd tea.Cmd) {
 	// Note editor takes priority when active.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
 		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() {
@@ -45,7 +45,7 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.closeNote(d.noteKey())
 		})
 		if handled {
-			return false, cmd
+			return false, true, cmd
 		}
 	}
 
@@ -53,7 +53,7 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		if idx := d.numberKeyIndex(msg); idx >= 0 {
 			d.mouseActive = false
 			d.cursorIdx = idx
-			return false, nil
+			return false, true, nil
 		}
 	}
 
@@ -70,13 +70,10 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		return false, nil
 	}); handled {
-		return done, cmd
+		return done, true, cmd
 	}
 
 	switch {
-	case key.Matches(msg, d.keyClose):
-		d.answer(question.Answer{QuestionID: d.Request.ID})
-		return true, nil
 	case key.Matches(msg, d.keyEnter):
 		// In hover mode, act on the item under the mouse. Landing on
 		// the fill-in focuses it (mirroring a click) instead of
@@ -84,19 +81,16 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		if d.mouseActive {
 			d.adoptHover()
 			if d.isFillIn() {
-				return false, d.fillIn.Focus()
+				return false, true, d.fillIn.Focus()
 			}
 		}
 		d.answer(d.respond())
-		return true, nil
+		return true, true, nil
 	case key.Matches(msg, d.keyNote) && !d.fillIn.Focused():
 		d.adoptHover()
-		return false, d.openNote(d.noteKey())
+		return false, true, d.openNote(d.noteKey())
 	}
-	if d.handleNavKey(msg) {
-		return false, nil
-	}
-	return false, nil
+	return false, d.handleNavKey(msg), nil
 }
 
 func (d *SingleChoice) answer(resp question.Answer) {
@@ -152,7 +146,7 @@ func (d *SingleChoice) ShortHelp() []key.Binding {
 	if d.isFillIn() && d.fillIn.Focused() {
 		return []key.Binding{d.navUp, d.keyEnter, backKey}
 	}
-	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote, cancelKey}
+	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote}
 }
 
 func (d *SingleChoice) Height(width int) int { return d.height(width, d.renderItem) }

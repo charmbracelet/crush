@@ -3,6 +3,7 @@ package dialog
 import (
 	"fmt"
 	"image"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -15,11 +16,20 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// questionResponder extends InlineEditor with access to the last
-// response. Used internally by QuestionForm to collect answers
-// from child components.
+// questionResponder is a question tab inside a QuestionForm. It is an
+// [InlineEditor] whose HandleKey also reports whether it used the key,
+// so the form can give an unused esc its batch-wide meaning (cancel)
+// while esc inside a focused text field or note stays with the
+// question.
 type questionResponder interface {
-	InlineEditor
+	// HandleKey processes a key press. done reports that the question
+	// was answered; handled reports that the key was used.
+	HandleKey(msg tea.KeyPressMsg) (done, handled bool, cmd tea.Cmd)
+	ShortHelp() []key.Binding
+	Height(width int) int
+	Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor
+	HeightChanged() bool
+	SetFocused(focused bool)
 	Response() question.Answer
 	SetHover(x, y int)
 	HandleMouseClick(x, y int) (done bool, handled bool)
@@ -217,24 +227,19 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 	// Confirm tab delegates to ConfirmComponent.
 	if f.isConfirmTab() {
-		done, cmd := f.confirmComp.HandleKey(msg)
-		if done {
-			return true, cmd
-		}
-		return false, cmd
+		done, _, cmd := f.confirmComp.HandleKey(msg)
+		return done, cmd
 	}
 
-	// Global keys for question tabs. Esc inside a focused text field
-	// belongs to the question (it closes the field); only cancel the
-	// batch when nothing is being edited.
-	if key.Matches(msg, f.keyClose) && !f.activeEditingText() {
-		f.cancel()
-		return true, nil
-	}
-
-	// Route to active question.
+	// Route to active question. Esc inside a focused text field belongs
+	// to the question (it closes the field); an esc it leaves unused
+	// cancels the batch.
 	if f.activeIdx < f.numQuestions {
-		done, cmd := f.questions[f.activeIdx].HandleKey(msg)
+		done, handled, cmd := f.questions[f.activeIdx].HandleKey(msg)
+		if !handled && key.Matches(msg, f.keyClose) {
+			f.cancel()
+			return true, nil
+		}
 		if done {
 			resp := f.questions[f.activeIdx].Response()
 			f.answers[f.activeIdx] = &resp
@@ -250,16 +255,6 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, cmd
 	}
 	return false, nil
-}
-
-// activeEditingText reports whether the active question has a
-// focused fill-in or note editor.
-func (f *QuestionForm) activeEditingText() bool {
-	if f.isConfirmTab() || f.activeIdx >= f.numQuestions {
-		return false
-	}
-	te, ok := f.questions[f.activeIdx].(textEditor)
-	return ok && te.editingText()
 }
 
 // HandleWheel scrolls the active choice list vertically, or delegates
@@ -353,6 +348,11 @@ func (f *QuestionForm) ShortHelp() []key.Binding {
 	bindings := []key.Binding{f.keyPrevTab, f.keyNextTab}
 	if f.activeIdx < f.numQuestions {
 		bindings = append(bindings, f.questions[f.activeIdx].ShortHelp()...)
+	}
+	// A question only lists esc while it keeps esc for a text field;
+	// otherwise esc cancels the batch.
+	if !slices.ContainsFunc(bindings, func(b key.Binding) bool { return b.Help().Key == cancelKey.Help().Key }) {
+		bindings = append(bindings, cancelKey)
 	}
 	return bindings
 }

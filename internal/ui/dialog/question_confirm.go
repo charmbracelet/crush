@@ -75,46 +75,46 @@ func NewConfirmComponent(sty *styles.Styles, title, description string, labels [
 	}
 }
 
-// HandleKey processes input on the confirm tab. Returns true when
-// the user has confirmed submission. Tab/shift+tab are NOT handled
+// HandleKey processes input on the confirm tab. done reports the
+// user confirmed submission; handled reports the key was used. Tab/shift+tab are NOT handled
 // here; QuestionForm intercepts them for tab navigation.
-func (c *ConfirmComponent) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+func (c *ConfirmComponent) HandleKey(msg tea.KeyPressMsg) (done, handled bool, cmd tea.Cmd) {
 	switch {
 	case key.Matches(msg, c.keyUp):
 		if c.scrollOffset > 0 {
 			c.scrollOffset--
 		}
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, c.keyDown):
 		c.scrollOffset++
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, c.keyLeft), key.Matches(msg, c.keyRight):
 		c.confirmYes = !c.confirmYes
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, c.keyYes):
 		c.confirmYes = true
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, c.keyNo):
 		c.confirmYes = false
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, c.keyEnter):
 		if c.confirmYes {
 			if c.OnConfirm != nil {
 				c.OnConfirm()
 			}
-			return true, nil
+			return true, true, nil
 		}
 		if c.OnReject != nil {
 			c.OnReject()
 		}
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, c.keyClose):
 		if c.OnReject != nil {
 			c.OnReject()
 		}
-		return false, nil
+		return false, true, nil
 	}
-	return false, nil
+	return false, false, nil
 }
 
 // Response returns an empty response. The confirm tab doesn't

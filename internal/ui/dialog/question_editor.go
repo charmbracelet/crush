@@ -57,19 +57,6 @@ type questionEditor struct {
 	navDown key.Binding
 }
 
-// textEditor is implemented by question components that can hold
-// keyboard focus in a text field. The form routes esc to them while
-// editing so it closes the field instead of cancelling the batch.
-type textEditor interface {
-	editingText() bool
-}
-
-// editingText reports whether the fill-in or a note editor has
-// keyboard focus.
-func (e *questionEditor) editingText() bool {
-	return e.fillIn.Focused() || (e.activeNoteKey != "" && e.noteEditor.Focused())
-}
-
 // newQuestionEditor creates a questionEditor with configured
 // fill-in and note textareas.
 func newQuestionEditor(sty *styles.Styles) questionEditor {

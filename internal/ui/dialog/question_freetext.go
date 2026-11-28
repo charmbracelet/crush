@@ -61,14 +61,15 @@ func NewFreeText(sty *styles.Styles, req question.Question) *FreeText {
 	}
 }
 
-// HandleKey processes a key press. Returns true when the user has
-// submitted or dismissed the question.
-func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+// HandleKey processes a key press. done reports the user submitted
+// an answer; handled reports the key was used. Esc is left unused: the
+// answer box is the whole question, so esc cancels the batch rather
+// than leaving the box.
+func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (done, handled bool, cmd tea.Cmd) {
 	d.wheelActive = false
 	switch {
 	case key.Matches(msg, d.keyClose):
-		d.answer(question.Answer{QuestionID: d.Request.ID})
-		return true, nil
+		return false, false, nil
 	case key.Matches(msg, d.keyEnter):
 		val := strings.TrimSpace(d.editor.Value())
 		if val != "" {
@@ -76,16 +77,15 @@ func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 				QuestionID: d.Request.ID,
 				FillInText: val,
 			})
-			return true, nil
+			return true, true, nil
 		}
-		return false, nil
+		return false, true, nil
 	case key.Matches(msg, d.keyNewline):
 		d.editor.InsertRune('\n')
-		return false, nil
+		return false, true, nil
 	default:
-		var cmd tea.Cmd
 		d.editor, cmd = d.editor.Update(msg)
-		return false, cmd
+		return false, true, cmd
 	}
 }
 
@@ -107,7 +107,7 @@ func (d *FreeText) GetRequest() question.Question { return d.Request }
 
 // ShortHelp returns key bindings for the status bar.
 func (d *FreeText) ShortHelp() []key.Binding {
-	return []key.Binding{d.keyEnter, d.keyNewline, cancelKey}
+	return []key.Binding{d.keyEnter, d.keyNewline}
 }
 
 // Height returns the visual height at the default max width.

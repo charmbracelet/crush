@@ -38,7 +38,7 @@ func NewMultiChoice(sty *styles.Styles, req question.Question) *MultiChoice {
 
 // HandleKey processes key events. Returns true when the user has
 // submitted or dismissed the question.
-func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (done, handled bool, cmd tea.Cmd) {
 	// Note editor takes priority when active.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
 		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() {
@@ -48,7 +48,7 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.closeNote(d.noteKey())
 		})
 		if handled {
-			return false, cmd
+			return false, true, cmd
 		}
 	}
 
@@ -60,7 +60,7 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			if !d.selected[idx] {
 				delete(d.selected, idx)
 			}
-			return false, nil
+			return false, true, nil
 		}
 	}
 
@@ -75,44 +75,38 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		return false, nil
 	}); handled {
-		return done, cmd
+		return done, true, cmd
 	}
 
 	switch {
-	case key.Matches(msg, d.keyClose):
-		d.answer(question.Answer{QuestionID: d.Request.ID})
-		return true, nil
 	case key.Matches(msg, d.keyDone):
 		if d.isFillIn() && !d.fillIn.Focused() {
 			d.fillIn.Focus()
-			return false, d.fillIn.Focus()
+			return false, true, d.fillIn.Focus()
 		}
 		d.answer(d.respond())
-		return true, nil
+		return true, true, nil
 	case key.Matches(msg, d.keyToggle):
 		// In hover mode, toggle the item under the mouse.
 		d.adoptHover()
 		if d.isFillIn() {
 			if !d.fillIn.Focused() {
 				d.fillIn.Focus()
-				return false, d.fillIn.Focus()
+				return false, true, d.fillIn.Focus()
 			}
-			var cmd tea.Cmd
 			d.fillIn, cmd = d.fillIn.Update(msg)
-			return false, cmd
+			return false, true, cmd
 		}
 		d.selected[d.cursorIdx] = !d.selected[d.cursorIdx]
 		if !d.selected[d.cursorIdx] {
 			delete(d.selected, d.cursorIdx)
 		}
+		return false, true, nil
 	case key.Matches(msg, d.keyNote) && !d.fillIn.Focused():
 		d.adoptHover()
-		return false, d.openNote(d.noteKey())
+		return false, true, d.openNote(d.noteKey())
 	}
-	if d.handleNavKey(msg) {
-		return false, nil
-	}
-	return false, nil
+	return false, d.handleNavKey(msg), nil
 }
 
 func (d *MultiChoice) answer(resp question.Answer) {
@@ -154,7 +148,7 @@ func (d *MultiChoice) ShortHelp() []key.Binding {
 	if d.isFillIn() && d.fillIn.Focused() {
 		return []key.Binding{d.navUp, d.keyDone, backKey}
 	}
-	return []key.Binding{d.keyUp, d.keyDown, d.keyToggle, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyDone, cancelKey}
+	return []key.Binding{d.keyUp, d.keyDown, d.keyToggle, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyDone}
 }
 
 func (d *MultiChoice) Height(width int) int { return d.height(width, d.renderItem) }

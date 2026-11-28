@@ -173,3 +173,21 @@ func TestQuestionLabelsTruncateByWidth(t *testing.T) {
 	})
 	require.Equal(t, "Use Postgres for the analytics store?", form.confirmComp.QuestionLabels[0])
 }
+
+// TestQuestionChildrenLeaveCancelToForm verifies a question lists esc
+// only while a text field or note has it, so the form alone supplies
+// the cancel hint, and that an unused esc reaches the form unhandled.
+func TestQuestionChildrenLeaveCancelToForm(t *testing.T) {
+	t.Parallel()
+	form, _ := newTestBatchForm(t)
+	sc := form.questions[0].(*SingleChoice)
+	require.Empty(t, helpFor(sc.ShortHelp(), "esc"))
+	_, handled, _ := sc.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.False(t, handled, "esc outside a text field is the form's")
+
+	sc.HandleKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	require.True(t, sc.fillIn.Focused())
+	require.Equal(t, "back", helpFor(sc.ShortHelp(), "esc"))
+	_, handled, _ = sc.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.True(t, handled, "esc in the fill-in closes it")
+}

@@ -120,8 +120,5 @@ func HandleDiagnostics(client *Client, params json.RawMessage) {
 
 	totalCount := client.setFileDiagnostics(diagParams.URI, diagParams.Diagnostics)
 
-	// Trigger callback if set
-	if client.onDiagnosticsChanged != nil {
-		client.onDiagnosticsChanged(client.name, totalCount)
-	}
+	client.notifyDiagnosticsChanged(totalCount)
 }

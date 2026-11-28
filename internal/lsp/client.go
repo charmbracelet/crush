@@ -50,8 +50,9 @@ type Client struct {
 	cancelCtx context.CancelFunc
 	resolver  config.VariableResolver
 
-	// Diagnostic change callback
-	onDiagnosticsChanged func(name string, count int)
+	// Diagnostic change callback. It is set from the manager callback while
+	// the server may already be publishing diagnostics, so it is atomic.
+	onDiagnosticsChanged atomic.Pointer[func(name string, count int)]
 
 	// Diagnostic cache
 	diagnostics *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
@@ -345,7 +346,18 @@ func (c *Client) FileTypes() []string {
 
 // SetDiagnosticsCallback sets the callback function for diagnostic changes
 func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
-	c.onDiagnosticsChanged = callback
+	if callback == nil {
+		c.onDiagnosticsChanged.Store(nil)
+		return
+	}
+	c.onDiagnosticsChanged.Store(&callback)
+}
+
+// notifyDiagnosticsChanged calls the diagnostics callback, if any.
+func (c *Client) notifyDiagnosticsChanged(count int) {
+	if cb := c.onDiagnosticsChanged.Load(); cb != nil {
+		(*cb)(c.name, count)
+	}
 }
 
 // WaitForServerReady waits for the server to be ready
@@ -544,9 +556,7 @@ func (c *Client) clearDiagnostics() {
 	c.diagTotal = 0
 	c.diagMu.Unlock()
 
-	if c.onDiagnosticsChanged != nil {
-		c.onDiagnosticsChanged(c.name, 0)
-	}
+	c.notifyDiagnosticsChanged(0)
 }
 
 // add adds (sign 1) or removes (sign -1) the given diagnostics.

@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -118,8 +119,18 @@ func (s *Manager) Start(ctx context.Context, path string) {
 		return
 	}
 
-	var wg sync.WaitGroup
+	// Most of the bundled servers do not handle this file. Filter them out
+	// here so only servers that already have a client, or whose file types
+	// match, get a goroutine and the full start checks.
+	var (
+		wg   sync.WaitGroup
+		base = strings.ToLower(filepath.Base(path))
+		kind = powernap.DetectLanguage(path)
+	)
 	for name, server := range s.manager.GetServers() {
+		if _, ok := s.clients.Get(name); !ok && !matchesFiletype(server.FileTypes, base, kind) {
+			continue
+		}
 		wg.Go(func() {
 			s.startServer(name, path, server)
 		})
@@ -281,14 +292,14 @@ func (s *Manager) canAutoStart(
 		return false
 	}
 
-	// Filtering by file type is cheap and usually rejects a server before the
-	// root marker check. Do both before searching PATH, which can require a stat
-	// for every directory in PATH for every bundled server.
-	if !handles(server, filePath, workDir) {
+	// The unavailable check is a map lookup. Filtering by file type is cheap
+	// and usually rejects a server before the root marker check, which may
+	// read the working directory. Do all of them before searching PATH,
+	// which can require a stat for every directory in PATH.
+	if s.recentlyUnavailable(name) {
 		return false
 	}
-
-	if s.recentlyUnavailable(name) {
+	if !handles(server, filePath, workDir) {
 		return false
 	}
 	if _, err := s.lookPath(server.Command); err != nil {
@@ -365,18 +376,34 @@ func handlesFiletype(sname string, fileTypes []string, filePath string) bool {
 
 	kind := powernap.DetectLanguage(filePath)
 	name := strings.ToLower(filepath.Base(filePath))
-	for _, filetype := range fileTypes {
-		suffix := strings.ToLower(filetype)
-		if !strings.HasPrefix(suffix, ".") {
-			suffix = "." + suffix
-		}
-		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
-			slog.Debug("Handles file", "name", sname, "file", name, "filetype", filetype, "kind", kind)
-			return true
-		}
+	if matchesFiletype(fileTypes, name, kind) {
+		slog.Debug("Handles file", "name", sname, "file", name, "kind", kind)
+		return true
 	}
 
 	slog.Debug("Doesn't handle file", "name", sname, "file", name)
+	return false
+}
+
+// matchesFiletype reports whether a file with the given lowercased base name
+// and detected language matches any of fileTypes. An empty fileTypes matches
+// every file.
+func matchesFiletype(fileTypes []string, base string, kind protocol.LanguageKind) bool {
+	if len(fileTypes) == 0 {
+		return true
+	}
+	for _, filetype := range fileTypes {
+		if filetype == string(kind) {
+			return true
+		}
+		// Match base against "." + filetype without allocating.
+		ext := strings.TrimPrefix(strings.ToLower(filetype), ".")
+		if len(base) > len(ext) &&
+			base[len(base)-len(ext)-1] == '.' &&
+			strings.HasSuffix(base, ext) {
+			return true
+		}
+	}
 	return false
 }
 

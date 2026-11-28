@@ -152,11 +152,7 @@ func (s *ShellItem) Render(width int) string {
 	} else {
 		prefix = s.sty.Messages.ShellBarBlurred.Render()
 	}
-	lines := strings.Split(content, "\n")
-	for i, ln := range lines {
-		lines[i] = prefix + ln
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(content, prefix)
 
 	return s.renderHighlighted(out, width, lipgloss.Height(out))
 }

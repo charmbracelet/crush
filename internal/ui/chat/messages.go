@@ -151,6 +151,12 @@ func defaultHighlighter(sty *styles.Styles, v *list.Versioned) *highlightableMes
 	}
 }
 
+// prefixLines prepends prefix to every line of s, empty lines included. It
+// allocates once, where splitting, prefixing and joining allocates per line.
+func prefixLines(s, prefix string) string {
+	return prefix + strings.ReplaceAll(s, "\n", "\n"+prefix)
+}
+
 // cacheClearable is implemented by message items that cache rendered
 // output and can be asked to drop the cache.
 type cacheClearable interface {
@@ -358,11 +364,7 @@ func (a *AssistantInfoItem) Render(width int) string {
 		return cached
 	}
 	prefix := a.sty.Messages.SectionHeader.Render()
-	lines := strings.Split(a.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(a.RawRender(width), prefix)
 	a.setCachedPrefixedRender(out, width, 0)
 	return out
 }
@@ -490,11 +492,7 @@ func (c *ChannelInfoItem) Render(width int) string {
 		return cached
 	}
 	prefix := c.sty.Messages.SectionHeader.Render()
-	lines := strings.Split(c.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(c.RawRender(width), prefix)
 	c.setCachedPrefixedRender(out, width, 0)
 	return out
 }

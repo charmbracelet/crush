@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/message"
@@ -118,9 +117,5 @@ func (p *PendingAssistantItem) RawRender(int) string { return p.anim.Render() }
 // Render implements list.Item.
 func (p *PendingAssistantItem) Render(width int) string {
 	prefix := p.sty.Messages.AssistantBlurred.Render()
-	lines := strings.Split(p.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	return strings.Join(lines, "\n")
+	return prefixLines(p.RawRender(width), prefix)
 }

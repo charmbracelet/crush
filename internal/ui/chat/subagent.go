@@ -2,7 +2,6 @@ package chat
 
 import (
 	"fmt"
-	"strings"
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
@@ -98,7 +97,7 @@ func (s *SubAgentReportItem) Render(width int) string {
 			prefix = s.sty.Messages.ToolCallFocused.Render()
 		}
 		raw := s.RawRender(width - MessageLeftPaddingTotal)
-		out = prefix + strings.ReplaceAll(raw, "\n", "\n"+prefix)
+		out = prefixLines(raw, prefix)
 		s.setCachedPrefixedRender(out, width, key)
 	}
 	if !s.isHighlighted() {

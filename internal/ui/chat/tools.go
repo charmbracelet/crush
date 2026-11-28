@@ -450,11 +450,7 @@ func (t *baseToolMessageItem) Render(width int) string {
 	} else {
 		prefix = t.sty.Messages.ToolCallBlurred.Render()
 	}
-	lines := strings.Split(t.RawRender(width), "\n")
-	for i, ln := range lines {
-		lines[i] = prefix + ln
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(t.RawRender(width), prefix)
 	if useCache {
 		t.setCachedPrefixedRender(out, width, key)
 	}

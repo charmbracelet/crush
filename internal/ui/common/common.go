@@ -47,6 +47,10 @@ func PlanReadyMarkerPresent(text string) bool {
 }
 
 func planMarkerPresent(text, marker string) bool {
+	// A marker line contains the marker, so text without it has none.
+	if !strings.Contains(text, marker) {
+		return false
+	}
 	for line := range strings.SplitSeq(text, "\n") {
 		if planMarkerLine(line, marker) {
 			return true
@@ -81,6 +85,11 @@ func StripPlanMarkers(text string) string {
 }
 
 func stripPlanMarker(text, marker string) string {
+	// A marker line contains the marker, so text without it has nothing
+	// to strip.
+	if !strings.Contains(text, marker) {
+		return text
+	}
 	lines := strings.Split(text, "\n")
 	kept := lines[:0]
 	inFence := false

@@ -214,6 +214,15 @@ type AssistantMessageItem struct {
 	thinkingHashLen    int
 	thinkingHashSample string
 
+	// contentHash memoizes the FNV-64a hash of contentHashText, so one
+	// Render hashes the content once rather than once for the prefix
+	// cache key and again for the content section. Holding the hashed
+	// string keeps the comparison exact: equal strings that share their
+	// backing array compare in O(1).
+	contentHash      uint64
+	contentHashText  string
+	contentHashValid bool
+
 	// Per-section render caches. Splitting these out means content
 	// streaming does not invalidate the (often expensive) thinking
 	// render, and vice versa.
@@ -358,18 +367,11 @@ func (a *AssistantMessageItem) Render(width int) string {
 			return cached
 		}
 	}
-	focused := a.sty.Messages.AssistantFocused.Render()
-	blurred := a.sty.Messages.AssistantBlurred.Render()
-	rendered := a.RawRender(width)
-	lines := strings.Split(rendered, "\n")
-	for i, line := range lines {
-		if a.focused {
-			lines[i] = focused + line
-		} else {
-			lines[i] = blurred + line
-		}
+	prefix := a.sty.Messages.AssistantBlurred.Render()
+	if a.focused {
+		prefix = a.sty.Messages.AssistantFocused.Render()
 	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(a.RawRender(width), prefix)
 	if useCache {
 		a.setCachedPrefixedRender(out, width, key)
 	}
@@ -554,7 +556,18 @@ func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
 	if a.planStreaming() {
 		planStreaming = 1
 	}
-	return fnv64(a.message.Content().Text), uint64(planStreaming)
+	return a.contentHashOf(a.message.Content().Text), uint64(planStreaming)
+}
+
+// contentHashOf returns the FNV-64a hash of text, reusing the last result
+// when text is the string that was hashed last.
+func (a *AssistantMessageItem) contentHashOf(text string) uint64 {
+	if !a.contentHashValid || text != a.contentHashText {
+		a.contentHash = fnv64(text)
+		a.contentHashText = text
+		a.contentHashValid = true
+	}
+	return a.contentHash
 }
 
 // SetPlanAgent flags this item as plan-agent output (or clears the
@@ -973,6 +986,9 @@ func (a *AssistantMessageItem) clearCache() {
 	a.thinkingHash = 0
 	a.thinkingHashLen = 0
 	a.thinkingHashSample = ""
+	a.contentHash = 0
+	a.contentHashText = ""
+	a.contentHashValid = false
 }
 
 // ToggleExpanded advances the F5 thinking view-mode cycle and returns

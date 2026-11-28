@@ -729,9 +729,10 @@ func TestPendingStateDoesNotRetainPayload(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// The message is left unfinished so its pending entry is kept, as it
+	// is for a stream that is still running.
 	msg.AppendReasoningContent(strings.Repeat("x", 64*1024))
 	msg.AddToolCall(ToolCall{ID: "tc-1", Name: "bash", Finished: true})
-	msg.AddFinish(FinishReasonEndTurn, "", "")
 	require.NoError(t, svc.Update(t.Context(), msg))
 	require.NoError(t, svc.Flush(t.Context(), msg.ID))
 
@@ -743,6 +744,53 @@ func TestPendingStateDoesNotRetainPayload(t *testing.T) {
 	require.Empty(t, p.latest.Parts, "flushed pending state still pins the message parts")
 	require.True(t, p.hasFlushed)
 	require.Equal(t, []bool{true}, p.baseline.toolCallsFinished)
+}
+
+func TestFinishedMessageDropsPendingState(t *testing.T) {
+	t.Parallel()
+
+	for _, debounce := range []time.Duration{0, time.Hour} {
+		t.Run(debounce.String(), func(t *testing.T) {
+			t.Parallel()
+
+			svc, sessionID := newTestService(t, WithDebounce(debounce))
+			s := svc.(*service)
+			sub := svc.Subscribe(t.Context())
+
+			msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+			require.NoError(t, err)
+
+			msg.AppendContent("streaming")
+			require.NoError(t, svc.Update(t.Context(), msg))
+			msg.AddFinish(FinishReasonEndTurn, "", "")
+			require.NoError(t, svc.Update(t.Context(), msg))
+
+			s.mu.Lock()
+			require.Empty(t, s.pending, "finished message must not keep pending state")
+			s.mu.Unlock()
+
+			// A later update for the same ID still lands and is
+			// published, and is dropped again once flushed.
+			drainEvents(sub)
+			msg.AppendContent(" more")
+			require.NoError(t, svc.Update(t.Context(), msg))
+
+			got, err := svc.Get(t.Context(), msg.ID)
+			require.NoError(t, err)
+			require.Equal(t, "streaming more", got.Content().Text)
+			require.True(t, got.IsFinished())
+
+			events := drainEvents(sub)
+			require.NotEmpty(t, events)
+			last := events[len(events)-1]
+			require.Equal(t, pubsub.UpdatedEvent, last.Type)
+			require.Equal(t, "streaming more", last.Payload.Content().Text)
+
+			s.mu.Lock()
+			require.Empty(t, s.pending)
+			s.mu.Unlock()
+		})
+	}
 }
 
 // TestShouldFlushNow_AgainstCompactBaseline pins terminal detection to the

@@ -121,6 +121,20 @@ func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key 
 	return nil
 }
 
+// SignOut removes a provider's stored credential; see
+// [config.ConfigStore.SignOut].
+func (b *Backend) SignOut(ctx context.Context, workspaceID string, scope config.Scope, providerID string, extraFields ...string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := ws.Cfg.SignOut(ctx, scope, providerID, extraFields...); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
+}
+
 // UpdatePreferredModel updates the preferred model for the given type
 // and persists it to the config file at the given scope.
 func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {

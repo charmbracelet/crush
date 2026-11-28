@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
@@ -48,6 +50,27 @@ const refreshLockDeadline = 45 * time.Second
 // refreshLockDeadline because a user is watching: if a peer is wedged we
 // would rather write and risk a rare clobber than hang the UI.
 const credentialWriteLockDeadline = 10 * time.Second
+
+// TokenExchangeTimeout bounds a single OAuth token exchange. It matches
+// the HTTP timeout the provider clients use, and it is applied to a
+// context detached from the caller's, so an exchange that has started is
+// always allowed to finish. See refreshOAuthTokenLocked.
+const TokenExchangeTimeout = 30 * time.Second
+
+// refreshCooldown is how recently a credential must have been issued for
+// a refresh request to be answered with the credential itself rather than
+// another exchange.
+//
+// Several triggers watch the same token (a turn starting, a renewal ahead
+// of expiry, a usage panel polling), and they routinely fire within
+// seconds of each other off snapshots taken at different moments. On a provider that rotates refresh tokens
+// each of those exchanges retires the one before it, so a burst of them
+// leaves every other session holding something dead. A refused request
+// is not subject to this; see RefreshRejectedOAuthToken.
+const refreshCooldown = 60 * time.Second
+
+// ErrSignedOut is returned by a refresh whose login is no longer on disk; the provider needs a new sign-in.
+var ErrSignedOut = errors.New("signed out")
 
 // fileSnapshot captures metadata about a config file at a point in time.
 type fileSnapshot struct {
@@ -133,6 +156,31 @@ type ConfigStore struct {
 	// now is the clock for rejectedRefreshTokens; nil means time.Now.
 	now func() time.Time
 
+	// tokenMu makes reading a provider's live OAuth credential and
+	// replacing it one step, so adopting a token from disk can be
+	// compare-and-swap against a refresh or sign-in landing meanwhile.
+	tokenMu sync.Mutex
+	// beforeAdoptApply, when set, runs between reading a token from disk
+	// and applying it. Tests use it to land a competing write in exactly
+	// that window.
+	beforeAdoptApply func()
+	// pendingPersist holds, per provider, a token that was exchanged and
+	// published in memory but could not be written to disk. While an
+	// entry exists, disk is known to be stale for that provider: nothing
+	// may be adopted from it or exchanged until the save succeeds.
+	// Guarded by tokenMu.
+	pendingPersist map[string]pendingToken
+	// exchanges counts, per provider, token exchanges admitted and not
+	// yet published, so the managed transition can wait them out. Guarded
+	// by tokenMu.
+	exchanges map[string]*exchangeGate
+	// beforeExchange, when set, runs right after an exchange is admitted;
+	// tests use it to hold one in flight.
+	beforeExchange func()
+	// persistTokenFields writes token fields to the config file. Nil
+	// means SetConfigFields; tests substitute a failing writer.
+	persistTokenFields func(scope Scope, fields map[string]any) error
+
 	// exchangeToken performs the provider-specific OAuth token exchange.
 	// It is a field so tests can substitute a fake exchange without making
 	// real network calls. Production code leaves it nil, and exchange falls
@@ -145,6 +193,12 @@ type ConfigStore struct {
 	// on the next wait.
 	authSignalMu sync.Mutex
 	authSignals  map[string]chan struct{}
+
+	// managed holds credentials pushed by an external owner (e.g. a
+	// bridge driving `crush server`). A managed provider is never
+	// refreshed or reconciled with disk; see managed.go. Atomic so it can
+	// be read with or without writeMu held; nil when nothing is managed.
+	managed atomic.Pointer[ManagedCredentials]
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -234,9 +288,11 @@ func (s *ConfigStore) RefetchHyperProvider(ctx context.Context) error {
 	// not the stale snapshot captured at startup. The syncer's original
 	// client closes over the startup config and would send an expired
 	// token after OAuth re-authentication.
+	auth := s.hyperAuth(func() string { return ResolveHyperAPIKey(s.Config()) })
 	hyperSyncer.SetFetch(realHyperClient{
 		baseURL:    hyperp.BaseURL(),
-		resolveKey: func() string { return ResolveHyperAPIKey(s.Config()) },
+		resolveKey: auth.resolveKey,
+		managed:    auth.managed,
 	}.Get)
 
 	hyperProvider, err := hyperSyncer.Refetch(ctx)
@@ -407,41 +463,29 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
-	if err := s.writeConfigFields(scope, kv); err != nil {
+	if err := s.atomicEdit(scope, kv, nil); err != nil {
 		return err
 	}
-	// Auto-reload to keep in-memory state fresh after config edits.
-	// We use context.Background() since this is an internal operation that
-	// shouldn't be cancelled by user context.
-	if err := s.autoReload(context.Background()); err != nil {
-		// Log warning but don't fail the write - disk is already updated.
-		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
-	}
+	s.reloadAfterWrite()
 	return nil
 }
 
-// writeConfigFields persists key/value pairs to the config file. It does not
-// touch in-memory config state or the staleness snapshot: callers either
-// reload (SetConfigFields, whose reload recaptures the snapshot) or have
-// already published an updated clone and capture the snapshot themselves
-// (update). Both of those run under writeMu, which is what keeps the
-// snapshot map free of concurrent writers.
-func (s *ConfigStore) writeConfigFields(scope Scope, kv map[string]any) error {
-	// Sort keys for deterministic output regardless of map iteration
-	// order. This also ensures consistent results when callers pass
-	// overlapping JSONPath keys (e.g. "a" and "a.b").
-	keys := make([]string, 0, len(kv))
-	for k := range kv {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-
+// atomicEdit sets and deletes JSON-path fields in the scope's config file in
+// one locked write. It leaves memory and the staleness snapshot to callers.
+func (s *ConfigStore) atomicEdit(scope Scope, set map[string]any, del []string) error {
+	// Sorted so output is deterministic and overlapping paths apply in order.
+	keys := slices.Sorted(maps.Keys(set))
 	return s.atomicWrite(scope, func(data []byte) ([]byte, error) {
 		v := string(data)
+		var err error
 		for _, key := range keys {
-			var sErr error
-			if v, sErr = sjson.Set(v, key, kv[key]); sErr != nil {
-				return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
+			if v, err = sjson.Set(v, key, set[key]); err != nil {
+				return nil, fmt.Errorf("failed to set config field %s: %w", key, err)
+			}
+		}
+		for _, key := range del {
+			if v, err = sjson.Delete(v, key); err != nil {
+				return nil, fmt.Errorf("failed to delete config field %s: %w", key, err)
 			}
 		}
 		return []byte(v), nil
@@ -480,7 +524,7 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	if len(fields) == 0 {
 		return nil
 	}
-	if err := s.writeConfigFields(scope, fields); err != nil {
+	if err := s.atomicEdit(scope, fields, nil); err != nil {
 		return err
 	}
 	// Refresh the staleness snapshot so the file watcher does not treat
@@ -527,22 +571,56 @@ func (s *ConfigStore) pinPreferredModelLocked(modelType SelectedModelType, model
 //
 // The write is protected by an in-process mutex and a cross-process flock.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
-	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
-		v, sErr := sjson.Delete(string(data), key)
-		if sErr != nil {
-			return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
-		}
-		return []byte(v), nil
-	})
-	if err != nil {
+	if err := s.atomicEdit(scope, nil, []string{key}); err != nil {
 		return err
 	}
+	s.reloadAfterWrite()
+	return nil
+}
 
+// reloadAfterWrite refreshes in-memory state from disk after a write. The
+// write has landed either way, so a failed reload is only logged.
+func (s *ConfigStore) reloadAfterWrite() {
 	if err := s.autoReload(context.Background()); err != nil {
 		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
 	}
+}
 
+// SignOut removes a provider's credential and extraFields in one write under the refresh lock.
+func (s *ConfigStore) SignOut(ctx context.Context, scope Scope, providerID string, extraFields ...string) error {
+	lockCtx, cancel := context.WithTimeout(ctx, refreshLockDeadline)
+	defer cancel()
+	release, err := lock.File(lockCtx, s.refreshLockPath(providerID))
+	if err != nil {
+		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, err)
+	}
+	defer release()
+	if s.IsManagedProvider(providerID) {
+		return fmt.Errorf("sign out of provider %s: %w", providerID, ErrCredentialManaged)
+	}
+
+	var del []string
+	for _, field := range append([]string{"oauth", "api_key"}, extraFields...) {
+		del = append(del, providerField(providerID, field))
+	}
+	if err := s.atomicEdit(scope, nil, del); err != nil {
+		return err
+	}
+	// Drop the unsaved token too, or the next refresh would save it back.
+	s.tokenMu.Lock()
+	delete(s.pendingPersist, providerID)
+	if pc, ok := s.Config().Providers.Get(providerID); ok {
+		pc.OAuthToken, pc.APIKey = nil, ""
+		s.Config().Providers.Set(providerID, pc)
+	}
+	s.tokenMu.Unlock()
+	s.reloadAfterWrite()
 	return nil
+}
+
+// providerField is the JSON path of one of a provider's config fields.
+func providerField(providerID, field string) string {
+	return fmt.Sprintf("providers.%s.%s", providerID, field)
 }
 
 // UpdatePreferredModel updates the preferred model for the given type and
@@ -598,124 +676,58 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 	})
 }
 
-// SetProviderAPIKey sets the API key for a provider and persists it.
-// The OpenAI provider holds exactly one credential: storing a ChatGPT
-// token removes a previously entered API key, and storing an API key
-// removes a previous ChatGPT login.
+// SetProviderAPIKey stores an API key or OAuth token as the provider's
+// credential. OpenAI and xAI hold exactly one: a key retires the login and a
+// ChatGPT login retires the key.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
-	var providerConfig ProviderConfig
-	var exists bool
-	var setKeyOrToken func()
-	isToken := false
-
+	var set map[string]any
+	var del []string
+	var apply func(*ProviderConfig)
+	_, isToken := apiKey.(*oauth.Token)
 	switch v := apiKey.(type) {
 	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
-			return fmt.Errorf("failed to save api key to config file: %w", err)
+		set = map[string]any{providerField(providerID, "api_key"): v}
+		var catalog string
+		switch providerID {
+		case string(catwalk.InferenceProviderOpenAI):
+			catalog = "chatgpt_models"
+		case string(catwalk.InferenceProviderXAI):
+			catalog = "grok_models"
 		}
-		setKeyOrToken = func() {
-			providerConfig.APIKey = v
-			if providerID == string(catwalk.InferenceProviderOpenAI) {
-				// Either OAuth or an API key, never both: the login
-				// leaves nothing usable on the API-key side behind.
-				providerConfig.OAuthToken = nil
-				providerConfig.ChatGPTModels = nil
-			}
-			if providerID == string(catwalk.InferenceProviderXAI) {
-				// Either OAuth or an API key, never both: the key
-				// replaces a previous Grok login, whose refreshes would
-				// otherwise overwrite the key again.
-				providerConfig.OAuthToken = nil
-				providerConfig.GrokModels = nil
-			}
+		if catalog != "" {
+			del = []string{providerField(providerID, "oauth"), providerField(providerID, catalog)}
 		}
-		if providerID == string(catwalk.InferenceProviderOpenAI) {
-			// Either OAuth or an API key, never both: the new key
-			// leaves nothing usable on the ChatGPT side behind.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
-				return err
-			}
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.chatgpt_models", providerID)); err != nil {
-				return err
-			}
-		}
-		if providerID == string(catwalk.InferenceProviderXAI) {
-			// Either OAuth or an API key, never both: the new key
-			// leaves nothing usable on the Grok side behind.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
-				return err
-			}
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.grok_models", providerID)); err != nil {
-				return err
+		apply = func(pc *ProviderConfig) {
+			pc.APIKey = v
+			if catalog != "" {
+				pc.OAuthToken, pc.ChatGPTModels, pc.GrokModels = nil, nil, nil
 			}
 		}
 	case *oauth.Token:
-		isToken = true
-		// Hold the refresh lock across the write so a peer's in-flight
-		// token exchange cannot land on top of a credential the user just
-		// obtained interactively — which would silently invalidate the
-		// login they only just completed.
-		fields := map[string]any{
-			fmt.Sprintf("providers.%s.oauth", providerID): v,
-		}
-		if providerID != string(catwalk.InferenceProviderOpenAI) {
-			fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v.AccessToken
-		}
-		if err := s.withRefreshLock(providerID, func() error {
-			return s.SetConfigFields(scope, fields)
-		}); err != nil {
-			return err
-		}
+		set = tokenFields(providerID, v)
 		if providerID == string(catwalk.InferenceProviderOpenAI) {
-			// Either OAuth or an API key, never both: the login retires
-			// any key that came before it.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID)); err != nil {
-				return err
-			}
+			del = []string{providerField(providerID, "api_key")}
 		}
-		setKeyOrToken = func() {
-			providerConfig.OAuthToken = v
+		apply = func(pc *ProviderConfig) {
+			*pc = withToken(*pc, providerID, v)
 			if providerID == string(catwalk.InferenceProviderOpenAI) {
-				providerConfig.APIKey = ""
-				return
-			}
-			providerConfig.APIKey = v.AccessToken
-			if providerID == string(catwalk.InferenceProviderCopilot) {
-				providerConfig.SetupGitHubCopilot()
+				pc.APIKey = ""
 			}
 		}
+	default:
+		return fmt.Errorf("unsupported credential type for provider %s", providerID)
 	}
 
-	cfg := s.Config()
-	providerConfig, exists = cfg.Providers.Get(providerID)
-	if exists {
-		setKeyOrToken()
-		cfg.Providers.Set(providerID, providerConfig)
-	} else {
-		var foundProvider *catwalk.Provider
-		for _, p := range s.knownProviders {
-			if string(p.ID) == providerID {
-				foundProvider = &p
-				break
-			}
+	// Under the refresh lock, so a refresh in flight cannot write the old login back over this.
+	if err := s.withRefreshLock(providerID, func() error {
+		if err := s.atomicEdit(scope, set, del); err != nil {
+			return fmt.Errorf("failed to save credential to config file: %w", err)
 		}
-
-		if foundProvider != nil {
-			providerConfig = ProviderConfig{
-				ID:           providerID,
-				Name:         foundProvider.Name,
-				BaseURL:      foundProvider.APIEndpoint,
-				Type:         foundProvider.Type,
-				Disable:      false,
-				ExtraHeaders: make(map[string]string),
-				ExtraParams:  make(map[string]string),
-				Models:       foundProvider.Models,
-			}
-			setKeyOrToken()
-		} else {
-			return fmt.Errorf("provider with ID %s not found in known providers", providerID)
-		}
-		cfg.Providers.Set(providerID, providerConfig)
+		// Published after the reload, which re-derives catalog defaults such as a key template.
+		s.reloadAfterWrite()
+		return s.publishCredential(providerID, apply, isToken)
+	}); err != nil {
+		return err
 	}
 
 	// After authenticating with Hyper, re-fetch the provider catalog so
@@ -739,6 +751,38 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	return nil
 }
 
+// publishCredential applies a new credential to the live provider config,
+// creating it from the known catalog if needed. Under tokenMu so a disk
+// adoption that read the previous credential cannot overwrite it.
+func (s *ConfigStore) publishCredential(providerID string, apply func(*ProviderConfig), isToken bool) error {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	pc, ok := s.Config().Providers.Get(providerID)
+	if !ok {
+		i := slices.IndexFunc(s.knownProviders, func(p catwalk.Provider) bool { return string(p.ID) == providerID })
+		if i < 0 {
+			return fmt.Errorf("provider with ID %s not found in known providers", providerID)
+		}
+		known := s.knownProviders[i]
+		pc = ProviderConfig{
+			ID:           providerID,
+			Name:         known.Name,
+			BaseURL:      known.APIEndpoint,
+			Type:         known.Type,
+			ExtraHeaders: make(map[string]string),
+			ExtraParams:  make(map[string]string),
+			Models:       known.Models,
+		}
+	}
+	apply(&pc)
+	s.Config().Providers.Set(providerID, pc)
+	// A new login, or a key that retired the login, supersedes an unsaved refreshed token.
+	if isToken || pc.OAuthToken == nil {
+		delete(s.pendingPersist, providerID)
+	}
+	return nil
+}
+
 // fetchOpenAIModels fetches the ChatGPT model catalog from the Codex
 // backend. A package variable so tests can stub the network call,
 // matching how the catwalk and hyper syncers are swappable globals.
@@ -758,7 +802,9 @@ func (s *ConfigStore) refetchOpenAIModels(ctx context.Context, scope Scope) {
 	// with a 401. A failed refresh falls through and lets the fetch run
 	// on the old token, which keeps the existing catalog in place.
 	if pc.OAuthToken.IsExpired() {
-		if err := s.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+		if err := s.RefreshOAuthToken(ctx, scope, providerID); errors.Is(err, ErrSignedOut) {
+			return
+		} else if err != nil {
 			slog.Warn("Failed to refresh the ChatGPT token before fetching the model catalog", "error", err)
 		}
 		if refreshed, ok := s.Config().Providers.Get(providerID); ok && refreshed.OAuthToken != nil {
@@ -819,7 +865,9 @@ func (s *ConfigStore) refetchGrokModels(ctx context.Context, scope Scope) {
 	// with a 401. A failed refresh falls through and lets the fetch run
 	// on the old token, which keeps the existing catalog in place.
 	if pc.OAuthToken.IsExpired() {
-		if err := s.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+		if err := s.RefreshOAuthToken(ctx, scope, providerID); errors.Is(err, ErrSignedOut) {
+			return
+		} else if err != nil {
 			slog.Warn("Failed to refresh the Grok token before fetching the model catalog", "error", err)
 		}
 		if refreshed, ok := s.Config().Providers.Get(providerID); ok && refreshed.OAuthToken != nil {
@@ -868,8 +916,8 @@ func (s *ConfigStore) RefetchGrokModels(ctx context.Context) {
 // two crush instances (or two goroutines) refresh concurrently with the
 // same stored refresh token, the second exchange reuses an already-revoked
 // token, trips the provider's reuse detection, and revokes the entire
-// token family — leaving both with dead tokens even though each refresh
-// "succeeded".
+// token family. Both are then left with dead tokens even though each
+// refresh "succeeded".
 //
 // To prevent that, refreshes are single-flighted at two levels:
 //
@@ -878,32 +926,76 @@ func (s *ConfigStore) RefetchGrokModels(ctx context.Context) {
 //   - Cross-process: a per-provider advisory lock is held across the whole
 //     read-decide-exchange-write cycle, so only one process exchanges at a
 //     time. A process that acquires the lock after a peer rotated finds the
-//     peer's fresh token on disk and adopts it instead of exchanging.
+//     peer's refresh token on disk and uses it instead of its own.
+//
+// A credential issued within refreshCooldown is left alone, since a renewal
+// that just happened answers this request too. Use RefreshRejectedOAuthToken
+// when a request was refused, so that cooldown does not apply.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
+	if s.IsManagedProvider(providerID) {
+		// Exchanging a refresh token here would race the external owner,
+		// which is the only party allowed to rotate this credential.
+		return managedRefreshError(providerID)
+	}
 	key := fmt.Sprintf("%d\x00%s", scope, providerID)
 	_, err, _ := s.refreshSF.Do(key, func() (any, error) {
-		return nil, s.refreshOAuthTokenLocked(ctx, scope, providerID)
+		return nil, s.refreshOAuthTokenLocked(ctx, scope, providerID, nil)
 	})
 	return err
 }
 
-// refreshOAuthTokenLocked performs the cross-process single-flighted
-// refresh. It is invoked through refreshSF, so at most one goroutine per
-// provider runs it at a time within this process.
-func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, providerID string) error {
-	cfg := s.Config()
-	providerConfig, exists := cfg.Providers.Get(providerID)
+// RefreshRejectedOAuthToken renews the credential after a provider refused
+// rejected, the token the failed request was sent with.
+//
+// Several requests in flight on the same token tend to fail together, and
+// each asks for a renewal. Only the first should exchange: by the time the
+// others get here the live token differs from the one they were refused
+// with, so they report success and retry with it. A request refused on the
+// live token itself is always renewed, however recently that token was
+// issued, because the provider has just said it is no good.
+func (s *ConfigStore) RefreshRejectedOAuthToken(ctx context.Context, scope Scope, providerID string, rejected *oauth.Token) error {
+	if s.IsManagedProvider(providerID) {
+		return managedRefreshError(providerID)
+	}
+	if rejected == nil {
+		return s.RefreshOAuthToken(ctx, scope, providerID)
+	}
+	key := fmt.Sprintf("%d\x00%s\x00rejected\x00%s", scope, providerID, oauth.FingerprintSecret(rejected.AccessToken))
+	_, err, _ := s.refreshSF.Do(key, func() (any, error) {
+		return nil, s.refreshOAuthTokenLocked(ctx, scope, providerID, rejected)
+	})
+	return err
+}
+
+// liveToken returns the provider's in-memory OAuth token.
+func (s *ConfigStore) liveToken(providerID string) (*oauth.Token, error) {
+	providerConfig, exists := s.Config().Providers.Get(providerID)
 	if !exists {
-		return fmt.Errorf("provider %s not found", providerID)
+		return nil, fmt.Errorf("provider %s not found", providerID)
 	}
 	if providerConfig.OAuthToken == nil {
-		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
+		return nil, fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
-	entryToken := providerConfig.OAuthToken
+	return providerConfig.OAuthToken, nil
+}
+
+// refreshOAuthTokenLocked performs the cross-process single-flighted
+// refresh. It is invoked through refreshSF. When rejected is set, the
+// refresh answers a refused request; see RefreshRejectedOAuthToken.
+func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, providerID string, rejected *oauth.Token) error {
+	entryToken, err := s.liveToken(providerID)
+	if err != nil {
+		return err
+	}
+	slog.Info("Refreshing OAuth token",
+		"provider", providerID,
+		"refresh_token", entryToken.Fingerprint(),
+		"expires_in_s", entryToken.ExpiresInSeconds(),
+		"after_rejection", rejected != nil)
 
 	// Acquire the per-provider cross-process refresh lock. This is a
 	// dedicated lock file, not the config-write lock, and it does not take
-	// s.mu — so the network exchange below cannot stall unrelated config
+	// s.mu, so the network exchange below cannot stall unrelated config
 	// operations. The deadline exceeds the exchange timeout so that a peer
 	// mid-exchange has time to publish a token we can adopt. Lock ordering:
 	// the refresh lock is always taken before the config-write lock (via
@@ -912,61 +1004,276 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	defer cancel()
 	release, lockErr := lock.File(lockCtx, s.refreshLockPath(providerID))
 	if lockErr != nil {
+		if err := ctx.Err(); err != nil {
+			// The caller went away (shutdown, say) while we waited.
+			return fmt.Errorf("refresh OAuth token for provider %s: %w", providerID, err)
+		}
+		if _, pending := s.pendingToken(providerID); pending {
+			// Disk is stale for this provider until our own token is
+			// saved, so there is nothing safe to adopt from it.
+			return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
+		}
 		// Could not acquire the lock (peer wedged or deadline hit). Prefer a
 		// usable token already on disk over forcing our own exchange, which
 		// would risk reusing a rotated refresh token.
-		if diskToken := s.usableDiskToken(scope, providerID, entryToken); diskToken != nil {
+		diskToken, readErr := s.usableDiskToken(scope, providerID, entryToken)
+		if readErr != nil {
+			return fmt.Errorf("acquire refresh lock for provider %s: %w (and could not read the config file: %v)", providerID, lockErr, readErr)
+		}
+		if diskToken != nil {
 			slog.Warn("Refresh lock unavailable; adopting token from disk", "provider", providerID, "error", lockErr)
-			return s.applyToken(providerConfig, diskToken, providerID)
+			s.applyTokenIfUnchanged(providerID, entryToken, diskToken)
+			return nil
 		}
 		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
 	}
 	defer release()
 
-	// Now that we hold the lock, disk is the authority on which credential
-	// is current: a peer may have rotated ours away while we waited. Adopt
-	// a newer token outright when it is still usable, and otherwise switch
-	// to its refresh token for the exchange below. Presenting our own
-	// already-rotated refresh token would trip the provider's reuse
-	// detection and revoke the whole family, forcing an interactive login.
-	if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
-		if !diskToken.IsExpired() {
-			slog.Info("Adopting token refreshed by another session", "provider", providerID)
-			return s.applyToken(providerConfig, diskToken, providerID)
-		}
-		slog.Info("Exchanging with refresh token rotated by another session", "provider", providerID)
-		entryToken = diskToken
+	// The provider may have become managed while we queued for the lock.
+	// Its owner is the only party allowed to rotate it, and disk and any
+	// unsaved token are no longer its source of truth.
+	if s.IsManagedProvider(providerID) {
+		return managedRefreshError(providerID)
 	}
 
-	// Disk still holds our token (or no newer peer token exists) and we hold
-	// the lock, so we are the sole exchanger. Perform the exchange.
-	refreshedToken, refreshErr := s.exchange(ctx, providerID, entryToken.RefreshToken)
+	// Another goroutine in this process may have replaced the credential
+	// while we waited, so decide against the live token, not the one we
+	// saw on the way in.
+	if entryToken, err = s.liveToken(providerID); err != nil {
+		return err
+	}
+
+	// A token we exchanged earlier but failed to save is newer than
+	// anything on disk, and the refresh token disk holds is already
+	// retired. Save it before anything else, and do not go near disk or
+	// the provider until that works.
+	if _, pending := s.pendingToken(providerID); pending {
+		if err := s.retryPendingPersistLocked(providerID); err != nil {
+			return fmt.Errorf("refresh OAuth token for provider %s: an earlier refreshed token is still unsaved: %w", providerID, err)
+		}
+		if entryToken, err = s.liveToken(providerID); err != nil {
+			return err
+		}
+	}
+
+	// A reload that read disk before a sign-out can resurrect the token in memory, so disk decides.
+	switch onDisk, err := s.diskHoldsLogin(providerID); {
+	case err != nil:
+		return fmt.Errorf("refresh OAuth token for provider %s: cannot tell whether it was signed out: %w", providerID, err)
+	case !onDisk:
+		slog.Info("Not refreshing OAuth token; the login was removed from disk", "provider", providerID)
+		s.applyTokenIfUnchanged(providerID, entryToken, nil)
+		return fmt.Errorf("refresh OAuth token for provider %s: %w", providerID, ErrSignedOut)
+	}
+
+	// Now that we hold the lock, disk is the authority on which credential
+	// is current: a peer may have rotated ours away while we waited. A
+	// failed read is not the same as "nothing newer", because spending our
+	// own refresh token after a peer rotated it revokes the whole family.
+	// So when disk cannot be read, nothing is exchanged.
+	diskToken, readErr := s.newerDiskToken(scope, providerID, entryToken)
+	if readErr != nil {
+		return fmt.Errorf("refresh OAuth token for provider %s: cannot tell whether another session rotated it: %w", providerID, readErr)
+	}
+	// Disk may hold the very access token the provider just refused, under
+	// a refresh token a peer rotated. Adopting it would not repair
+	// anything, so spend its refresh token instead.
+	diskHoldsRejected := rejected != nil && diskToken != nil && diskToken.AccessToken == rejected.AccessToken
+	if diskToken != nil && !diskToken.IsExpired() && !diskHoldsRejected {
+		slog.Info("Adopting token refreshed by another session",
+			"provider", providerID,
+			"refresh_token", entryToken.Fingerprint(),
+			"new_refresh_token", diskToken.Fingerprint())
+		s.applyTokenIfUnchanged(providerID, entryToken, diskToken)
+		return nil
+	}
+
+	if diskHoldsRejected {
+		slog.Info("Disk holds the rejected access token; exchanging its refresh token",
+			"provider", providerID,
+			"refresh_token", diskToken.Fingerprint())
+	} else if rejected != nil {
+		// The request was refused on rejected. If that is no longer the
+		// live credential, someone has already replaced it and the retry
+		// should simply use the replacement.
+		if entryToken.AccessToken != rejected.AccessToken {
+			slog.Info("Skipping OAuth refresh; the rejected credential was already replaced",
+				"provider", providerID,
+				"refresh_token", entryToken.Fingerprint())
+			return nil
+		}
+	} else if diskToken == nil && entryToken.JustIssued(refreshCooldown) && !entryToken.IsExpired() {
+		// A renewal that already happened moments ago answers this one.
+		// The triggers that ask for a refresh do not coordinate with each
+		// other, so several routinely arrive just after a renewal landed.
+		// Rotating again would retire a credential the other sessions have
+		// not read yet.
+		slog.Info("Skipping OAuth refresh; the credential was just issued",
+			"provider", providerID,
+			"refresh_token", entryToken.Fingerprint(),
+			"expires_in_s", entryToken.ExpiresInSeconds())
+		return nil
+	}
+
+	// The refresh token to spend is the one disk holds when it differs
+	// from ours: a peer rotated, and ours is already retired.
+	spend := entryToken
+	if diskToken != nil {
+		slog.Info("Exchanging with refresh token rotated by another session",
+			"provider", providerID,
+			"refresh_token", diskToken.Fingerprint())
+		spend = diskToken
+	}
+
+	// Admission under tokenMu: refused once the provider is managed, and
+	// otherwise registered so a push waits for this exchange (and the
+	// publish that follows it) before marking the provider managed.
+	release, admitted := s.admitExchange(providerID)
+	if !admitted {
+		return managedRefreshError(providerID)
+	}
+	defer release()
+	refreshedToken, refreshErr := s.exchangeDetached(ctx, providerID, spend.RefreshToken)
 	if refreshErr != nil {
 		// The exchange may have failed because a peer rotated the refresh
-		// token in a window we did not cover. Re-check disk: adopt a usable
-		// token, or retry once with the peer's newer refresh token.
-		if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
-			if !diskToken.IsExpired() {
+		// token in a window we did not cover. Re-check disk, still under
+		// the lock: adopt a usable token, or retry once with the peer's
+		// newer refresh token.
+		peerToken, readErr := s.newerDiskToken(scope, providerID, spend)
+		if readErr != nil {
+			return fmt.Errorf("failed to refresh OAuth token for provider %s: %w (and could not read the config file: %v)", providerID, refreshErr, readErr)
+		}
+		if peerToken != nil {
+			if !peerToken.IsExpired() {
 				slog.Info("Adopting token refreshed by another session after exchange failure", "provider", providerID)
-				return s.applyToken(providerConfig, diskToken, providerID)
+				s.applyTokenIfUnchanged(providerID, entryToken, peerToken)
+				return nil
 			}
-			slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
-			refreshedToken, refreshErr = s.exchange(ctx, providerID, diskToken.RefreshToken)
+			if peerToken.RefreshToken != spend.RefreshToken {
+				if s.IsManagedProvider(providerID) {
+					return managedRefreshError(providerID)
+				}
+				slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
+				spend = peerToken
+				refreshedToken, refreshErr = s.exchangeDetached(ctx, providerID, spend.RefreshToken)
+			}
 		}
 	}
 	if refreshErr != nil {
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
 
-	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
-	if err := s.applyToken(providerConfig, refreshedToken, providerID); err != nil {
+	slog.Info("Successfully refreshed OAuth token",
+		"provider", providerID,
+		"refresh_token", spend.Fingerprint(),
+		"new_refresh_token", refreshedToken.Fingerprint(),
+		"rotated", refreshedToken.RefreshToken != spend.RefreshToken,
+		"expires_in", refreshedToken.ExpiresIn)
+	s.persistThenPublishLocked(scope, providerID, refreshedToken, spend)
+	return nil
+}
+
+// persistThenPublishLocked saves a freshly exchanged token and then makes
+// it the live credential. The caller holds the refresh lock, and every
+// other credential write (an interactive login, another refresh) takes it
+// too, so nothing can have replaced the credential since the exchange.
+//
+// Disk comes first so that peers, which read disk, never see a credential
+// older than the one in use here. If the save fails the token is published
+// anyway, because the provider has already retired the refresh token we
+// spent and this is the only copy of its replacement. The provider is then
+// marked pending, and every later refresh or adoption retries the save
+// before touching disk or the provider.
+func (s *ConfigStore) persistThenPublishLocked(scope Scope, providerID string, token, spent *oauth.Token) {
+	err := s.writeTokenFields(scope, providerID, token)
+
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	if s.IsManagedProvider(providerID) {
+		// Became managed mid-exchange. The token is still the user's own
+		// credential, saved above for when the provider stops being
+		// managed, but it is neither published nor kept pending.
+		delete(s.pendingPersist, providerID)
+		if err != nil {
+			slog.Warn("Could not save a token refreshed just before the provider became managed",
+				"provider", providerID, "error", err)
+		}
+		return
+	}
+	if providerConfig, ok := s.Config().Providers.Get(providerID); ok {
+		s.setTokenLocked(providerConfig, providerID, token)
+	}
+	if err == nil {
+		delete(s.pendingPersist, providerID)
+		return
+	}
+	if s.pendingPersist == nil {
+		s.pendingPersist = make(map[string]pendingToken)
+	}
+	s.pendingPersist[providerID] = pendingToken{scope: scope, token: token}
+	slog.Error("Refreshed OAuth token could not be saved; keeping it in memory and retrying the save on the next refresh",
+		"provider", providerID,
+		"new_refresh_token", token.Fingerprint(),
+		"rotated", token.RefreshToken != spent.RefreshToken,
+		"error", err)
+}
+
+// pendingToken is a refreshed token that is live in memory but not yet on
+// disk.
+type pendingToken struct {
+	scope Scope
+	token *oauth.Token
+}
+
+// pendingToken reports the provider's unsaved refreshed token, if any.
+func (s *ConfigStore) pendingToken(providerID string) (pendingToken, bool) {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	p, ok := s.pendingPersist[providerID]
+	return p, ok
+}
+
+// retryPendingPersistLocked tries again to save the provider's unsaved
+// refreshed token. The caller holds the refresh lock.
+func (s *ConfigStore) retryPendingPersistLocked(providerID string) error {
+	p, ok := s.pendingToken(providerID)
+	if !ok {
+		return nil
+	}
+	if err := s.writeTokenFields(p.scope, providerID, p.token); err != nil {
+		slog.Warn("Still could not save refreshed OAuth token", "provider", providerID, "error", err)
 		return err
 	}
-
-	if err := s.SetConfigFields(scope, tokenFields(providerID, refreshedToken)); err != nil {
-		return fmt.Errorf("failed to persist refreshed token: %w", err)
+	s.tokenMu.Lock()
+	if cur, ok := s.pendingPersist[providerID]; ok && cur.token == p.token {
+		delete(s.pendingPersist, providerID)
 	}
+	s.tokenMu.Unlock()
+	slog.Info("Saved previously unsaved refreshed OAuth token",
+		"provider", providerID,
+		"refresh_token", p.token.Fingerprint())
 	return nil
+}
+
+// retryPendingPersist takes the refresh lock and retries a pending save.
+func (s *ConfigStore) retryPendingPersist(ctx context.Context, providerID string) error {
+	lockCtx, cancel := context.WithTimeout(ctx, credentialWriteLockDeadline)
+	defer cancel()
+	release, err := lock.File(lockCtx, s.refreshLockPath(providerID))
+	if err != nil {
+		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, err)
+	}
+	defer release()
+	return s.retryPendingPersistLocked(providerID)
+}
+
+// writeTokenFields persists token as the provider's credential.
+func (s *ConfigStore) writeTokenFields(scope Scope, providerID string, token *oauth.Token) error {
+	fields := tokenFields(providerID, token)
+	if s.persistTokenFields != nil {
+		return s.persistTokenFields(scope, fields)
+	}
+	return s.SetConfigFields(scope, fields)
 }
 
 // tokenFields builds the config fields that persist an OAuth token. The
@@ -1043,52 +1350,164 @@ func (s *ConfigStore) SignalAuthComplete(providerID string) {
 	}
 }
 
-// newerDiskToken returns the on-disk token for the provider when it is
-// newer than entryToken — i.e. another session (possibly in another
-// process) has already rotated the credential. It returns nil when disk
-// holds nothing newer than what we started with.
+// AdoptNewerDiskToken reconciles the in-memory OAuth token for a provider
+// with the copy on disk, adopting the peer's credential when it is newer
+// and still usable. It reports whether anything was adopted.
 //
-// Newness is judged by expiry as well as identity, so a config file that
-// somehow holds an older token cannot drag us backwards. The result may
-// itself be expired: providers that rotate refresh tokens invalidate ours
-// the moment a peer refreshes, so the peer's refresh token is the only one
-// the provider will still accept even after its access token ages out.
-// Callers decide whether to adopt the token wholesale or merely borrow its
-// refresh token.
-func (s *ConfigStore) newerDiskToken(scope Scope, providerID string, entryToken *oauth.Token) *oauth.Token {
+// A session that has sat idle still holds whatever token it loaded when it
+// started, which a peer may have rotated away hours ago. Deciding anything
+// from that stale snapshot is what makes a retired refresh token get
+// presented to a provider that rotates them, and presenting a retired one
+// costs the whole token family rather than just the attempt. Consulting
+// disk first means the decision is made against the credential that is
+// actually current, and costs one file read.
+//
+// Adoption is compare-and-swap: if the live credential changed while disk
+// was being read (a refresh or a sign-in landed), it is left alone.
+func (s *ConfigStore) AdoptNewerDiskToken(scope Scope, providerID string) (bool, error) {
+	if s.IsManagedProvider(providerID) {
+		// The external owner is the only source of truth.
+		return false, nil
+	}
+	providerConfig, exists := s.Config().Providers.Get(providerID)
+	if !exists || providerConfig.OAuthToken == nil {
+		return false, nil
+	}
+	if _, pending := s.pendingToken(providerID); pending {
+		// Our unsaved token is newer than anything on disk. Try the save
+		// again, and adopt nothing either way.
+		return false, s.retryPendingPersist(context.Background(), providerID)
+	}
+	observed := providerConfig.OAuthToken
+	diskToken, err := s.usableDiskToken(scope, providerID, observed)
+	if err != nil || diskToken == nil {
+		return false, err
+	}
+	if s.beforeAdoptApply != nil {
+		s.beforeAdoptApply()
+	}
+	if !s.applyTokenIfUnchanged(providerID, observed, diskToken) {
+		slog.Info("Not adopting token from disk; the credential changed while reading it", "provider", providerID)
+		return false, nil
+	}
+	slog.Info("Adopted token refreshed by another session",
+		"provider", providerID,
+		"refresh_token", observed.Fingerprint(),
+		"new_refresh_token", diskToken.Fingerprint(),
+		"expires_in_s", diskToken.ExpiresInSeconds())
+	return true, nil
+}
+
+// AdoptPeerRefreshedToken looks for a usable credential published by
+// another session, for use after our own exchange came back rejected. It
+// reports whether one was adopted.
+//
+// A rejected exchange reads as a revoked credential, but it has a second
+// cause that looks identical: a peer rotated the family in a window we did
+// not cover, and its replacement had not reached disk by the time we looked.
+// Waiting for the refresh lock lets an exchange that is still in flight
+// finish and publish, which separates the two. The difference matters,
+// because one of them costs the user an interactive sign-in and the other
+// costs a file read.
+//
+// The read and the apply both happen while the lock is held, and the apply
+// is compare-and-swap, so a credential that changed in the meantime is
+// never rolled back to what disk held when we looked.
+func (s *ConfigStore) AdoptPeerRefreshedToken(ctx context.Context, scope Scope, providerID string) (bool, error) {
+	if s.IsManagedProvider(providerID) {
+		return false, nil
+	}
+	providerConfig, exists := s.Config().Providers.Get(providerID)
+	if !exists || providerConfig.OAuthToken == nil {
+		return false, nil
+	}
+	observed := providerConfig.OAuthToken
+
+	lockCtx, cancel := context.WithTimeout(ctx, refreshLockDeadline)
+	defer cancel()
+	release, err := lock.File(lockCtx, s.refreshLockPath(providerID))
+	if err != nil {
+		return false, fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, err)
+	}
+	defer release()
+
+	if _, pending := s.pendingToken(providerID); pending {
+		// Our unsaved token is newer than anything on disk. Try the save
+		// again, and adopt nothing either way.
+		return false, s.retryPendingPersistLocked(providerID)
+	}
+
+	diskToken, err := s.usableDiskToken(scope, providerID, observed)
+	if err != nil || diskToken == nil {
+		return false, err
+	}
+	if s.beforeAdoptApply != nil {
+		s.beforeAdoptApply()
+	}
+	if !s.applyTokenIfUnchanged(providerID, observed, diskToken) {
+		slog.Info("Not adopting token from disk; the credential changed while reading it", "provider", providerID)
+		return false, nil
+	}
+	slog.Info("Adopted token refreshed by another session after our exchange was rejected",
+		"provider", providerID,
+		"refresh_token", observed.Fingerprint(),
+		"new_refresh_token", diskToken.Fingerprint(),
+		"expires_in_s", diskToken.ExpiresInSeconds())
+	return true, nil
+}
+
+// newerDiskToken returns the on-disk token for the provider when it
+// supersedes entryToken, meaning another session (possibly in another
+// process) has replaced the credential. It returns nil when disk holds
+// nothing newer, and an error when disk could not be read, which callers
+// must not mistake for "nothing newer".
+//
+// Rotation is judged by refresh-token identity. Every exchange this process
+// makes is written to disk before the refresh lock is released, so a
+// different refresh token on disk can only have been put there afterwards
+// by someone else, and ours is the one that is retired. Expiry times are
+// not consulted for that decision: a peer's token may well have been issued
+// with a shorter lifetime than ours. Only when the refresh tokens match
+// (providers like Copilot that never rotate them) does expiry decide which
+// access token is the newer one.
+//
+// The result may itself be expired: providers that rotate refresh tokens
+// invalidate ours the moment a peer refreshes, so the peer's refresh token
+// is the only one the provider will still accept even after its access
+// token ages out. Callers decide whether to adopt the token wholesale or
+// merely spend its refresh token.
+func (s *ConfigStore) newerDiskToken(scope Scope, providerID string, entryToken *oauth.Token) (*oauth.Token, error) {
 	diskToken, err := s.loadTokenFromDisk(scope, providerID)
 	if err != nil {
 		slog.Warn("Failed to read token from config file", "provider", providerID, "error", err)
-		return nil
+		return nil, err
 	}
 	if diskToken == nil {
-		return nil
-	}
-	if diskToken.AccessToken == entryToken.AccessToken {
-		// Same token we started with; nobody rotated since.
-		return nil
+		return nil, nil
 	}
 	if diskToken.RefreshToken == "" && entryToken.RefreshToken != "" {
 		// Adopting would strand us with no way to refresh later, and
-		// there is nothing to borrow for an exchange.
-		return nil
+		// there is nothing to spend on an exchange.
+		return nil, nil
 	}
-	if diskToken.ExpiresAt < entryToken.ExpiresAt {
-		// Older than ours; nothing to gain from adopting it.
-		return nil
+	if diskToken.RefreshToken != entryToken.RefreshToken {
+		return diskToken, nil
 	}
-	return diskToken
+	if diskToken.AccessToken == entryToken.AccessToken || diskToken.ExpiresAt <= entryToken.ExpiresAt {
+		return nil, nil
+	}
+	return diskToken, nil
 }
 
-// usableDiskToken returns the on-disk token only when it is both newer
-// than entryToken and still valid, meaning it can be adopted as-is with
-// no exchange at all.
-func (s *ConfigStore) usableDiskToken(scope Scope, providerID string, entryToken *oauth.Token) *oauth.Token {
-	diskToken := s.newerDiskToken(scope, providerID, entryToken)
-	if diskToken == nil || diskToken.IsExpired() {
-		return nil
+// usableDiskToken returns the on-disk token only when it supersedes
+// entryToken and is still valid, meaning it can be adopted as-is with no
+// exchange at all.
+func (s *ConfigStore) usableDiskToken(scope Scope, providerID string, entryToken *oauth.Token) (*oauth.Token, error) {
+	diskToken, err := s.newerDiskToken(scope, providerID, entryToken)
+	if err != nil || diskToken == nil || diskToken.IsExpired() {
+		return nil, err
 	}
-	return diskToken
+	return diskToken, nil
 }
 
 // rejectedRefreshTokenTTL is how long a refused refresh token is answered
@@ -1098,6 +1517,29 @@ const rejectedRefreshTokenTTL = 5 * time.Minute
 type rejectedRefresh struct {
 	err   error
 	until time.Time
+}
+
+// exchangeDetached performs a token exchange on a context detached from
+// the caller's, with a budget of its own.
+//
+// A successful exchange rotates the credential at the provider, so
+// abandoning one halfway retires the refresh token we presented and leaves
+// its replacement nowhere. That costs an interactive sign-in, and it costs
+// it for every session sharing the account rather than only the one that
+// gave up. Callers ask for a refresh from whatever happens to be running
+// at the time (a turn that can end, a panel poll with seconds to spend),
+// and their deadlines are the right bound on how long to wait for the
+// refresh lock, never on whether an exchange already in flight may finish.
+func (s *ConfigStore) exchangeDetached(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	// Until the request goes out nothing has been spent, so a caller that
+	// has gone away (shutdown, say) still gets to stop us here.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("not starting token exchange for provider %s: %w", providerID, err)
+	}
+	exchangeCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx), TokenExchangeTimeout)
+	defer cancel()
+	return s.exchange(exchangeCtx, providerID, refreshToken)
 }
 
 // exchange performs the provider-specific OAuth token exchange, answering
@@ -1178,8 +1620,77 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 	return filepath.Join(dir, fmt.Sprintf("%s.refresh.lock", providerID))
 }
 
-// applyToken updates the in-memory provider config with the given token.
-func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
+// applyToken installs token as the provider's live credential.
+func (s *ConfigStore) applyToken(providerID string, token *oauth.Token) {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	if providerConfig, ok := s.Config().Providers.Get(providerID); ok {
+		s.setTokenLocked(providerConfig, providerID, token)
+	}
+}
+
+// applyTokenIfUnchanged installs token only if the live credential is
+// still observed, reporting whether it did. Adopting from disk is a
+// read-then-write, and a refresh or sign-in that lands in between must not
+// be rolled back to what disk held when we looked.
+func (s *ConfigStore) applyTokenIfUnchanged(providerID string, observed, token *oauth.Token) bool {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	providerConfig, ok := s.Config().Providers.Get(providerID)
+	if !ok || !sameCredential(providerConfig.OAuthToken, observed) {
+		return false
+	}
+	return s.setTokenLocked(providerConfig, providerID, token)
+}
+
+// sameCredential reports whether a and b are the same OAuth credential.
+func sameCredential(a, b *oauth.Token) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.AccessToken == b.AccessToken && a.RefreshToken == b.RefreshToken
+}
+
+// reapplyPendingTokens puts unsaved refreshed tokens back into cfg, which
+// was just loaded from disk and so holds the older credentials.
+func (s *ConfigStore) reapplyPendingTokens(cfg *Config) {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	for providerID, p := range s.pendingPersist {
+		if s.IsManagedProvider(providerID) {
+			continue
+		}
+		if providerConfig, ok := cfg.Providers.Get(providerID); ok {
+			cfg.Providers.Set(providerID, withToken(providerConfig, providerID, p.token))
+		}
+	}
+}
+
+// setTokenLocked writes token into providerConfig and publishes it. The
+// caller holds tokenMu and passes the provider config it just read, so no
+// other field can be rolled back by a stale copy.
+func (s *ConfigStore) setTokenLocked(providerConfig ProviderConfig, providerID string, token *oauth.Token) bool {
+	// Checked under tokenMu, which SyncManagedProvider also takes, so an
+	// exchange or adoption already in flight when the provider became
+	// managed cannot land on top of it.
+	if s.IsManagedProvider(providerID) {
+		slog.Info("Discarding a token obtained for a provider that is now managed", "provider", providerID)
+		return false
+	}
+	s.Config().Providers.Set(providerID, withToken(providerConfig, providerID, token))
+	return true
+}
+
+// withToken returns providerConfig carrying token as its credential.
+func withToken(providerConfig ProviderConfig, providerID string, token *oauth.Token) ProviderConfig {
+	if token == nil {
+		// Signing out also drops the key that only mirrored the login.
+		if old := providerConfig.OAuthToken; old != nil && providerConfig.APIKey == old.AccessToken {
+			providerConfig.APIKey = ""
+		}
+		providerConfig.OAuthToken = nil
+		return providerConfig
+	}
 	providerConfig.OAuthToken = token
 	// The OpenAI provider holds exactly one credential, so a ChatGPT
 	// token means there is no API key side by side with it.
@@ -1189,8 +1700,7 @@ func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Tok
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
-	s.Config().Providers.Set(providerID, providerConfig)
-	return nil
+	return providerConfig
 }
 
 // loadTokenFromDisk reads the OAuth token for the given provider from the
@@ -1210,6 +1720,16 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 		return nil, err
 	}
 
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, nil
+	}
+	// gjson finds nothing in a file it cannot parse, which would read as
+	// "no token on disk". A truncated or half-written file says nothing
+	// about whether a peer rotated, so report it as the read failure it is.
+	if !json.Valid(data) {
+		return nil, fmt.Errorf("config file %s is not valid JSON", path)
+	}
+
 	oauthKey := fmt.Sprintf("providers.%s.oauth", providerID)
 	oauthResult := gjson.Get(string(data), oauthKey)
 	if !oauthResult.Exists() {
@@ -1226,6 +1746,31 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 	}
 
 	return &token, nil
+}
+
+// diskHoldsLogin reports whether any JSON config file the store reads holds
+// an OAuth login for the provider, whichever scope it was saved in.
+func (s *ConfigStore) diskHoldsLogin(providerID string) (bool, error) {
+	key := providerField(providerID, "oauth")
+	for _, path := range append(s.LoadedPaths(), s.globalDataPath, s.workspacePath) {
+		if filepath.Ext(path) != ".json" {
+			continue
+		}
+		data, err := readFile(path)
+		if os.IsNotExist(err) || (err == nil && len(bytes.TrimSpace(data)) == 0) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !json.Valid(data) {
+			return false, fmt.Errorf("config file %s is not valid JSON", path)
+		}
+		if gjson.GetBytes(data, key).Exists() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // nextRecentModels computes the recent-models list for the given type
@@ -1292,14 +1837,8 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	}
 
 	if err := s.SetProviderAPIKey(ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
+		slog.Error("Unable to save GitHub Copilot token", "error", err)
 		return token, false
-	}
-
-	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
-		"providers.copilot.api_key": token.AccessToken,
-		"providers.copilot.oauth":   token,
-	}); err != nil {
-		slog.Error("Unable to save GitHub Copilot token to disk", "error", err)
 	}
 
 	slog.Info("GitHub Copilot successfully imported")
@@ -1522,6 +2061,12 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	if err := cfg.configureProviders(ctx, s, env, resolver, providers); err != nil {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
+	// Managed credentials beat whatever disk and env just produced.
+	s.syncAllManagedLocked(cfg)
+
+	// A refreshed token that could not be saved is newer than what the
+	// reload just read from disk, so carry it over.
+	s.reapplyPendingTokens(cfg)
 
 	// Finish models and agents before publishing, so readers never see a
 	// half-set-up config.
@@ -1576,4 +2121,74 @@ func (s *ConfigStore) autoReload(ctx context.Context) error {
 	}
 	defer s.writeMu.Unlock()
 	return s.reloadFromDiskLocked(ctx)
+}
+
+// exchangeGate tracks the exchanges in flight for one provider; done is
+// closed when the last one finishes.
+type exchangeGate struct {
+	n    int
+	done chan struct{}
+}
+
+// admitExchange registers a token exchange for providerID unless the
+// provider is managed, returning the release to call once the exchange's
+// result is published.
+func (s *ConfigStore) admitExchange(providerID string) (release func(), admitted bool) {
+	s.tokenMu.Lock()
+	if s.IsManagedProvider(providerID) {
+		s.tokenMu.Unlock()
+		return nil, false
+	}
+	if s.exchanges == nil {
+		s.exchanges = make(map[string]*exchangeGate)
+	}
+	g := s.exchanges[providerID]
+	if g == nil {
+		g = &exchangeGate{done: make(chan struct{})}
+		s.exchanges[providerID] = g
+	}
+	g.n++
+	s.tokenMu.Unlock()
+	if s.beforeExchange != nil {
+		s.beforeExchange()
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.tokenMu.Lock()
+			defer s.tokenMu.Unlock()
+			if g.n--; g.n == 0 {
+				close(g.done)
+				if s.exchanges[providerID] == g {
+					delete(s.exchanges, providerID)
+				}
+			}
+		})
+	}, true
+}
+
+// managedTransitionWait bounds how long making a provider managed waits
+// for exchanges already in flight: one exchange plus its retry.
+const managedTransitionWait = 2 * TokenExchangeTimeout
+
+// waitForExchanges blocks until no exchange is in flight for providerID,
+// or the bound passes. Called with no store locks held: an exchange's
+// publish takes them.
+func (s *ConfigStore) waitForExchanges(providerID string) {
+	deadline := time.NewTimer(managedTransitionWait)
+	defer deadline.Stop()
+	for {
+		s.tokenMu.Lock()
+		g := s.exchanges[providerID]
+		s.tokenMu.Unlock()
+		if g == nil {
+			return
+		}
+		select {
+		case <-g.done:
+		case <-deadline.C:
+			slog.Warn("Marking provider managed while a token exchange is still running", "provider", providerID)
+			return
+		}
+	}
 }

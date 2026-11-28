@@ -21,6 +21,14 @@ type ConfigRemoveRequest struct {
 	Key   string       `json:"key"`
 }
 
+// ConfigSignOutRequest asks the server to remove a provider's stored
+// credential together with ExtraFields, its other per-login fields.
+type ConfigSignOutRequest struct {
+	Scope       config.Scope `json:"scope"`
+	ProviderID  string       `json:"provider_id"`
+	ExtraFields []string     `json:"extra_fields,omitempty"`
+}
+
 // ConfigModelRequest represents a request to update the preferred model.
 type ConfigModelRequest struct {
 	Scope     config.Scope             `json:"scope"`

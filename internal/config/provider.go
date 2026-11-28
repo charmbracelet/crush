@@ -141,6 +141,41 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 // LoadProviders is Providers with a cold-start deadline and a Hyper token
 // refresher; the first call configures the syncers for the process.
 func LoadProviders(ctx context.Context, cfg *Config, refreshHyper HyperTokenRefresher) ([]catwalk.Provider, error) {
+	return loadProviders(ctx, cfg, hyperAuth{
+		resolveKey: func() string { return ResolveHyperAPIKey(cfg) },
+		refresh:    refreshHyper,
+	})
+}
+
+// hyperAuth is how the Hyper catalog fetch authenticates.
+type hyperAuth struct {
+	// resolveKey returns the bearer credential to present.
+	resolveKey func() string
+	// refresh renews the credential after a 401; nil means no retry.
+	refresh HyperTokenRefresher
+	// managed reports whether the credential is owned externally, in
+	// which case a 401 is never answered with a refresh.
+	managed func() bool
+}
+
+// hyperAuth returns the Hyper catalog credentials for a store: a managed
+// credential when one was pushed, fallback otherwise.
+func (s *ConfigStore) hyperAuth(fallback func() string) hyperAuth {
+	return hyperAuth{
+		resolveKey: func() string {
+			if cred, ok := s.ManagedCredential(hyper.Name); ok {
+				return cred.AccessToken
+			}
+			return fallback()
+		},
+		refresh: func(ctx context.Context) error {
+			return s.RefreshOAuthToken(ctx, ScopeGlobal, hyper.Name)
+		},
+		managed: func() bool { return s.IsManagedProvider(hyper.Name) },
+	}
+}
+
+func loadProviders(ctx context.Context, cfg *Config, auth hyperAuth) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		if cfg.Options.DisableDefaultProviders {
 			return
@@ -149,8 +184,9 @@ func LoadProviders(ctx context.Context, cfg *Config, refreshHyper HyperTokenRefr
 		catwalkSyncer.Init(newCatwalkClient(catwalkURL()).GetProviders, cachePathFor("providers"), autoupdate)
 		hyperSyncer.Init(realHyperClient{
 			baseURL:      hyper.BaseURL(),
-			resolveKey:   func() string { return ResolveHyperAPIKey(cfg) },
-			refreshToken: refreshHyper,
+			resolveKey:   auth.resolveKey,
+			refreshToken: auth.refresh,
+			managed:      auth.managed,
 		}.Get, cachePathFor("hyper"), autoupdate)
 	})
 

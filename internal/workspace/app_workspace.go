@@ -432,6 +432,10 @@ func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 	return w.store.RemoveConfigField(scope, key)
 }
 
+func (w *AppWorkspace) SignOut(scope config.Scope, providerID string, extraFields ...string) error {
+	return w.store.SignOut(context.Background(), scope, providerID, extraFields...)
+}
+
 func (w *AppWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	return w.store.ImportCopilot()
 }

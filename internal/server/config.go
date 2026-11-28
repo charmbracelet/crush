@@ -43,6 +43,24 @@ func (c *controllerV1) handlePostWorkspaceConfigRemove(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceConfigSignOut removes a provider's stored credential.
+func (c *controllerV1) handlePostWorkspaceConfigSignOut(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.ConfigSignOutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SignOut(r.Context(), id, req.Scope, req.ProviderID, req.ExtraFields...); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceConfigModel updates the preferred model.
 func (c *controllerV1) handlePostWorkspaceConfigModel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

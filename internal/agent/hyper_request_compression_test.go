@@ -107,7 +107,7 @@ func testCoordinator(t *testing.T) *coordinator {
 
 func generateAgainst(t *testing.T, coord *coordinator, baseURL, providerID string, prompt fantasy.Prompt) error {
 	t.Helper()
-	provider, err := coord.buildOpenaiCompatProvider(baseURL, "test-key", nil, nil, providerID, false, catwalk.TypeCompletions)
+	provider, err := coord.buildOpenaiCompatProvider(baseURL, "test-key", nil, nil, providerID, false, catwalk.TypeCompletions, false)
 	require.NoError(t, err)
 	lm, err := provider.LanguageModel(t.Context(), "test-model")
 	require.NoError(t, err)

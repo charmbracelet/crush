@@ -1,10 +1,13 @@
 package lsp
 
 import (
+	"context"
 	"errors"
+	"os/exec"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/stretchr/testify/require"
@@ -112,4 +115,88 @@ func TestCanAutoStartCachesMissingCommand(t *testing.T) {
 	require.False(t, manager.canAutoStart("gopls", "main.go", t.TempDir(), server))
 	require.False(t, manager.canAutoStart("gopls", "main.go", t.TempDir(), server))
 	require.Equal(t, 1, lookups)
+}
+
+func newTestManager(t *testing.T, lsps config.LSPs) *Manager {
+	t.Helper()
+	store := config.NewTestStore(&config.Config{
+		LSP:     lsps,
+		Options: &config.Options{},
+	})
+	return NewManager(store)
+}
+
+func TestStartServerBacksOffAfterStartFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "missing command", command: "crush-test-missing-lsp-command"},
+		{name: "initialize failure", command: "false"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if tt.command == "false" {
+				if _, err := exec.LookPath("false"); err != nil {
+					t.Skip("false command not available")
+				}
+			}
+
+			lspCfg := config.LSPConfig{
+				Command:   tt.command,
+				FileTypes: []string{"go"},
+				Timeout:   5,
+			}
+			manager := newTestManager(t, config.LSPs{"broken": lspCfg})
+			base := time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC)
+			now := base
+			manager.now = func() time.Time { return now }
+
+			server, ok := manager.manager.GetServer("broken")
+			require.True(t, ok)
+
+			manager.startServer("broken", "main.go", server)
+
+			_, exists := manager.clients.Get("broken")
+			require.False(t, exists)
+			require.True(t, manager.recentlyUnavailable("broken"))
+
+			retryAt, _ := manager.unavailable.Get("broken")
+			require.Equal(t, base.Add(startFailureRetryDelay), retryAt)
+
+			now = base.Add(startFailureRetryDelay + time.Second)
+			require.False(t, manager.recentlyUnavailable("broken"))
+		})
+	}
+}
+
+func TestStartServerShutsDownErroredClient(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("false"); err != nil {
+		t.Skip("false command not available")
+	}
+
+	lspCfg := config.LSPConfig{
+		Command:   "false",
+		FileTypes: []string{"go"},
+		Timeout:   5,
+	}
+	manager := newTestManager(t, config.LSPs{"broken": lspCfg})
+
+	errored, err := New("broken", lspCfg, manager.cfg.Resolver(), "", false)
+	require.NoError(t, err)
+	errored.SetServerState(StateError)
+	manager.clients.Set("broken", errored)
+
+	server, ok := manager.manager.GetServer("broken")
+	require.True(t, ok)
+	manager.startServer("broken", "main.go", server)
+
+	require.ErrorIs(t, errored.ctx.Err(), context.Canceled)
 }

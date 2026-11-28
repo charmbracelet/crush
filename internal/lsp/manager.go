@@ -21,11 +21,20 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-const unavailableRetryDelay = 30 * time.Second
+const (
+	// unavailableRetryDelay is how long a server whose command is missing
+	// is skipped before Crush looks for it again.
+	unavailableRetryDelay = 30 * time.Second
+	// startFailureRetryDelay is how long a server that failed to start or
+	// initialize is skipped. It is longer than unavailableRetryDelay because
+	// each retry spawns a process and may block for the full init timeout.
+	startFailureRetryDelay = 5 * time.Minute
+)
 
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
-	clients     *csync.Map[string, *Client]
+	clients *csync.Map[string, *Client]
+	// unavailable maps server names to the time they may be retried.
 	unavailable *csync.Map[string, time.Time]
 	cfg         *config.ConfigStore
 	manager     *powernapconfig.Manager
@@ -178,6 +187,9 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		if !handles(server, filepath, s.cfg.WorkingDir()) {
 			return
 		}
+		if s.recentlyUnavailable(name) {
+			return
+		}
 	} else if !s.canAutoStart(name, filepath, s.cfg.WorkingDir(), server) {
 		return
 	}
@@ -200,6 +212,7 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
+		s.markUnavailableFor(name, startFailureRetryDelay)
 		return
 	}
 	// Only store non-nil clients. If another goroutine raced us,
@@ -210,6 +223,11 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 			client.Shutdown()
 			s.callback(name, existing)
 			return
+		case StateError:
+			// A client left in the error state (for example by a failed
+			// restart) may still have a live server process. Shut it down
+			// before replacing it so the process is not orphaned.
+			existing.Shutdown()
 		}
 	}
 	s.clients.Set(name, client)
@@ -237,8 +255,10 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		client.Shutdown()
 		s.clients.Del(name)
+		s.markUnavailableFor(name, startFailureRetryDelay)
 		return
 	}
+	s.clearUnavailable(name)
 
 	if err := client.WaitForServerReady(initCtx); err != nil {
 		slog.Warn("LSP server not fully ready, continuing anyway", "name", name, "error", err)
@@ -284,11 +304,11 @@ func (s *Manager) isUserConfigured(name string) bool {
 }
 
 func (s *Manager) recentlyUnavailable(name string) bool {
-	lastUnavailableAt, exists := s.unavailable.Get(name)
+	retryAt, exists := s.unavailable.Get(name)
 	if !exists {
 		return false
 	}
-	if s.now().Sub(lastUnavailableAt) < unavailableRetryDelay {
+	if s.now().Before(retryAt) {
 		return true
 	}
 	s.unavailable.Del(name)
@@ -296,7 +316,12 @@ func (s *Manager) recentlyUnavailable(name string) bool {
 }
 
 func (s *Manager) markUnavailable(name string) {
-	s.unavailable.Set(name, s.now())
+	s.markUnavailableFor(name, unavailableRetryDelay)
+}
+
+// markUnavailableFor skips the server for the given duration.
+func (s *Manager) markUnavailableFor(name string, delay time.Duration) {
+	s.unavailable.Set(name, s.now().Add(delay))
 }
 
 func (s *Manager) clearUnavailable(name string) {

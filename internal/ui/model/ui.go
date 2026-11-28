@@ -317,6 +317,11 @@ type UI struct {
 	bangMode     bool
 	bangWasEmpty bool // true when bang prompt became empty on last keystroke
 
+	// sessionLoad tracks the latest session load, so a superseded one is
+	// never applied and the nested transcripts it reads after the apply
+	// do not lose the events that arrive meanwhile.
+	sessionLoad sessionLoad
+
 	// pendingBangCommand holds a shell command that was issued before
 	// the session finished loading. The loadSessionMsg handler creates
 	// the pending UI item and starts execution once the chat list is
@@ -780,12 +785,15 @@ func (m *UI) loadInitialSession() tea.Cmd {
 	case m.initialSessionID != "":
 		return m.loadSession(m.initialSessionID)
 	case m.continueLastSession:
+		// The load is registered here, on the event loop; the command only
+		// finds out which session it is for.
+		ctx, seq := m.beginSessionLoad()
 		return func() tea.Msg {
-			sessions, err := m.com.Workspace.ListSessions(context.Background())
+			sessions, err := m.com.Workspace.ListSessions(ctx)
 			if err != nil || len(sessions) == 0 {
 				return nil
 			}
-			return m.loadSession(sessions[0].ID)()
+			return m.sessionLoadCmd(ctx, seq, sessions[0].ID)()
 		}
 	default:
 		return nil
@@ -1014,6 +1022,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
+		if msg.seq != m.sessionLoad.seq {
+			// A newer load (or leaving the session) superseded this one;
+			// applying it would show a session the user has moved away from.
+			break
+		}
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
@@ -1047,7 +1060,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs := msg.messages
-		if cmd := m.setSessionMessages(msgs); cmd != nil {
+		if cmd := m.setSessionMessagesWithBusy(msgs, msg.dispatchBusy); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// The nested agent transcripts are read now, after the transcript
+		// is up, and attached when they land.
+		if cmd := m.loadNestedTranscriptsCmd(msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.restoreModelFromSession(msgs); cmd != nil {
@@ -1073,6 +1091,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+
+	case nestedTranscriptsMsg:
+		if cmd := m.applyNestedTranscripts(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -1187,6 +1210,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Payload.SessionID != m.session.ID {
 			// This might be a child session message from an agent tool.
+			m.bufferChildSessionEvent(msg)
 			if cmd := m.handleChildSessionMessage(msg); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1845,8 +1869,18 @@ func (m *UI) handleAnimTick(msg animTickMsg) {
 	}
 }
 
-// setSessionMessages sets the messages for the current session in the chat
+// setSessionMessages sets the messages for the current session in the chat,
+// treating every dispatch as finished.
 func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
+	return m.setSessionMessagesWithBusy(msgs, nil)
+}
+
+// setSessionMessagesWithBusy sets the messages for the current session in
+// the chat. dispatchBusy is what the session load probed off the event loop
+// for the open dispatches (see probeOpenDispatches), so nothing here queries
+// the workspace. The nested tools of agent tool calls are attached later,
+// by applyNestedTranscripts.
+func (m *UI) setSessionMessagesWithBusy(msgs []message.Message, dispatchBusy map[string]bool) tea.Cmd {
 	var cmds []tea.Cmd
 	// Build tool result map to link tool calls with their results
 	msgPtrs := make([]*message.Message, len(msgs))
@@ -1876,11 +1910,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		}
 	}
 
-	// Load nested tool calls for agent/agentic_fetch tools.
-	m.loadNestedToolCalls(items)
 	m.setMessagePlanFlags(items)
 	replayDispatchReports(items, msgPtrs, func(messageID, toolCallID string) bool {
-		return m.com.Workspace.AgentIsSessionBusy(m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID))
+		return dispatchBusy[m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID)]
 	})
 
 	// If the user switches between sessions while the agent is working we
@@ -1994,8 +2026,14 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	return cmds
 }
 
-// loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
-func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
+// loadNestedToolCalls recursively attaches nested tool calls to
+// agent/agentic_fetch tools, building them from the nested transcripts the
+// session load read off the event loop (see loadNestedTranscripts). A tool
+// with no transcript keeps the nested tools it has.
+//
+// A dispatch nested inside another agent is never the latest dispatch of
+// the session, so like replayDispatchReports it is settled here.
+func (m *UI) loadNestedToolCalls(items []chat.MessageItem, transcripts map[string][]message.Message) {
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
 		if !ok {
@@ -2012,9 +2050,8 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Get the agent tool session ID.
 		agentSessionID := m.com.Workspace.CreateAgentToolSessionID(messageID, tc.ID)
 
-		// Fetch nested messages.
-		nestedMsgs, err := m.com.Workspace.ListMessages(context.Background(), agentSessionID)
-		if err != nil || len(nestedMsgs) == 0 {
+		nestedMsgs := transcripts[agentSessionID]
+		if len(nestedMsgs) == 0 {
 			continue
 		}
 
@@ -2035,6 +2072,9 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 					if simplifiable, ok := nestedToolItem.(chat.Compactable); ok {
 						simplifiable.SetCompact(true)
 					}
+					if dispatch, ok := nestedToolItem.(*chat.AgentToolMessageItem); ok && dispatch.DispatchLabel() != "" {
+						dispatch.MarkDispatchReported()
+					}
 					nestedTools = append(nestedTools, nestedToolItem)
 				}
 			}
@@ -2045,7 +2085,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		for i, nt := range nestedTools {
 			nestedMessageItems[i] = nt
 		}
-		m.loadNestedToolCalls(nestedMessageItems)
+		m.loadNestedToolCalls(nestedMessageItems, transcripts)
 
 		// Set nested tools on the parent.
 		nestedContainer.SetNestedTools(nestedTools)
@@ -6444,6 +6484,8 @@ func (m *UI) newSession() tea.Cmd {
 
 	planCmd := m.resetPlanModeState()
 	m.turnOutcome = ""
+	// A load still in flight must not bring the session back.
+	m.abandonSessionLoad()
 	m.session = nil
 	m.sidebarOffset = 0
 	m.sessionFiles = nil

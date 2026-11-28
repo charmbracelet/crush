@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -23,6 +24,18 @@ type NestedToolContainer interface {
 	NestedTools() []ToolMessageItem
 	SetNestedTools(tools []ToolMessageItem)
 	AddNestedTool(tool ToolMessageItem)
+}
+
+// HasNestedTools reports whether calls of the named tool render as a
+// [NestedToolContainer], showing the tool calls of the agent session they
+// started. Loading a transcript uses it to know which nested sessions to
+// read before the items are built.
+func HasNestedTools(toolName string) bool {
+	switch toolName {
+	case agent.AgentToolName, agent.AgentDispatchToolName, tools.AgenticFetchToolName:
+		return true
+	}
+	return false
 }
 
 // AgentToolMessageItem is a message item that represents an agent tool call.

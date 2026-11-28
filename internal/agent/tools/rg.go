@@ -46,11 +46,9 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
-	name := getRg()
-	if name == "" {
-		return nil
-	}
+// rgSearchCmd builds a ripgrep search command that runs the rg binary at
+// name.
+func rgSearchCmd(ctx context.Context, name, pattern, path, include string) *exec.Cmd {
 	// Use -n to show line numbers, -0 for null separation to handle Windows paths
 	args := []string{"--json", "-H", "-n", "-0", pattern}
 	if include != "" {

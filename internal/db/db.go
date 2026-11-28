@@ -81,6 +81,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getLastSessionStmt, err = db.PrepareContext(ctx, getLastSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetLastSession: %w", err)
 	}
+	if q.getLatestFileVersionByPathStmt, err = db.PrepareContext(ctx, getLatestFileVersionByPath); err != nil {
+		return nil, fmt.Errorf("error preparing query GetLatestFileVersionByPath: %w", err)
+	}
 	if q.getMessageStmt, err = db.PrepareContext(ctx, getMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMessage: %w", err)
 	}
@@ -122,9 +125,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
-	}
-	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
-		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
 	}
 	if q.listFilesBySessionStmt, err = db.PrepareContext(ctx, listFilesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySession: %w", err)
@@ -280,6 +280,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getLastSessionStmt: %w", cerr)
 		}
 	}
+	if q.getLatestFileVersionByPathStmt != nil {
+		if cerr := q.getLatestFileVersionByPathStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getLatestFileVersionByPathStmt: %w", cerr)
+		}
+	}
 	if q.getMessageStmt != nil {
 		if cerr := q.getMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getMessageStmt: %w", cerr)
@@ -348,11 +353,6 @@ func (q *Queries) Close() error {
 	if q.listAllUserMessagesStmt != nil {
 		if cerr := q.listAllUserMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
-		}
-	}
-	if q.listFilesByPathStmt != nil {
-		if cerr := q.listFilesByPathStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listFilesByPathStmt: %w", cerr)
 		}
 	}
 	if q.listFilesBySessionStmt != nil {
@@ -503,6 +503,7 @@ type Queries struct {
 	getHourDayHeatmapStmt                *sql.Stmt
 	getLastAssistantMessageBySessionStmt *sql.Stmt
 	getLastSessionStmt                   *sql.Stmt
+	getLatestFileVersionByPathStmt       *sql.Stmt
 	getMessageStmt                       *sql.Stmt
 	getRecentActivityStmt                *sql.Stmt
 	getSessionByIDStmt                   *sql.Stmt
@@ -517,7 +518,6 @@ type Queries struct {
 	insertSkillsDisabledStmt             *sql.Stmt
 	insertSkillsEnabledStmt              *sql.Stmt
 	listAllUserMessagesStmt              *sql.Stmt
-	listFilesByPathStmt                  *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
 	listLatestSessionFilesStmt           *sql.Stmt
 	listMCPDisabledServersStmt           *sql.Stmt
@@ -561,6 +561,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getHourDayHeatmapStmt:                q.getHourDayHeatmapStmt,
 		getLastAssistantMessageBySessionStmt: q.getLastAssistantMessageBySessionStmt,
 		getLastSessionStmt:                   q.getLastSessionStmt,
+		getLatestFileVersionByPathStmt:       q.getLatestFileVersionByPathStmt,
 		getMessageStmt:                       q.getMessageStmt,
 		getRecentActivityStmt:                q.getRecentActivityStmt,
 		getSessionByIDStmt:                   q.getSessionByIDStmt,
@@ -575,7 +576,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		insertSkillsDisabledStmt:             q.insertSkillsDisabledStmt,
 		insertSkillsEnabledStmt:              q.insertSkillsEnabledStmt,
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
-		listFilesByPathStmt:                  q.listFilesByPathStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:           q.listLatestSessionFilesStmt,
 		listMCPDisabledServersStmt:           q.listMCPDisabledServersStmt,

@@ -6,8 +6,51 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHandleLSPClientUpdateIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	const name = "test-handle-lsp-client-update"
+	client := &lsp.Client{}
+	client.SetServerState(lsp.StateStarting)
+
+	handleLSPClientUpdate(name, client)
+	info, ok := lspStates.Get(name)
+	require.True(t, ok)
+	require.Equal(t, lsp.StateStarting, info.State)
+
+	updateLSPDiagnostics(name, 5)
+
+	// Repeated calls for an unchanged client keep the diagnostic count.
+	handleLSPClientUpdate(name, client)
+	info, _ = lspStates.Get(name)
+	require.Equal(t, 5, info.DiagnosticCount)
+
+	// A state change is recorded, still keeping the count.
+	client.SetServerState(lsp.StateReady)
+	handleLSPClientUpdate(name, client)
+	info, _ = lspStates.Get(name)
+	require.Equal(t, lsp.StateReady, info.State)
+	require.Equal(t, 5, info.DiagnosticCount)
+	connectedAt := info.ConnectedAt
+	require.False(t, connectedAt.IsZero())
+
+	// The connection time is not reset while the client stays ready.
+	handleLSPClientUpdate(name, client)
+	info, _ = lspStates.Get(name)
+	require.Equal(t, connectedAt, info.ConnectedAt)
+
+	// A new client starts from scratch.
+	replacement := &lsp.Client{}
+	replacement.SetServerState(lsp.StateStarting)
+	handleLSPClientUpdate(name, replacement)
+	info, _ = lspStates.Get(name)
+	require.Same(t, replacement, info.Client)
+	require.Zero(t, info.DiagnosticCount)
+}
 
 func TestKeyedThrottleRunsOncePerBurst(t *testing.T) {
 	t.Parallel()

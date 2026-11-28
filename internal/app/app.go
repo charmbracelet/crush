@@ -273,14 +273,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	go app.refreshCatalogs(ctx, app.AgentCoordinator)
 
 	// Set up callback for LSP state updates.
-	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
-		if client == nil {
-			updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
-			return
-		}
-		client.SetDiagnosticsCallback(updateLSPDiagnostics)
-		updateLSPState(name, client.GetServerState(), nil, client, 0)
-	})
+	app.LSPManager.SetCallback(handleLSPClientUpdate)
 
 	// TrackConfigured must run after SetCallback so the callback is already
 	// installed when configured-but-not-yet-started LSPs are announced.

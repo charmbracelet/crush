@@ -200,3 +200,33 @@ func TestStartServerShutsDownErroredClient(t *testing.T) {
 
 	require.ErrorIs(t, errored.ctx.Err(), context.Canceled)
 }
+
+func TestHandlesFiletype(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		fileTypes []string
+		path      string
+		want      bool
+	}{
+		{name: "no file types", path: "/x/anything.txt", want: true},
+		{name: "extension", fileTypes: []string{"go"}, path: "/x/main.go", want: true},
+		{name: "dotted extension", fileTypes: []string{".go"}, path: "/x/main.go", want: true},
+		{name: "upper case file type", fileTypes: []string{"GO"}, path: "/x/main.go", want: true},
+		{name: "upper case file name", fileTypes: []string{"go"}, path: "/x/MAIN.GO", want: true},
+		{name: "multi part extension", fileTypes: []string{"d.ts"}, path: "/x/a.d.ts", want: true},
+		{name: "dot file", fileTypes: []string{"go"}, path: "/x/.go", want: true},
+		{name: "bare name", fileTypes: []string{"go"}, path: "/x/go", want: false},
+		{name: "partial extension", fileTypes: []string{"o"}, path: "/x/main.go", want: false},
+		{name: "other extension", fileTypes: []string{"rs"}, path: "/x/main.go", want: false},
+		{name: "language", fileTypes: []string{"dockerfile"}, path: "/x/Dockerfile", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, handlesFiletype("test", tt.fileTypes, tt.path))
+		})
+	}
+}

@@ -615,40 +615,68 @@ func (a *AssistantMessageItem) cachedThinking(width int) string {
 	srcHash, extra := a.thinkingKey()
 	if a.thinkingSec.hit(width, srcHash, extra) {
 		a.thinkingBoxHeight = a.thinkingSec.aux
-		return a.thinkingSec.out
+	} else {
+		out := a.renderThinking(a.message.ReasoningContent().Thinking, width)
+		a.thinkingSec.store(width, srcHash, extra, out, a.thinkingBoxHeight)
 	}
-	out := a.renderThinking(a.message.ReasoningContent().Thinking, width)
-	a.thinkingSec.store(width, srcHash, extra, out, a.thinkingBoxHeight)
-	return out
+	if a.thinkingSettled() {
+		// The thinking can no longer change, so every later miss is a
+		// width, view-mode or theme change, and each of those renders
+		// in full anyway. Drop the streaming cache: it holds a full
+		// render of the whole trace, which the collapsed box never
+		// shows.
+		a.streamingThinking.Reset()
+	}
+	return a.thinkingSec.out
+}
+
+// thinkingSettled reports whether the thinking section's cache key can
+// no longer change on its own: the message is finished and the thinking
+// duration is fixed rather than measured against the current time.
+func (a *AssistantMessageItem) thinkingSettled() bool {
+	if !a.message.IsFinished() {
+		return false
+	}
+	rc := a.message.ReasoningContent()
+	return rc.StartedAt == 0 || rc.FinishedAt != 0
 }
 
 // cachedContent returns the rendered content section.
 func (a *AssistantMessageItem) cachedContent(width int) string {
 	srcHash, extra := a.contentKey()
-	if a.contentSec.hit(width, srcHash, extra) {
-		return a.contentSec.out
+	if !a.contentSec.hit(width, srcHash, extra) {
+		a.contentSec.store(width, srcHash, extra, a.renderContent(width), 0)
 	}
+	if a.message.IsFinished() {
+		// A finished message's content no longer changes, so later
+		// misses render in full anyway. Drop the streaming caches and
+		// the stable-prefix render they hold.
+		a.streamingContent.Reset()
+		a.streamingPlan.Reset()
+	}
+	return a.contentSec.out
+}
+
+// renderContent renders the content section without consulting its cache.
+func (a *AssistantMessageItem) renderContent(width int) string {
 	text := a.message.Content().Text
 	// In plan mode the agent ends its final plan with a sentinel marker.
 	// Hide the end plan marker and wrap the message in a background "card" so
 	// the plan stands out from regular assistant replies. Mirrors the
 	// ThinkingBox treatment.
-	var out string
 	switch {
 	case common.PlanReadyMarkerPresent(text):
-		out = a.renderPlanCard(common.StripPlanMarkers(text), width)
+		return a.renderPlanCard(common.StripPlanMarkers(text), width)
 	case a.planStreaming() && common.PlanStartMarkerPresent(text):
 		// While the plan streams, draw the card as an open box: top
 		// and side borders only. The bottom border closes once the
 		// plan-ready marker arrives. The plan-start marker gates the
 		// card so intermediate exploratory replies in plan mode never
 		// grow a border.
-		out = a.renderPlanCardStreaming(common.StripPlanMarkers(text), width)
+		return a.renderPlanCardStreaming(common.StripPlanMarkers(text), width)
 	default:
-		out = a.renderMarkdown(common.StripPlanMarkers(text), width)
+		return a.renderMarkdown(common.StripPlanMarkers(text), width)
 	}
-	a.contentSec.store(width, srcHash, extra, out, 0)
-	return out
 }
 
 // renderPlanCard renders the final plan message as a full-width bordered

@@ -1041,8 +1041,13 @@ func TestAssistantMessageItem_FinishedRendersOnce(t *testing.T) {
 
 	require.Empty(t, item.streamingContent.stablePrefix)
 	require.Empty(t, item.streamingThinking.stablePrefix)
-	require.NotEmpty(t, item.streamingContent.lastRender)
-	require.NotEmpty(t, item.streamingThinking.lastRender)
+	// The section caches serve every later render of a finished
+	// message, so the streaming caches are released once they are
+	// stored.
+	require.NotEmpty(t, item.contentSec.out)
+	require.NotEmpty(t, item.thinkingSec.out)
+	require.Empty(t, item.streamingContent.lastRender)
+	require.Empty(t, item.streamingThinking.lastRender)
 }
 
 // TestMarkdownSentinel_RendersToNothing pins the assumption renderPiece

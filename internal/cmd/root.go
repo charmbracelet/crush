@@ -467,13 +467,18 @@ func setupLocalWorkspace(cmd *cobra.Command, store *config.ConfigStore) (workspa
 	cwd := store.WorkingDir()
 
 	cfg := store.Config()
-	store.Overrides().EnabledChannels = channels
-	store.Overrides().Prompts = prompts
+	store.UpdateOverrides(func(o *config.RuntimeOverrides) {
+		o.EnabledChannels = channels
+		o.Prompts = prompts
+		switch {
+		case yoloCount > 1:
+			o.PermissionMode = permission.PermissionModeSysadmin
+		case yoloCount == 1:
+			o.PermissionMode = permission.PermissionModeYolo
+		}
+	})
 	if yoloCount > 1 {
-		store.Overrides().PermissionMode = permission.PermissionModeSysadmin
 		fmt.Fprintln(os.Stderr, sysadminModeWarning)
-	} else if yoloCount == 1 {
-		store.Overrides().PermissionMode = permission.PermissionModeYolo
 	}
 
 	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {

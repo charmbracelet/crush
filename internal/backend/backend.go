@@ -525,9 +525,11 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
 
-	cfg.Overrides().EnabledChannels = args.Channels
-	cfg.Overrides().PermissionMode = proto.ProtoModeToPermission(args.PermissionMode)
-	cfg.Overrides().Prompts = args.Prompts
+	cfg.UpdateOverrides(func(o *config.RuntimeOverrides) {
+		o.EnabledChannels = args.Channels
+		o.PermissionMode = proto.ProtoModeToPermission(args.PermissionMode)
+		o.Prompts = args.Prompts
+	})
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)

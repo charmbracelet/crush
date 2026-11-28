@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -174,22 +175,58 @@ func TestConfigStore_RuntimeOverrides_Independent(t *testing.T) {
 	require.Equal(t, permission.PermissionModeNormal, store1.Overrides().PermissionMode)
 	require.Equal(t, permission.PermissionModeNormal, store2.Overrides().PermissionMode)
 
-	store1.Overrides().PermissionMode = permission.PermissionModeYolo
+	store1.UpdateOverrides(func(o *RuntimeOverrides) {
+		o.PermissionMode = permission.PermissionModeYolo
+	})
 
 	require.Equal(t, permission.PermissionModeYolo, store1.Overrides().PermissionMode)
 	require.Equal(t, permission.PermissionModeNormal, store2.Overrides().PermissionMode)
 }
 
-func TestConfigStore_RuntimeOverrides_MutableViaPointer(t *testing.T) {
+func TestConfigStore_RuntimeOverrides_ReturnsCopy(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{config: &Config{}}
+	store.UpdateOverrides(func(o *RuntimeOverrides) {
+		o.EnabledChannels = []string{"a"}
+		o.Prompts = PromptPaths{"coder": "/a.md"}
+		o.Models = map[SelectedModelType]SelectedModel{SelectedModelTypeLarge: {Model: "a"}}
+	})
+
 	overrides := store.Overrides()
-
-	require.Equal(t, permission.PermissionModeNormal, overrides.PermissionMode)
-
 	overrides.PermissionMode = permission.PermissionModeYolo
-	require.Equal(t, permission.PermissionModeYolo, store.Overrides().PermissionMode)
+	overrides.EnabledChannels[0] = "b"
+	overrides.Prompts["coder"] = "/b.md"
+	overrides.Models[SelectedModelTypeLarge] = SelectedModel{Model: "b"}
+
+	got := store.Overrides()
+	require.Equal(t, permission.PermissionModeNormal, got.PermissionMode)
+	require.Equal(t, []string{"a"}, got.EnabledChannels)
+	require.Equal(t, "/a.md", got.Prompts["coder"])
+	require.Equal(t, "a", got.Models[SelectedModelTypeLarge].Model)
+}
+
+// Reading overrides while a reload replaces them must not race.
+func TestConfigStore_RuntimeOverrides_ConcurrentReadAndReplace(t *testing.T) {
+	t.Parallel()
+
+	store := &ConfigStore{config: &Config{}}
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 1000 {
+			store.writeMu.Lock()
+			overrides := store.overrides
+			overrides.EnabledChannels = []string{"server:x"}
+			store.overrides = overrides
+			store.writeMu.Unlock()
+		}
+	})
+	wg.Go(func() {
+		for range 1000 {
+			_ = len(store.Overrides().EnabledChannels)
+		}
+	})
+	wg.Wait()
 }
 
 func TestGlobalWorkspaceDir(t *testing.T) {

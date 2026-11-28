@@ -150,7 +150,7 @@ func TestPromptTextRuntimeOverrideWins(t *testing.T) {
 	require.NoError(t, os.WriteFile(flagged, []byte("flagged"), 0o644))
 
 	store := promptStore(t, map[string]string{"coder": configured, "task": configured})
-	store.Overrides().Prompts = config.PromptPaths{"coder": flagged}
+	store.UpdateOverrides(func(o *config.RuntimeOverrides) { o.Prompts = config.PromptPaths{"coder": flagged} })
 
 	coder, err := promptText(store, "coder")
 	require.NoError(t, err)

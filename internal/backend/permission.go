@@ -56,11 +56,10 @@ func (b *Backend) AutoApproveSession(workspaceID, sessionID string) error {
 //
 // Only the permission service is updated; the config override is left
 // holding the startup flag on purpose. The override is a seed that
-// app.New reads once at construction, and config.Overrides() hands
-// back a bare pointer with no locking, so writing it here would race
-// the readers on the CreateWorkspace path for no benefit. Leaving the
-// service as the single writable source of truth is what keeps the
-// enforced mode and the mode reported to clients from drifting apart.
+// app.New reads once at construction, so writing it here would have no
+// effect. Leaving the service as the single writable source of truth is
+// what keeps the enforced mode and the mode reported to clients from
+// drifting apart.
 func (b *Backend) SetPermissionMode(workspaceID string, mode permission.PermissionMode) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {

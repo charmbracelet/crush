@@ -267,7 +267,7 @@ func TestUpdateStateTracksChannelOptInAndCapability(t *testing.T) {
 	t.Cleanup(func() { states.Del(name) })
 
 	cfg := config.NewTestStore(&config.Config{})
-	cfg.Overrides().EnabledChannels = []string{name}
+	cfg.UpdateOverrides(func(o *config.RuntimeOverrides) { o.EnabledChannels = []string{name} })
 	m := config.MCPConfig{Type: config.MCPStdio}
 
 	// Opt-in is recorded on the connect attempt and survives the attempt
@@ -287,7 +287,7 @@ func TestUpdateStateTracksChannelOptInAndCapability(t *testing.T) {
 	}
 
 	// channel_enabled alone opts in; neither source means not opted in.
-	cfg.Overrides().EnabledChannels = nil
+	cfg.UpdateOverrides(func(o *config.RuntimeOverrides) { o.EnabledChannels = nil })
 	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, config.MCPConfig{ChannelEnabled: true}))
 	if info, _ := GetState(name); !info.ChannelOptIn {
 		t.Fatal("channel_enabled should opt the server in")

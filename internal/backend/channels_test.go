@@ -224,7 +224,7 @@ func insertChannelWorkspaceCfg(t *testing.T, b *Backend, srvName string, enabled
 	cfg, err := config.Init(t.Context(), wd, "", false)
 	require.NoError(t, err)
 	if enabled {
-		cfg.Overrides().EnabledChannels = []string{srvName}
+		cfg.UpdateOverrides(func(o *config.RuntimeOverrides) { o.EnabledChannels = []string{srvName} })
 	}
 
 	ws := &Workspace{

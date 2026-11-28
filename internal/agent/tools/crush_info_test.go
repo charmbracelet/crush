@@ -158,7 +158,7 @@ func TestCrushInfo_YoloMode(t *testing.T) {
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{},
 	})
-	cfg.Overrides().PermissionMode = permission.PermissionModeYolo
+	cfg.UpdateOverrides(func(o *config.RuntimeOverrides) { o.PermissionMode = permission.PermissionModeYolo })
 
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
@@ -172,7 +172,7 @@ func TestCrushInfo_SysadminMode(t *testing.T) {
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{},
 	})
-	cfg.Overrides().PermissionMode = permission.PermissionModeSysadmin
+	cfg.UpdateOverrides(func(o *config.RuntimeOverrides) { o.PermissionMode = permission.PermissionModeSysadmin })
 
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")

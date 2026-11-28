@@ -284,11 +284,26 @@ func (s *ConfigStore) SetupAgents() {
 	s.Config().SetupAgents()
 }
 
-// Overrides returns the runtime overrides for this store.
-func (s *ConfigStore) Overrides() *RuntimeOverrides {
+// Overrides returns a copy of the runtime overrides for this store. A
+// reload replaces the overrides under writeMu, so callers get their own
+// copy instead of a pointer they would read without the lock. Use
+// [ConfigStore.UpdateOverrides] to change them.
+func (s *ConfigStore) Overrides() RuntimeOverrides {
 	s.writeMu.RLock()
 	defer s.writeMu.RUnlock()
-	return &s.overrides
+	o := s.overrides
+	o.EnabledChannels = slices.Clone(o.EnabledChannels)
+	o.Models = maps.Clone(o.Models)
+	o.Prompts = maps.Clone(o.Prompts)
+	return o
+}
+
+// UpdateOverrides changes the runtime overrides for this store under
+// writeMu.
+func (s *ConfigStore) UpdateOverrides(fn func(*RuntimeOverrides)) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	fn(&s.overrides)
 }
 
 // LoadedPaths returns the config file paths that were successfully loaded.

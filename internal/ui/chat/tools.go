@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/diffview"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -1220,23 +1221,33 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 		formatter = formatter.Split()
 	}
 
-	formatted := formatter.String()
-	lines := strings.Split(formatted, "\n")
-
-	// Truncate if needed.
-	maxLines := collapsedMaxLines(len(lines))
-	if expanded {
-		maxLines = len(lines)
-	}
-
-	if len(lines) > maxLines && !expanded {
+	formatted, hidden := renderToolDiff(formatter, expanded)
+	if hidden > 0 {
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(bodyWidth).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
-		formatted = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, hidden))
+		formatted = formatted + "\n" + truncMsg
 	}
 
 	return sty.Tool.Body.Render(formatted)
+}
+
+// renderToolDiff renders a diff and returns the rows to show and how many
+// rows were left out. A collapsed view shows at most collapsedMaxLines rows,
+// so the formatter is told to stop one row past them rather than highlight
+// and style the whole diff only to drop most of it.
+func renderToolDiff(formatter *diffview.DiffView, expanded bool) (string, int) {
+	if expanded {
+		return formatter.String(), 0
+	}
+	formatted := formatter.Height(responseContextHeight + 1).String()
+	total := formatter.TotalLines()
+	maxLines := collapsedMaxLines(total)
+	if total <= maxLines {
+		return formatted, 0
+	}
+	lines := strings.SplitN(formatted, "\n", maxLines+1)
+	return strings.Join(lines[:min(maxLines, len(lines))], "\n"), total - maxLines
 }
 
 // formatTimeout converts timeout seconds to a duration string (e.g., "30s").
@@ -1270,20 +1281,12 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 		formatter = formatter.Split()
 	}
 
-	formatted := formatter.String()
-	lines := strings.Split(formatted, "\n")
-
-	// Truncate if needed.
-	maxLines := collapsedMaxLines(len(lines))
-	if expanded {
-		maxLines = len(lines)
-	}
-
-	if len(lines) > maxLines && !expanded {
+	formatted, hidden := renderToolDiff(formatter, expanded)
+	if hidden > 0 {
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(bodyWidth).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
-		formatted = truncMsg + "\n" + strings.Join(lines[:maxLines], "\n")
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, hidden))
+		formatted = truncMsg + "\n" + formatted
 	}
 
 	// Add failed edits note if any exist.

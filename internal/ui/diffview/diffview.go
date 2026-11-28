@@ -200,6 +200,13 @@ func (dv *DiffView) clearSyntaxCache() {
 	}
 }
 
+// TotalLines returns the number of rows the whole diff spans, including the
+// file name and hunk headers, regardless of any height limit. It is only
+// valid after [DiffView.String] has run.
+func (dv *DiffView) TotalLines() int {
+	return dv.totalLines
+}
+
 // String returns the string representation of the DiffView.
 func (dv *DiffView) String() string {
 	dv.normalizeLineEndings()

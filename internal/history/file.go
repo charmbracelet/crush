@@ -63,22 +63,20 @@ func (s *service) Create(ctx context.Context, sessionID, path, content string) (
 // number. If no previous versions exist for the path, it creates the initial
 // version. The provided content is stored as the new version.
 func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
-	// Get the latest version for this path
-	files, err := s.q.ListFilesByPath(ctx, path)
+	// Only the highest version number is needed, so avoid loading the
+	// content of every stored version of the path. The query reports -1
+	// when the path has no versions yet.
+	latest, err := s.q.GetLatestFileVersionByPath(ctx, path)
 	if err != nil {
 		return File{}, err
 	}
 
-	if len(files) == 0 {
+	if latest < InitialVersion {
 		// No previous versions, create initial
 		return s.Create(ctx, sessionID, path, content)
 	}
 
-	// Get the latest version
-	latestFile := files[0] // Files are ordered by version DESC, created_at DESC
-	nextVersion := latestFile.Version + 1
-
-	return s.createWithVersion(ctx, sessionID, path, content, nextVersion)
+	return s.createWithVersion(ctx, sessionID, path, content, latest+1)
 }
 
 func (s *service) createWithVersion(ctx context.Context, sessionID, path, content string, version int64) (File, error) {

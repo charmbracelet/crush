@@ -84,13 +84,13 @@ func parsePS(out []byte) []Proc {
 // classify inspects a process table snapshot for pinentry and gpg
 // processes. handover reports that a terminal pinentry dialog is present
 // and needs exclusive control of the terminal. ctrlL reports that the
-// dialog is an ncurses flavor that redraws on Ctrl-L. gpg reports that a
-// gpg process is running.
-func classify(procs []Proc) (handover, ctrlL, gpg bool) {
+// dialog is an ncurses flavor that redraws on Ctrl-L. gpg lists the PIDs
+// of running gpg processes.
+func classify(procs []Proc) (handover, ctrlL bool, gpg []int) {
 	for i := range procs {
 		p := procs[i]
 		if _, ok := gpgNames[p.Name]; ok {
-			gpg = true
+			gpg = append(gpg, p.PID)
 		}
 		if _, ok := terminalPinentryNames[p.Name]; !ok {
 			continue

@@ -182,8 +182,8 @@ box width — border and padding live *inside* it.
 - Use the shared helpers instead of re-deriving widths:
   - keybind hints → `renderDialogHelp(t, &m.help, m, innerWidth)` (sizes,
     pads, truncates — never `helpStyle.Render(m.help.View(m))` raw);
-  - text inputs → `dialogInputTextWidth(t, input, innerWidth)` (accounts
-    for the `"> "` prompt);
+  - text inputs → `sizeDialogInput(t, &input, innerWidth)` (accounts
+    for the `"> "` prompt, re-scrolls, returns the text width);
   - titles → `common.DialogTitle` (truncates instead of wrapping);
   - list + scrollbar → `joinScrollbar`;
   - hiding a crowded info column → `applyInfoColumnVisibility`.

@@ -16,29 +16,18 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// dialogInputTextWidth returns the text-area width for a dialog input so
-// that the input frame, its prompt (e.g. "> "), the text, and a trailing
-// cursor cell all fit within contentWidth. The prompt is rendered outside
-// the text area, so it must be subtracted or long values wrap past the
-// dialog border.
-func dialogInputTextWidth(t *styles.Styles, input textinput.Model, contentWidth int) int {
+// sizeDialogInput fits input to contentWidth, re-scrolls it and returns its text width.
+func sizeDialogInput(t *styles.Styles, input *textinput.Model, contentWidth int) int {
 	const cursorPadding = 1
-	return max(0, contentWidth-
+	w := max(0, contentWidth-
 		t.Dialog.InputPrompt.GetHorizontalFrameSize()-
 		lipgloss.Width(input.Prompt)-
 		cursorPadding)
-}
-
-// sizeDialogInput fits input to contentWidth (see [dialogInputTextWidth])
-// and re-scrolls it to the cursor. The input only recomputes which part
-// of a long value is visible as the cursor moves, so without the re-scroll
-// a resize, or a state change that widens the prompt, leaves a stale
-// window that wraps past the dialog until the next key press.
-func sizeDialogInput(t *styles.Styles, input *textinput.Model, contentWidth int) {
-	if w := dialogInputTextWidth(t, *input, contentWidth); w != input.Width() {
+	if w != input.Width() {
 		input.SetWidth(w)
 		input.SetCursor(input.Position())
 	}
+	return w
 }
 
 // sizer is satisfied by any list type that can report its total content

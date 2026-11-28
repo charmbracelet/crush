@@ -366,8 +366,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			onboardingLogoHeight-onboardingTopGap(area.Dy()))
 	}
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	inputWidth := dialogInputTextWidth(t, m.input, innerWidth)
-	m.input.SetWidth(inputWidth)
+	inputWidth := sizeDialogInput(t, &m.input, innerWidth)
 	// Ellipsize the placeholder instead of letting it cut off mid-word.
 	m.input.Placeholder = ansi.Truncate(m.basePlaceholder(), inputWidth, "…")
 

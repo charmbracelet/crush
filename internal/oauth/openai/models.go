@@ -70,10 +70,7 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 		return nil, fmt.Errorf("read Codex model catalog: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, &oauth.TokenExchangeError{
-			StatusCode: resp.StatusCode,
-			Body:       string(body),
-		}
+		return nil, oauth.NewTokenExchangeError(resp.StatusCode, string(body))
 	}
 
 	var mr modelsResponse

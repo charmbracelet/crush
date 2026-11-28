@@ -101,7 +101,7 @@ func PollForToken(ctx context.Context, deviceCode string, expiresIn int) (*oauth
 		if !errors.As(err, &exchangeErr) {
 			return nil, err
 		}
-		switch oauthErrorCode(exchangeErr.Body) {
+		switch oauthErrorCode(exchangeErr.Body()) {
 		case "authorization_pending":
 			// Keep waiting for the user.
 		case "slow_down":

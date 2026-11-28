@@ -22,7 +22,7 @@ func TestRefreshOAuthToken_RefusedRefreshTokenIsNotRetried(t *testing.T) {
 	var exchanges atomic.Int64
 	store := newRefreshTestStore(t, configPath, func(context.Context, string, string) (*oauth.Token, error) {
 		exchanges.Add(1)
-		return nil, &oauth.TokenExchangeError{StatusCode: 401, Body: `{"error":"refresh token revoked"}`}
+		return nil, oauth.NewTokenExchangeError(401, `{"error":"refresh token revoked"}`)
 	})
 
 	for range 3 {
@@ -43,7 +43,7 @@ func TestRefreshOAuthToken_TransientFailureIsRetried(t *testing.T) {
 	var exchanges atomic.Int64
 	store := newRefreshTestStore(t, configPath, func(context.Context, string, string) (*oauth.Token, error) {
 		exchanges.Add(1)
-		return nil, &oauth.TokenExchangeError{StatusCode: 503, Body: `unavailable`}
+		return nil, oauth.NewTokenExchangeError(503, `unavailable`)
 	})
 
 	for range 2 {
@@ -61,7 +61,7 @@ func TestRefreshOAuthToken_RefusalExpires(t *testing.T) {
 	var exchanges atomic.Int64
 	store := newRefreshTestStore(t, configPath, func(context.Context, string, string) (*oauth.Token, error) {
 		exchanges.Add(1)
-		return nil, &oauth.TokenExchangeError{StatusCode: 401, Body: `{"error":"refresh token revoked"}`}
+		return nil, oauth.NewTokenExchangeError(401, `{"error":"refresh token revoked"}`)
 	})
 	clock := time.Now()
 	store.now = func() time.Time { return clock }

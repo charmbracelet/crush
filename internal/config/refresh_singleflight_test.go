@@ -205,7 +205,7 @@ func rotatingExchange(live string, next int) (exchange func(ctx context.Context,
 		defer mu.Unlock()
 		if refreshToken != live {
 			reused.Add(1)
-			return nil, &oauth.TokenExchangeError{StatusCode: 400, Body: `{"error":"invalid_grant"}`}
+			return nil, oauth.NewTokenExchangeError(400, `{"error":"invalid_grant"}`)
 		}
 		exchanged.Add(1)
 		token := &oauth.Token{
@@ -280,10 +280,44 @@ func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 	require.Equal(t, "at9", pc.APIKey)
 }
 
-// TestRefreshOAuthToken_IgnoresOlderDiskToken guards against walking
-// backwards: a config file holding an older credential than the one we
-// already have must not be adopted or borrowed from.
-func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
+// writeCorruptTokenToDisk leaves a config file whose stored credential
+// cannot be decoded, standing in for any failure to read disk.
+func writeCorruptTokenToDisk(t *testing.T, path string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(path, []byte(`{"providers":{"hyper":{"oauth":"not-a-token"}}}`), 0o600))
+}
+
+// TestRefreshOAuthToken_SpendsDiskRefreshTokenWhateverItsExpiry pins the
+// rule that decides rotation: a different refresh token on disk means a
+// peer rotated and ours is retired, even when the peer's access token
+// expires before ours did. Spending ours would revoke the family.
+func TestRefreshOAuthToken_SpendsDiskRefreshTokenWhateverItsExpiry(t *testing.T) {
+	isolateHyperCredentials(t)
+
+	configPath := filepath.Join(t.TempDir(), "crush.json")
+	exchange, exchanges, reuse := rotatingExchange("rt5", 6)
+	store := newRefreshTestStore(t, configPath, exchange)
+
+	writeTokenToDisk(t, configPath, &oauth.Token{
+		AccessToken:  "at5",
+		RefreshToken: "rt5",
+		ExpiresIn:    3600,
+		ExpiresAt:    time.Now().Add(-24 * time.Hour).Unix(),
+	})
+
+	require.NoError(t, store.RefreshOAuthToken(context.Background(), ScopeGlobal, "hyper"))
+	require.Equal(t, int64(1), exchanges.Load())
+	require.Equal(t, int64(0), reuse.Load(), "must not present its own retired refresh token")
+
+	pc, ok := store.config.Providers.Get("hyper")
+	require.True(t, ok)
+	require.Equal(t, "rt6", pc.OAuthToken.RefreshToken)
+}
+
+// TestRefreshOAuthToken_IgnoresOlderAccessTokenForSameRefreshToken guards
+// against walking backwards when the refresh token did not change: an older
+// access token on disk is not a newer credential.
+func TestRefreshOAuthToken_IgnoresOlderAccessTokenForSameRefreshToken(t *testing.T) {
 	isolateHyperCredentials(t)
 
 	configPath := filepath.Join(t.TempDir(), "crush.json")
@@ -292,7 +326,7 @@ func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
 
 	writeTokenToDisk(t, configPath, &oauth.Token{
 		AccessToken:  "ancient",
-		RefreshToken: "ancient-rt",
+		RefreshToken: "rt0",
 		ExpiresIn:    3600,
 		ExpiresAt:    time.Now().Add(-24 * time.Hour).Unix(),
 	})
@@ -304,4 +338,22 @@ func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
 	pc, ok := store.config.Providers.Get("hyper")
 	require.True(t, ok)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
+}
+
+// TestRefreshOAuthToken_DoesNotExchangeWhenDiskIsUnreadable keeps a failed
+// read from passing for "no peer rotated". Without knowing what disk holds,
+// spending our refresh token risks presenting one a peer already retired.
+func TestRefreshOAuthToken_DoesNotExchangeWhenDiskIsUnreadable(t *testing.T) {
+	isolateHyperCredentials(t)
+
+	configPath := filepath.Join(t.TempDir(), "crush.json")
+	var exchanges atomic.Int64
+	store := newRefreshTestStore(t, configPath, func(context.Context, string, string) (*oauth.Token, error) {
+		exchanges.Add(1)
+		return nil, fmt.Errorf("unexpected exchange")
+	})
+	writeCorruptTokenToDisk(t, configPath)
+
+	require.Error(t, store.RefreshOAuthToken(context.Background(), ScopeGlobal, "hyper"))
+	require.Zero(t, exchanges.Load())
 }

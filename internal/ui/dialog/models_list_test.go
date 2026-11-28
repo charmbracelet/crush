@@ -84,6 +84,45 @@ func describeModelsItems(t *testing.T, items []list.Item) []string {
 	return out
 }
 
+// TestPickerRowsKeepHeightAcrossMatchAndFocus verifies picker rows, which
+// report [list.HeightStable], keep their line count when their focus or
+// match changes, so the list may reuse their cached height.
+func TestPickerRowsKeepHeightAcrossMatchAndFocus(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	prov := catwalk.Provider{ID: "openai", Name: "OpenAI"}
+	rows := map[string]interface {
+		list.Item
+		list.HeightStable
+		SetFocused(bool)
+		SetMatch(fuzzy.Match)
+	}{
+		"model":         NewModelItem(&sty, prov, catwalk.Model{ID: "gpt", Name: "GPT 5 with a rather long model name"}, ModelTypeLarge, true),
+		"command":       NewCommandItem(&sty, "c", "New Session", "ctrl+n", nil),
+		"command+desc":  NewCommandItem(&sty, "d", "Init", "", nil).WithDescription("Create or update the AGENTS.md file"),
+		"command+empty": NewCommandItem(&sty, "e", "Empty", "", nil).WithDescription(" "),
+	}
+	for name, row := range rows {
+		require.True(t, row.HeightStable(), name)
+		for _, w := range []int{0, 5, 20, 60} {
+			base := renderedLines(row.Render(w))
+			row.SetFocused(true)
+			require.Equalf(t, base, renderedLines(row.Render(w)), "%s focused at width %d", name, w)
+			row.SetMatch(fuzzy.Match{MatchedIndexes: []int{0, 1, 2}, Score: 3})
+			require.Equalf(t, base, renderedLines(row.Render(w)), "%s matched at width %d", name, w)
+			row.SetFocused(false)
+			row.SetMatch(fuzzy.Match{})
+			require.Equalf(t, base, renderedLines(row.Render(w)), "%s reset at width %d", name, w)
+		}
+	}
+}
+
+// renderedLines counts the lines the list would store for a render.
+func renderedLines(s string) int {
+	return strings.Count(strings.TrimRight(s, "\n"), "\n") + 1
+}
+
 // TestModelsListFilterMatchesPerGroup verifies filtering each group on its
 // own gives the same items, order and highlights as matching every model
 // once per group, and keeps the same header and spacer items across

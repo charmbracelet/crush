@@ -937,6 +937,67 @@ func TestList_Restyle_KeepsHeights(t *testing.T) {
 	require.Equal(t, 1, items[10].renderHits, "off-screen items keep their cached render")
 }
 
+// stableItem is a trackedItem that reports a stable height.
+type stableItem struct {
+	*trackedItem
+	lines int
+}
+
+func (s *stableItem) HeightStable() bool { return true }
+
+func (s *stableItem) Render(width int) string {
+	out := s.trackedItem.Render(width)
+	return out + strings.Repeat("\nx", max(0, s.lines-1))
+}
+
+// TestList_HeightStable_SkipsRenderForGeometry verifies a version bump on
+// an item with a stable height does not make TotalHeight render it, only
+// drawing does, and that a height which changed anyway is corrected once
+// the item is drawn.
+func TestList_HeightStable_SkipsRenderForGeometry(t *testing.T) {
+	t.Parallel()
+
+	items := make([]*stableItem, 0, 50)
+	listItems := make([]Item, 0, 50)
+	tracked := make([]*trackedItem, 0, 50)
+	for idx := range 50 {
+		item := &stableItem{trackedItem: newTrackedItem(strconv.Itoa(idx), "item "+strconv.Itoa(idx)), lines: 1}
+		items = append(items, item)
+		listItems = append(listItems, item)
+		tracked = append(tracked, item.trackedItem)
+	}
+	l := NewList(listItems...)
+	l.SetSize(40, 5)
+	require.Equal(t, 50, l.TotalHeight())
+	_ = l.Render()
+	before := totalRenderHits(tracked)
+
+	// Every item mutates, as filtering does when it sets new matches.
+	for _, item := range items {
+		item.Bump()
+	}
+	l.SetItems(listItems...)
+	require.Equal(t, 50, l.TotalHeight())
+	require.Equal(t, before, totalRenderHits(tracked), "geometry must not render")
+
+	_ = l.Render()
+	require.Equal(t, before+5, totalRenderHits(tracked), "only visible items re-render")
+
+	// A visible item whose height did change is corrected when drawn.
+	items[0].lines = 3
+	items[0].Bump()
+	l.SetItems(listItems...)
+	require.Equal(t, 50, l.TotalHeight())
+	_ = l.Render()
+	require.Equal(t, 52, l.TotalHeight())
+
+	// Width changes still re-render, since heights may differ there.
+	l.SetSize(30, 5)
+	before = totalRenderHits(tracked)
+	require.Equal(t, 52, l.TotalHeight())
+	require.Equal(t, before+50, totalRenderHits(tracked))
+}
+
 // linesItem renders n numbered lines under a name.
 type linesItem struct {
 	*Versioned

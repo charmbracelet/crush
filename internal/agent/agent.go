@@ -1530,6 +1530,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		a.publishRunComplete(ctx, call, complete)
 	}
+	// The handoff nests the next turn inside this frame, and Go keeps a
+	// named result live while a function with defers is running. Drop this
+	// turn's step results, final message and attachments so a chain of
+	// queued turns or compaction continuations does not pin every earlier
+	// turn until the whole chain ends. Nothing reads them past this point:
+	// the deferred RunComplete is skipped, and the return value is
+	// replaced by the nested Run's.
+	result = nil
+	currentAssistant = nil
+	call.Attachments = nil
 	return a.Run(ctx, firstQueuedMessage)
 }
 

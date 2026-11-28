@@ -470,3 +470,34 @@ func TestUpdate_DirtyFromNonCacheableViewResetsNextScrollOnlyView(t *testing.T) 
 	require.Equal(t, 0, u.frames.hits)
 	require.Equal(t, 1, u.frames.Len())
 }
+
+// View reuses its canvas between frames. A frame drawn over the leftovers of
+// a different frame must match a frame drawn on a fresh canvas.
+func TestView_ReusedCanvasMatchesFreshCanvas(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.frames = nil
+
+	u.chat.ScrollToTop()
+	top := u.View()
+	buf := u.canvas.RenderBuffer
+	require.NotNil(t, buf)
+
+	u.chat.ScrollToBottom()
+	bottom := u.View()
+	require.Same(t, buf, u.canvas.RenderBuffer, "canvas must be reused")
+	require.NotEqual(t, top.Content, bottom.Content)
+
+	u.canvas = uv.ScreenBuffer{}
+	fresh := u.View()
+	require.Equal(t, fresh.Content, bottom.Content)
+
+	// A resize reallocates the canvas at the new size.
+	buf = u.canvas.RenderBuffer
+	u.width, u.height = u.width-10, u.height-5
+	u.updateLayoutAndSize()
+	u.View()
+	require.NotSame(t, buf, u.canvas.RenderBuffer)
+	require.Equal(t, u.width, u.canvas.Width())
+	require.Equal(t, u.height, u.canvas.Height())
+}

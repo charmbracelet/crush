@@ -281,6 +281,10 @@ type UI struct {
 	frameDirty       bool
 	frameSkipPut     bool
 	frameGCArmed     bool
+	// canvas is the screen buffer View draws into. It is reused across
+	// frames and only reallocated when the terminal size changes; Draw
+	// clears it before drawing anything.
+	canvas uv.ScreenBuffer
 	// planReadySessionID holds the session whose plan run emitted the
 	// plan-ready marker but has not been confirmed for execution yet. It
 	// lets the user reopen the handoff prompt after dismissing it.
@@ -3858,7 +3862,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.updateSidebarScrollState()
 	}
 
-	// Clear the screen first
+	// Clear the screen first. View reuses its canvas between frames, so
+	// nothing may be drawn before this clear.
 	screen.Clear(scr)
 
 	switch m.state {
@@ -4042,7 +4047,13 @@ func (m *UI) View() tea.View {
 		}
 	}
 
-	canvas := uv.NewScreenBuffer(m.width, m.height)
+	// Reuse the canvas between frames: a full-screen buffer is the largest
+	// allocation of a frame. This relies on Draw clearing the screen
+	// before it draws anything.
+	if m.canvas.RenderBuffer == nil || m.canvas.Width() != m.width || m.canvas.Height() != m.height {
+		m.canvas = uv.NewScreenBuffer(m.width, m.height)
+	}
+	canvas := m.canvas
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
 	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines

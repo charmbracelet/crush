@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"slices"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -219,7 +220,9 @@ func (d *Overlay) removeDialog(idx int) {
 		d.lastClosedID = d.dialogs[idx].ID()
 		d.lastClosedAt = time.Now()
 	}
-	d.dialogs = append(d.dialogs[:idx], d.dialogs[idx+1:]...)
+	// slices.Delete zeroes the vacated slot, so the closed dialog is not
+	// kept reachable through the backing array.
+	d.dialogs = slices.Delete(d.dialogs, idx, idx+1)
 	// Clear grace state when the front dialog changes.
 	if idx == len(d.dialogs) {
 		d.graceOpenedAt = time.Time{}

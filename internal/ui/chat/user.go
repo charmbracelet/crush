@@ -207,11 +207,7 @@ func (m *UserMessageItem) Render(width int) string {
 	} else {
 		prefix = m.sty.Messages.UserBlurred.Render()
 	}
-	lines := strings.Split(m.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(m.RawRender(width), prefix)
 	if useCache {
 		m.setCachedPrefixedRender(out, width, key)
 	}

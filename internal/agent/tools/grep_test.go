@@ -87,14 +87,14 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			matches, _, err := searchWithRipgrepBinary(t.Context(), testRgPath(), pattern, path, include, 100)
 			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if name == "rg" && getRg() == "" {
+			if name == "rg" && testRgPath() == "" {
 				t.Skip("rg is not in $PATH")
 			}
 
@@ -148,14 +148,14 @@ func TestSearchImplementations(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			matches, _, err := searchWithRipgrepBinary(t.Context(), testRgPath(), pattern, path, include, 100)
 			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if name == "rg" && getRg() == "" {
+			if name == "rg" && testRgPath() == "" {
 				t.Skip("rg is not in $PATH")
 			}
 
@@ -405,14 +405,14 @@ func TestMultipleMatchesPerFile(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			matches, _, err := searchWithRipgrepBinary(t.Context(), testRgPath(), pattern, path, include, 100)
 			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if name == "rg" && getRg() == "" {
+			if name == "rg" && testRgPath() == "" {
 				t.Skip("rg is not in $PATH")
 			}
 
@@ -438,14 +438,14 @@ func TestColumnMatch(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			matches, _, err := searchWithRipgrep(t.Context(), pattern, path, include, 100)
+			matches, _, err := searchWithRipgrepBinary(t.Context(), testRgPath(), pattern, path, include, 100)
 			return matches, err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if name == "rg" && getRg() == "" {
+			if name == "rg" && testRgPath() == "" {
 				t.Skip("rg is not in $PATH")
 			}
 

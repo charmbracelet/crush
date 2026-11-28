@@ -216,10 +216,16 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 // ordered by file modification time (newest first), and whether more
 // matches were found than were returned.
 func searchWithRipgrep(ctx context.Context, pattern, path, include string, limit int) ([]grepMatch, bool, error) {
-	cmd := getRgSearchCmd(ctx, pattern, path, include)
-	if cmd == nil {
+	return searchWithRipgrepBinary(ctx, getRg(), pattern, path, include, limit)
+}
+
+// searchWithRipgrepBinary is searchWithRipgrep with the rg binary given
+// explicitly, so tests can run a real ripgrep.
+func searchWithRipgrepBinary(ctx context.Context, rg, pattern, path, include string, limit int) ([]grepMatch, bool, error) {
+	if rg == "" {
 		return nil, false, fmt.Errorf("ripgrep not found in $PATH")
 	}
+	cmd := rgSearchCmd(ctx, rg, pattern, path, include)
 
 	// Only add ignore files if they exist
 	for _, ignoreFile := range []string{".gitignore", ".crushignore"} {

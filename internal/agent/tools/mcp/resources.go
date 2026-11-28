@@ -1,10 +1,15 @@
 package mcp
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"log/slog"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -55,6 +60,41 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 		return nil, err
 	}
 	return result.Contents, nil
+}
+
+// ResourceText joins the contents of a resource read into the text placed in
+// the conversation. Binary blobs are replaced by a short placeholder, and the
+// joined text is bounded like tool output, with oversized text spilled into
+// spillDir.
+func ResourceText(contents []*ResourceContents, spillDir string) string {
+	var textParts []string
+	for _, content := range contents {
+		if content == nil {
+			continue
+		}
+		if content.Text != "" {
+			textParts = append(textParts, content.Text)
+			continue
+		}
+		if len(content.Blob) > 0 {
+			textParts = append(textParts, blobText(content))
+			continue
+		}
+		slog.Debug("MCP resource content missing text/blob", "uri", content.URI)
+	}
+	return capResult(strings.Join(textParts, "\n"), spillDir)
+}
+
+// blobText returns a blob's bytes as text when they are text, and a short
+// placeholder otherwise, so binary data never reaches the conversation.
+func blobText(content *ResourceContents) string {
+	if utf8.Valid(content.Blob) && !bytes.Contains(content.Blob, []byte{0}) {
+		return string(content.Blob)
+	}
+	return fmt.Sprintf(
+		"[binary resource %s, %s, %d bytes omitted]",
+		content.URI, cmp.Or(content.MIMEType, "unknown type"), len(content.Blob),
+	)
 }
 
 // RefreshResources gets the updated list of resources from the MCP and updates the

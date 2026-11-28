@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -127,6 +128,13 @@ type (
 	}
 	ActionSSHCancel struct {
 		RequestID string
+	}
+	// Messages for the terminals dialog.
+	ActionOpenTerminal struct {
+		Session *shell.InteractiveSession
+	}
+	ActionKillTerminal struct {
+		Session *shell.InteractiveSession
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {

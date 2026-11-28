@@ -270,6 +270,22 @@ func TestTerminalToolStartBusy(t *testing.T) {
 	require.Contains(t, second.Content, "already running")
 }
 
+func TestTerminalToolStartBusyInAnotherChat(t *testing.T) {
+	needsPOSIXShell(t)
+
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	_, err := shell.GetInteractiveSessionManager().Start(shell.InteractiveSessionOptions{Command: "cat", WorkingDir: t.TempDir(), Owner: "other-chat"})
+	require.NoError(t, err)
+
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30", Wait: agentDriven()})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "another chat")
+	require.Contains(t, resp.Content, "/terminals")
+	require.NotContains(t, resp.Content, "kill")
+}
+
 func TestTerminalToolStartBlocked(t *testing.T) {
 	resetTerminalManager(t)
 

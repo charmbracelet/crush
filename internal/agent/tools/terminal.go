@@ -640,6 +640,9 @@ func (h terminalHost) start(ctx context.Context, params TerminalParams) (termina
 	})
 	if err != nil {
 		if errors.Is(err, shell.ErrInteractiveActive) {
+			if active, ok := manager.Active(); ok && active.Owner() != "" && active.Owner() != h.chat {
+				return terminalError("a terminal from another chat is already running, and only one can run at a time. You cannot see or end it; ask the user to close it from /terminals, or use the bash tool instead"), nil
+			}
 			return terminalError(fmt.Sprintf(
 				"%v. If you hold its keyboard, drive it with read/write or end it with kill first; if the user holds it, wait for them (read with wait_seconds) or ask for the keyboard with take",
 				err,

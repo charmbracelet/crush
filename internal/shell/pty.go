@@ -74,6 +74,9 @@ type InteractiveSessionOptions struct {
 	// AgentDriven gives the keyboard to the agent of Owner from the start.
 	// Otherwise the user holds it.
 	AgentDriven bool
+	// Private hides a terminal the user started from the agent: it can
+	// neither read nor take the session.
+	Private bool
 }
 
 // InteractiveSession runs a command attached to a real PTY while mirroring
@@ -101,6 +104,8 @@ type InteractiveSession struct {
 	owner          string
 	agentDriven    bool
 	controlChanged chan struct{}
+
+	private bool
 
 	// id is assigned by the manager; empty for sessions that never
 	// registered.
@@ -436,6 +441,7 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 		command:        opts.Command,
 		owner:          opts.Owner,
 		agentDriven:    opts.AgentDriven,
+		private:        opts.Private,
 		controlChanged: make(chan struct{}),
 		dirty:          make(chan struct{}, 1),
 		done:           make(chan struct{}),
@@ -1014,6 +1020,9 @@ func (s *InteractiveSession) Owner() string {
 	defer s.controlMu.Unlock()
 	return s.owner
 }
+
+// Private reports whether the session is hidden from the agent.
+func (s *InteractiveSession) Private() bool { return s.private }
 
 // AgentDriven reports whether the agent holds the keyboard. Otherwise the
 // user does, and the agent may not type into the session.

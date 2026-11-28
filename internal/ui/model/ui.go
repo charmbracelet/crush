@@ -178,6 +178,10 @@ type (
 	}
 )
 
+// errTerminalRunning reports that the single interactive terminal slot is
+// taken, and where the user can find the terminal that holds it.
+var errTerminalRunning = errors.New("an interactive terminal is already running; switch to it or close it from /terminals")
+
 // activeTerminalSession tracks the embedded interactive terminal currently
 // on screen. Only one exists at a time.
 type activeTerminalSession struct {
@@ -1393,7 +1397,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.attachTerminalDialog(msg.Session, msg.UserCommand, false, false, chatSessionID))
 	case terminalSpawnErrorMsg:
-		cmds = append(cmds, util.ReportError(fmt.Errorf("interactive terminal: %w", msg.Err)))
+		err := fmt.Errorf("interactive terminal: %w", msg.Err)
+		if errors.Is(msg.Err, shell.ErrInteractiveActive) {
+			// The running terminal may be hidden with another chat.
+			err = errTerminalRunning
+		}
+		cmds = append(cmds, util.ReportError(err))
 	case dialog.TerminalOutputMsg:
 		if m.activeTerminal != nil {
 			cmds = append(cmds, m.watchTerminalSession(m.activeTerminal.session))
@@ -2577,6 +2586,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 	case dialog.ActionTerminalComplete:
 		cmds = append(cmds, m.closeTerminalDialog(msg.Result))
+	case dialog.ActionOpenTerminal:
+		m.dialog.CloseDialog(dialog.TerminalsID)
+		cmds = append(cmds, m.showTerminal(msg.Session))
+	case dialog.ActionKillTerminal:
+		cmds = append(cmds, m.killTerminal(msg.Session))
 
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
@@ -6245,6 +6259,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		m.openThemeEditorDialog("")
 	case dialog.ChannelsID:
 		m.openChannelsDialog()
+	case dialog.TerminalsID:
+		m.openTerminalsDialog()
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -6463,7 +6479,7 @@ func (m *UI) handleQuestionNotification(_ question.Notification) {
 // with the bang prefix. An empty command opens a bare interactive shell.
 func (m *UI) openInteractiveShell(command string) tea.Cmd {
 	if m.activeTerminal != nil {
-		return util.ReportError(errors.New("an interactive terminal session is already running"))
+		return util.ReportError(errTerminalRunning)
 	}
 
 	workingDir := m.com.Workspace.WorkingDir()
@@ -6738,6 +6754,91 @@ func (m *UI) restoreDetachedTerminal(chatSessionID string) tea.Cmd {
 		m.setTerminalFullscreen(true)
 	}
 	return cmd
+}
+
+// openTerminalsDialog lists the running interactive terminals of every
+// chat, shown or hidden, so the user can switch to one or end it.
+func (m *UI) openTerminalsDialog() {
+	if m.dialog.ContainsDialog(dialog.TerminalsID) {
+		m.dialog.BringToFront(dialog.TerminalsID)
+		return
+	}
+
+	manager := shell.GetInteractiveSessionManager()
+	ids := manager.List()
+	// IDs come from a monotonic counter, so this is age order.
+	slices.Sort(ids)
+	var entries []dialog.TerminalEntry
+	for _, id := range ids {
+		session, ok := manager.Get(id)
+		if !ok || session.Exited() {
+			continue
+		}
+		entry := dialog.TerminalEntry{Session: session}
+		chat := session.Owner()
+		switch {
+		case m.activeTerminal != nil && m.activeTerminal.session == session:
+			entry.Shown = true
+			chat = m.activeTerminal.chatSessionID
+		case m.detachedTerminal != nil && m.detachedTerminal.session == session:
+			chat = m.detachedTerminal.chatSessionID
+		}
+		switch {
+		case chat == "":
+		case m.session != nil && m.session.ID == chat:
+			entry.Chat = "this chat"
+		default:
+			entry.Chat = "another chat"
+		}
+		entries = append(entries, entry)
+	}
+	m.dialog.OpenDialog(dialog.NewTerminals(m.com, entries))
+}
+
+// showTerminal brings a running terminal picked in the terminals dialog on
+// screen: it focuses the shown one, opens the chat a hidden one belongs to
+// (which restores its panel), and docks one the UI never showed.
+func (m *UI) showTerminal(session *shell.InteractiveSession) tea.Cmd {
+	if session == nil {
+		return nil
+	}
+	if session.Exited() {
+		return util.ReportInfo("The terminal has already exited")
+	}
+
+	switch {
+	case m.activeTerminal != nil && m.activeTerminal.session == session:
+		m.focusTerminal()
+		return nil
+	case m.detachedTerminal != nil && m.detachedTerminal.session == session:
+		chat := m.detachedTerminal.chatSessionID
+		if chat != "" && (m.session == nil || m.session.ID != chat) {
+			return m.loadSession(chat)
+		}
+		return m.restoreDetachedTerminal(chat)
+	}
+
+	detach := m.detachTerminal()
+	return tea.Batch(detach, m.attachTerminalDialog(session, session.Command(), session.Owner() != "", session.AgentDriven(), session.Owner()))
+}
+
+// killTerminal ends a terminal picked in the terminals dialog. A shown one
+// closes through its exit, like a quit from the panel; a hidden one is
+// dropped right away, like a hidden terminal found dead on return, so it
+// stops holding the terminal slot.
+func (m *UI) killTerminal(session *shell.InteractiveSession) tea.Cmd {
+	if session == nil {
+		return nil
+	}
+	if m.detachedTerminal != nil && m.detachedTerminal.session == session {
+		m.detachedTerminal = nil
+		shell.GetInteractiveSessionManager().Remove(session.ID())
+	}
+	return func() tea.Msg {
+		_ = session.Kill()
+		_ = session.Close()
+		return nil
+	}
 }
 
 // updateTerminalControl applies a handover the agent made to a terminal

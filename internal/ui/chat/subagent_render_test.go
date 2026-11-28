@@ -170,3 +170,32 @@ func TestDispatchCollapsesOlderToolCalls(t *testing.T) {
 	require.NotContains(t, out, "earlier tool calls")
 	require.Contains(t, out, "f00.go")
 }
+
+// A report's render is cached, but a focus flip still changes the gutter
+// and expanding it still shows the full report.
+func TestSubagentReportRenderCache(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	var b strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&b, "line %d of the report\n\n", i)
+	}
+	item := NewSubAgentReportItem(&sty, "audit", "hyper/glm-5", b.String(), false).(*SubAgentReportItem)
+
+	blurred := item.Render(100)
+	require.Equal(t, blurred, item.Render(100))
+	raw := item.RawRender(98)
+	require.Equal(t, raw, item.RawRender(98))
+
+	item.SetFocused(true)
+	focused := item.Render(100)
+	require.NotEqual(t, blurred, focused)
+	require.True(t, strings.HasPrefix(focused, sty.Messages.ToolCallFocused.Render()))
+	item.SetFocused(false)
+	require.Equal(t, blurred, item.Render(100))
+
+	item.ToggleExpanded()
+	expanded := item.Render(100)
+	require.Greater(t, strings.Count(expanded, "\n"), strings.Count(blurred, "\n"))
+	require.Contains(t, ansi.Strip(expanded), "line 39 of the report")
+}

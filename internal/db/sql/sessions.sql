@@ -81,3 +81,17 @@ WHERE id = ?;
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE id = ?;
+
+-- name: ListDescendantSessionIDs :many
+-- Returns the IDs of every session below the given one (sub-agent and
+-- title sessions, and their own children), excluding the session itself.
+WITH RECURSIVE descendants(id) AS (
+    SELECT s.id
+    FROM sessions s
+    WHERE s.parent_session_id = ?
+    UNION
+    SELECT c.id
+    FROM sessions c
+    INNER JOIN descendants d ON c.parent_session_id = d.id
+)
+SELECT id FROM descendants;

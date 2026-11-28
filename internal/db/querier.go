@@ -6,6 +6,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
@@ -48,6 +49,9 @@ type Querier interface {
 	// message too, but the user never typed it, so it has no place in the
 	// prompt history.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	// Returns the IDs of every session below the given one (sub-agent and
+	// title sessions, and their own children), excluding the session itself.
+	ListDescendantSessionIDs(ctx context.Context, parentSessionID sql.NullString) ([]string, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMCPDisabledServers(ctx context.Context) ([]string, error)

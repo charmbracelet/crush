@@ -501,10 +501,10 @@ type UI struct {
 	pillsView         string
 
 	// todoIsSpinning animates the in-progress todo icon in the pills. Its
-	// frame is derived from the shared animation clock; todoSpinnerFrame
+	// frame is derived from the shared animation clock; lastTodoSpinnerFrame
 	// is the frame the pills were last rendered with.
-	todoIsSpinning   bool
-	todoSpinnerFrame int
+	todoIsSpinning       bool
+	lastTodoSpinnerFrame int
 
 	// pending is the turn this client sent; the placeholder items in the
 	// chat are derived from it by syncPendingItem.
@@ -1832,7 +1832,7 @@ func (m *UI) handleAnimTick(msg animTickMsg) {
 		m.markScrollOnly()
 		return
 	}
-	todoMoved := m.todoSpinnerVisible() && todoSpinnerFrame(m.animClock.clock()) != m.todoSpinnerFrame
+	todoMoved := m.todoSpinnerVisible() && spinnerFrameIndex(m.animClock.clock()) != m.lastTodoSpinnerFrame
 	if !m.chat.advanceVisible() && m.subAgentsRunning == 0 && !todoMoved {
 		// Nothing moved on screen, so the frame can be reused. It cannot be
 		// when the header or the todo pill is spinning: those spinners are

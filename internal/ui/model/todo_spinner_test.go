@@ -45,6 +45,18 @@ func TestTodoSpinner_ArmsTheSharedClock(t *testing.T) {
 	require.True(t, u.animClock.running, "a spinning todo pill must arm the clock")
 }
 
+func TestTodoSpinner_KeepsSpinningBehindADialog(t *testing.T) {
+	t.Parallel()
+	u, _ := newTodoSpinnerTestUI(t)
+	u.dialog.OpenDialog(dialog.NewQuit(u.com, 0))
+	require.True(t, u.dialog.HasDialogs())
+	require.True(t, u.todoSpinnerVisible(), "the pills stay visible behind a dialog")
+
+	_, cmd := u.Update(neutralMsg{})
+	require.NotNil(t, cmd)
+	require.True(t, u.animClock.running, "a todo pill behind a dialog must keep the clock running")
+}
+
 func TestTodoSpinner_HiddenPillsDoNotArmTheClock(t *testing.T) {
 	t.Parallel()
 	u, _ := newTodoSpinnerTestUI(t)
@@ -76,5 +88,5 @@ func TestTodoSpinner_TickRedrawsOnlyWhenTheGlyphChanges(t *testing.T) {
 	second := u.View()
 	require.Equal(t, 1, u.frames.hits, "a moved todo glyph must not be served from cache")
 	require.NotEqual(t, first.Content, second.Content)
-	require.Equal(t, spinnerFrameIndex(*now), u.todoSpinnerFrame)
+	require.Equal(t, spinnerFrameIndex(*now), u.lastTodoSpinnerFrame)
 }

@@ -31,6 +31,11 @@ type Prompt struct {
 	canWrite   bool
 	toolNames  []string
 
+	// needsGitStatus reports whether the template mentions GitStatus.
+	// Collecting it spawns git twice, and prompts such as the task
+	// subagent's are rebuilt on every turn without ever rendering it.
+	needsGitStatus bool
+
 	// skillOverrides fetches the repository-scoped skill toggle state at
 	// Build time: which skills the repository disabled and which it
 	// re-enabled over the config. Nil means no overrides.
@@ -124,6 +129,9 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 		name:     name,
 		template: t,
 		now:      time.Now,
+		// A plain text match is deliberately conservative: any template
+		// that could reach the field names it, so none goes without.
+		needsGitStatus: strings.Contains(promptTemplate, "GitStatus"),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -287,7 +295,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		CanWrite:      p.canWrite,
 		ToolNames:     p.toolNames,
 	}
-	if isGit {
+	if isGit && p.needsGitStatus {
 		var err error
 		data.GitStatus, err = getGitStatus(ctx, store.WorkingDir())
 		if err != nil {

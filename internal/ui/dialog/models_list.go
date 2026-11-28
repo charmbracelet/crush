@@ -1,8 +1,6 @@
 package dialog
 
 import (
-	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -15,17 +13,20 @@ import (
 type ModelsList struct {
 	*list.List
 	groups []ModelGroup
-	query  string
-	t      *styles.Styles
+	// spacers holds one stable separator per group so filtering keeps
+	// hitting the list's per-item render cache.
+	spacers []list.Item
+	query   string
+	t       *styles.Styles
 }
 
 // NewModelsList creates a new list suitable for model items and groups.
 func NewModelsList(sty *styles.Styles, groups ...ModelGroup) *ModelsList {
 	f := &ModelsList{
-		List:   list.NewList(),
-		groups: groups,
-		t:      sty,
+		List: list.NewList(),
+		t:    sty,
 	}
+	f.setGroups(groups)
 	f.RegisterRenderCallback(list.FocusedRenderCallback(f.List))
 	return f
 }
@@ -51,17 +52,29 @@ func (f *ModelsList) VisibleCount() int {
 
 // SetGroups sets the model groups and updates the list items.
 func (f *ModelsList) SetGroups(groups ...ModelGroup) {
-	f.groups = groups
+	f.setGroups(groups)
 	items := []list.Item{}
-	for _, g := range f.groups {
-		items = append(items, &g)
+	for gi := range f.groups {
+		g := &f.groups[gi]
+		items = append(items, g)
 		for _, item := range g.Items {
 			items = append(items, item)
 		}
 		// Add a space separator after each provider section
-		items = append(items, list.NewSpacerItem(1))
+		items = append(items, f.spacers[gi])
 	}
 	f.SetItems(items...)
+}
+
+// setGroups stores the groups along with one spacer per group. Headers are
+// referenced as &f.groups[i], so both keep the same pointer across filter
+// changes.
+func (f *ModelsList) setGroups(groups []ModelGroup) {
+	f.groups = groups
+	f.spacers = make([]list.Item, len(groups))
+	for i := range f.spacers {
+		f.spacers[i] = list.NewSpacerItem(1)
+	}
 }
 
 // SetFilter sets the filter query and updates the list items.
@@ -188,49 +201,47 @@ func (f *ModelsList) VisibleItems() []list.Item {
 	if query == "" {
 		// No filter, return all items with group headers
 		items := []list.Item{}
-		for _, g := range f.groups {
-			items = append(items, &g)
+		for gi := range f.groups {
+			g := &f.groups[gi]
+			items = append(items, g)
 			for _, item := range g.Items {
 				item.SetMatch(fuzzy.Match{})
 				items = append(items, item)
 			}
 			// Add a space separator after each provider section
-			items = append(items, list.NewSpacerItem(1))
+			items = append(items, f.spacers[gi])
 		}
 		return items
 	}
 
-	filterableItems := make([]list.FilterableItem, 0, f.modelCount())
-	for _, g := range f.groups {
-		for _, item := range g.Items {
-			filterableItems = append(filterableItems, item)
-		}
-	}
-
 	items := []list.Item{}
-	visitedGroups := map[int]bool{}
+	var names []string
 
-	// Reconstruct groups with matched items
-	// Find which group this item belongs to
-	for gi, g := range f.groups {
-		addedCount := 0
+	// Match each group's items against the query, prefixed with the group
+	// title so a provider name matches all of its models.
+	for gi := range f.groups {
+		g := &f.groups[gi]
 		name := strings.ToLower(g.Title) + " "
 
-		names := make([]string, len(filterableItems))
-		for i, item := range filterableItems {
-			ms := item.(*ModelItem)
-			names[i] = fmt.Sprintf("%s%s", name, ms.Filter())
+		names = names[:0]
+		for _, item := range g.Items {
+			names = append(names, name+item.Filter())
 		}
 
 		matches := fuzzy.Find(query, names)
+		if len(matches) == 0 {
+			continue
+		}
 
 		// Sort by original index to preserve order within the group
 		sort.SliceStable(matches, func(i, j int) bool {
 			return matches[i].Index < matches[j].Index
 		})
 
+		// Add section header
+		items = append(items, g)
 		for _, match := range matches {
-			item := filterableItems[match.Index].(*ModelItem)
+			item := g.Items[match.Index]
 			idxs := []int{}
 			for _, idx := range match.MatchedIndexes {
 				// Adjusts removing provider name highlights
@@ -241,22 +252,12 @@ func (f *ModelsList) VisibleItems() []list.Item {
 			}
 
 			match.MatchedIndexes = idxs
-			if slices.Contains(g.Items, item) {
-				if !visitedGroups[gi] {
-					// Add section header
-					items = append(items, &g)
-					visitedGroups[gi] = true
-				}
-				// Add the matched item
-				item.SetMatch(match)
-				items = append(items, item)
-				addedCount++
-			}
+			// Add the matched item
+			item.SetMatch(match)
+			items = append(items, item)
 		}
-		if addedCount > 0 {
-			// Add a space separator after each provider section
-			items = append(items, list.NewSpacerItem(1))
-		}
+		// Add a space separator after each provider section
+		items = append(items, f.spacers[gi])
 	}
 
 	return items

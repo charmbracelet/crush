@@ -507,6 +507,15 @@ type LSPClientInfo struct {
 	ConnectedAt     time.Time       `json:"connected_at"`
 }
 
+// LSPDiagnosticCounts holds the number of diagnostics an LSP client
+// reports, by severity.
+type LSPDiagnosticCounts struct {
+	Error       int `json:"error"`
+	Warning     int `json:"warning"`
+	Information int `json:"information"`
+	Hint        int `json:"hint"`
+}
+
 // MarshalJSON implements the [json.Marshaler] interface.
 func (i LSPClientInfo) MarshalJSON() ([]byte, error) {
 	type Alias LSPClientInfo

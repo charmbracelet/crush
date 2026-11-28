@@ -336,6 +336,26 @@ func (c *Client) GetLSPDiagnostics(ctx context.Context, id string, lspName strin
 	return diagnostics, nil
 }
 
+// GetLSPDiagnosticCounts retrieves the number of diagnostics a specific
+// LSP client reports, by severity. A server answers 404, reported as
+// [ErrNotFound], when it does not know the workspace or the LSP client,
+// or when it predates the endpoint.
+func (c *Client) GetLSPDiagnosticCounts(ctx context.Context, id string, lspName string) (proto.LSPDiagnosticCounts, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/lsps/%s/diagnostic-counts", id, lspName), nil, nil)
+	if err != nil {
+		return proto.LSPDiagnosticCounts{}, fmt.Errorf("failed to get LSP diagnostic counts: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return proto.LSPDiagnosticCounts{}, fmt.Errorf("failed to get LSP diagnostic counts: %w", err)
+	}
+	var counts proto.LSPDiagnosticCounts
+	if err := json.NewDecoder(rsp.Body).Decode(&counts); err != nil {
+		return proto.LSPDiagnosticCounts{}, fmt.Errorf("failed to decode LSP diagnostic counts: %w", err)
+	}
+	return counts, nil
+}
+
 // GetLSPs retrieves the LSP client states for a workspace.
 func (c *Client) GetLSPs(ctx context.Context, id string) (map[string]proto.LSPClientInfo, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/lsps", id), nil, nil)

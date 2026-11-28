@@ -395,6 +395,24 @@ func (c *controllerV1) handleGetWorkspaceLSPDiagnostics(w http.ResponseWriter, r
 	jsonEncode(w, diagnostics)
 }
 
+// handleGetWorkspaceLSPDiagnosticCounts returns the number of diagnostics
+// an LSP client reports, by severity.
+func (c *controllerV1) handleGetWorkspaceLSPDiagnosticCounts(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	lspName := r.PathValue("lsp")
+	counts, err := c.backend.GetLSPDiagnosticCounts(id, lspName)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.LSPDiagnosticCounts{
+		Error:       counts.Error,
+		Warning:     counts.Warning,
+		Information: counts.Information,
+		Hint:        counts.Hint,
+	})
+}
+
 // handleGetWorkspaceSessions lists sessions for a workspace.
 func (c *controllerV1) handleGetWorkspaceSessions(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

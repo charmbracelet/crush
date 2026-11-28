@@ -292,6 +292,15 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handleGetWorkspaceLSPDiagnostics),
 
+		apigen.Get("/v1/workspaces/{id}/lsps/{lsp}/diagnostic-counts").
+			Summary("Get LSP diagnostic counts by severity").
+			Tags("lsp").
+			PathParam("id", "Workspace ID").
+			PathParam("lsp", "LSP client name").
+			Responds(proto.LSPDiagnosticCounts{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceLSPDiagnosticCounts),
+
 		apigen.Post("/v1/workspaces/{id}/lsps/start").
 			Summary("Start LSP server").
 			Tags("lsp").

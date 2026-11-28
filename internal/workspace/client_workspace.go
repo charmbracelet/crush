@@ -654,7 +654,23 @@ func (w *ClientWorkspace) LSPGetStates() map[string]LSPClientInfo {
 	return result
 }
 
+// LSPGetDiagnosticCounts asks the server for the counts it keeps cached,
+// rather than fetching every diagnostic only to count them here.
 func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+	c, err := w.client.GetLSPDiagnosticCounts(context.Background(), w.workspaceID(), name)
+	if err == nil {
+		return lsp.DiagnosticCounts{
+			Error:       c.Error,
+			Warning:     c.Warning,
+			Information: c.Information,
+			Hint:        c.Hint,
+		}
+	}
+	if !errors.Is(err, client.ErrNotFound) {
+		return lsp.DiagnosticCounts{}
+	}
+	// A server predating the counts endpoint answers 404; count its full
+	// diagnostics instead.
 	diags, err := w.client.GetLSPDiagnostics(context.Background(), w.workspaceID(), name)
 	if err != nil {
 		return lsp.DiagnosticCounts{}

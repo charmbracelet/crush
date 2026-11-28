@@ -600,12 +600,13 @@ Paths that start with `{id}/` are under `/v1/workspaces/`. For example,
 
 ### LSP
 
-| Method | Path                          | What it does                       |
-| ------ | ----------------------------- | ---------------------------------- |
-| `GET`  | `{id}/lsps`                   | Lists LSP servers and their state. |
-| `GET`  | `{id}/lsps/{lsp}/diagnostics` | Diagnostics from one LSP server.   |
-| `POST` | `{id}/lsps/start`             | Starts an LSP server.              |
-| `POST` | `{id}/lsps/stop`              | Stops all LSP servers.             |
+| Method | Path                                | What it does                                          |
+| ------ | ----------------------------------- | ----------------------------------------------------- |
+| `GET`  | `{id}/lsps`                         | Lists LSP servers and their state.                    |
+| `GET`  | `{id}/lsps/{lsp}/diagnostics`       | Diagnostics from one LSP server.                      |
+| `GET`  | `{id}/lsps/{lsp}/diagnostic-counts` | How many diagnostics one LSP server has, by severity. |
+| `POST` | `{id}/lsps/start`                   | Starts an LSP server.                                 |
+| `POST` | `{id}/lsps/stop`                    | Stops all LSP servers.                                |
 
 ### MCP
 

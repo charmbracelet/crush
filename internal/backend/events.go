@@ -10,6 +10,7 @@ import (
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -203,6 +204,30 @@ func (b *Backend) GetLSPDiagnostics(workspaceID, lspName string) (any, error) {
 	}
 
 	return nil, ErrLSPClientNotFound
+}
+
+// GetLSPDiagnosticCounts returns the number of diagnostics a specific LSP
+// client in the workspace reports, by severity. It answers from the
+// client's cached counts, so callers that only show totals need not copy
+// and transfer every diagnostic. Names are resolved like
+// GetLSPDiagnostics.
+func (b *Backend) GetLSPDiagnosticCounts(workspaceID, lspName string) (lsp.DiagnosticCounts, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return lsp.DiagnosticCounts{}, err
+	}
+
+	for name, client := range ws.LSPManager.Clients().Seq2() {
+		if name == lspName {
+			return client.GetDiagnosticCounts(), nil
+		}
+	}
+
+	if _, ok := app.GetLSPState(lspName); ok {
+		return lsp.DiagnosticCounts{}, nil
+	}
+
+	return lsp.DiagnosticCounts{}, ErrLSPClientNotFound
 }
 
 // GetWorkspaceConfig returns the workspace-level configuration.

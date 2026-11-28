@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -256,4 +257,25 @@ func TestHandleDiagnosticsTracksTotals(t *testing.T) {
 	require.Zero(t, c.diagnostics.Len())
 
 	require.Equal(t, []int{2, 3, 1, 2, 2, 0}, totals)
+}
+
+func TestEnsureFileOpenReportsAlreadyOpenFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	c := newTestClient()
+	c.cwd = dir
+	c.fileTypes = []string{"go"}
+
+	path := filepath.Join(dir, "main.go")
+	uri := string(protocol.URIFromPath(path))
+	c.openFiles.Set(uri, &OpenFileInfo{Version: 1, URI: protocol.DocumentURI(uri)})
+
+	opened, err := c.EnsureFileOpen(t.Context(), path)
+	require.NoError(t, err)
+	require.False(t, opened, "already open files are not opened again")
+
+	opened, err = c.EnsureFileOpen(t.Context(), filepath.Join(dir, "main.rs"))
+	require.NoError(t, err)
+	require.False(t, opened, "unhandled files are not opened")
 }

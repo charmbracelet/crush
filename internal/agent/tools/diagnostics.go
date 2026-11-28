@@ -38,44 +38,47 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 
 // openInLSPs ensures LSP servers are running and aware of the file, but does
 // not notify changes or wait for fresh diagnostics. Use this for read-only
-// operations like view where the file content hasn't changed.
+// operations like view where the file content hasn't changed. It returns the
+// clients that opened the file in this call; clients that already had it
+// open were sent nothing and will not publish new diagnostics for it.
 func openInLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,
 	filepath string,
-) {
+) []*lsp.Client {
 	if filepath == "" || manager == nil {
-		return
+		return nil
 	}
 
 	manager.Start(ctx, filepath)
 
+	var opened []*lsp.Client
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
-		_ = client.OpenFileOnDemand(ctx, filepath)
+		if ok, err := client.EnsureFileOpen(ctx, filepath); err == nil && ok {
+			opened = append(opened, client)
+		}
 	}
+	return opened
 }
 
-// waitForLSPDiagnostics waits briefly for diagnostics publication after a file
-// has been opened. Intended for read-only situations where viewing up-to-date
-// files matters but latency should remain low (i.e. when using the view tool).
+// waitForLSPDiagnostics waits briefly for diagnostics publication from
+// clients that just opened a file. Intended for read-only situations where
+// viewing up-to-date files matters but latency should remain low (i.e. when
+// using the view tool).
 func waitForLSPDiagnostics(
 	ctx context.Context,
-	manager *lsp.Manager,
-	filepath string,
+	clients []*lsp.Client,
 	timeout time.Duration,
 ) {
-	if filepath == "" || manager == nil || timeout <= 0 {
+	if timeout <= 0 {
 		return
 	}
 
 	var wg sync.WaitGroup
-	for client := range manager.Clients().Seq() {
-		if !client.HandlesFile(filepath) {
-			continue
-		}
+	for _, client := range clients {
 		wg.Go(func() {
 			client.WaitForDiagnostics(ctx, timeout)
 		})

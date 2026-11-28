@@ -160,11 +160,7 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	buttons := strings.Join(buttonViews, " ")
 	buttonsWidth := lipgloss.Width(buttons)
 
-	// Wrap the text inside the frame's padding so a small terminal wraps
-	// the lines, keeping them off the border, instead of pushing the
-	// dialog and its buttons off-screen. Each wrapped line is centered
-	// like the rest of the dialog rather than hanging off the left.
-	// Quitting cuts off any subagent mid-turn.
+	// Quitting cuts off any subagent mid-turn, so say how many are running.
 	var warningText string
 	if q.runningSubAgents > 0 {
 		noun := "subagents are"
@@ -174,60 +170,50 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		warningText = fmt.Sprintf("%d %s still running and will be cut off.", q.runningSubAgents, noun)
 	}
 
-	// Wrapping inside the padding costs lines; when that would make the
-	// dialog taller than the screen, wrap to the border instead (the
-	// frame then drops its horizontal padding below).
-	frame := q.com.Styles.Dialog.Quit.Frame
-	textWidth := max(buttonsWidth, area.Dx()-frame.GetHorizontalFrameSize()-baseStyle.GetHorizontalFrameSize())
-	if quitHeight(textWidth, warningText)+frame.GetVerticalFrameSize() > area.Dy() {
-		textWidth = max(buttonsWidth, area.Dx()-frame.GetHorizontalBorderSize()-baseStyle.GetHorizontalFrameSize())
-	}
-	wrap := func(s string) string {
-		wrapped := balancedWrap(s, textWidth)
-		return lipgloss.NewStyle().Width(lipgloss.Width(wrapped)).Align(lipgloss.Center).Render(wrapped)
-	}
-	question := wrap(quitQuestion)
-
-	var warning string
-	if warningText != "" {
-		warning = warningStyle.Render(wrap(warningText))
-	}
-
-	// buttonLine is the index of the content line reserved for the buttons,
-	// which are drawn as layers on top of the frame. The warning, when
-	// present, pushes that row down by its own height plus a blank line.
-	buttonLine := lipgloss.Height(question) + 1
-	if warning != "" {
-		buttonLine += lipgloss.Height(warning) + 1
-	}
-
-	// renderContent builds the dialog body around the given button row. A
-	// blank row of the same width reserves space for the buttons, which are
-	// painted as layers so their bounds double as mouse hit regions.
-	renderContent := func(buttonRow string) string {
-		lines := []string{question}
-		if warning != "" {
-			lines = append(lines, "", warning)
+	// render builds the dialog body with its text wrapped to textWidth
+	// around the given button row, and returns the index of the content
+	// line holding the buttons. Wrapping keeps the lines off the border on
+	// a small terminal instead of pushing the dialog and its buttons
+	// off-screen, and each wrapped line is centered like the rest of the
+	// dialog rather than hanging off the left. The button row is blank
+	// while measuring: the buttons are painted as layers on top of it so
+	// their bounds double as mouse hit regions.
+	render := func(textWidth int, buttonRow string) (string, int) {
+		wrap := func(s string) string {
+			wrapped := balancedWrap(s, textWidth)
+			return lipgloss.NewStyle().Width(lipgloss.Width(wrapped)).Align(lipgloss.Center).Render(wrapped)
 		}
+		lines := []string{wrap(quitQuestion)}
+		if warningText != "" {
+			lines = append(lines, "", warningStyle.Render(wrap(warningText)))
+		}
+		lines = append(lines, "")
+		buttonLine := blockHeight(strings.Join(lines, "\n"))
 		lines = append(lines,
-			"",
 			buttonRow,
 			"",
 			hintStyle.Render(wrap(quitHintLineOne)),
 			hintStyle.Render(wrap(quitHintLineTwo)),
 		)
-		return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
+		return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Center, lines...)), buttonLine
 	}
 
-	content := renderContent(strings.Repeat(" ", buttonsWidth))
-
+	// Wrap inside the frame's padding first. That costs lines; when it
+	// makes the dialog taller than the screen, wrap to the border instead.
 	frameStyle := q.com.Styles.Dialog.Quit.Frame
-	maxWidth := area.Dx() - frameStyle.GetHorizontalBorderSize()
-	if maxWidth < lipgloss.Width(content)+frameStyle.GetHorizontalPadding() {
+	blankRow := strings.Repeat(" ", buttonsWidth)
+	textWidth := max(buttonsWidth, area.Dx()-frameStyle.GetHorizontalFrameSize()-baseStyle.GetHorizontalFrameSize())
+	content, buttonLine := render(textWidth, blankRow)
+	if lipgloss.Height(content)+frameStyle.GetVerticalFrameSize() > area.Dy() {
+		textWidth = max(buttonsWidth, area.Dx()-frameStyle.GetHorizontalBorderSize()-baseStyle.GetHorizontalFrameSize())
+		content, buttonLine = render(textWidth, blankRow)
+	}
+
+	// Drop whichever padding the measured content leaves no room for.
+	if area.Dx()-frameStyle.GetHorizontalBorderSize() < lipgloss.Width(content)+frameStyle.GetHorizontalPadding() {
 		frameStyle = frameStyle.PaddingLeft(0).PaddingRight(0)
 	}
-	maxHeight := area.Dy() - frameStyle.GetVerticalBorderSize()
-	if maxHeight < lipgloss.Height(content)+frameStyle.GetVerticalPadding() {
+	if area.Dy()-frameStyle.GetVerticalBorderSize() < lipgloss.Height(content)+frameStyle.GetVerticalPadding() {
 		frameStyle = frameStyle.PaddingTop(0).PaddingBottom(0)
 	}
 	view := frameStyle.Render(content)
@@ -259,7 +245,8 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	} else {
 		// The buttons don't fit on screen as layers, so render them inline
 		// as part of the content instead: the user always sees them.
-		DrawCenter(scr, area, frameStyle.Render(renderContent(buttons)))
+		inline, _ := render(textWidth, buttons)
+		DrawCenter(scr, area, frameStyle.Render(inline))
 	}
 	return nil
 }
@@ -297,16 +284,4 @@ func (q *Quit) FullHelp() [][]key.Binding {
 		{q.keyMap.LeftRight, q.keyMap.EnterSpace, q.keyMap.Yes, q.keyMap.No},
 		{q.keyMap.Tab, q.keyMap.Close},
 	}
-}
-
-// quitHeight is the quit dialog's content height with its text wrapped
-// to width: question, optional warning, buttons and the two hint lines,
-// with blank rows between.
-func quitHeight(width int, warning string) int {
-	rows := func(s string) int { return strings.Count(balancedWrap(s, width), "\n") + 1 }
-	h := rows(quitQuestion) + 3 + rows(quitHintLineOne) + rows(quitHintLineTwo)
-	if warning != "" {
-		h += rows(warning) + 1
-	}
-	return h
 }

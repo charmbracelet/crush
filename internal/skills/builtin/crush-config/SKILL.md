@@ -237,10 +237,13 @@ option ui exit-banner compact
 ## Hooks runtime
 
 Hooks are user-defined shell commands that fire on agent events. Crush supports
-13 events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+14 events: `PreModelUse`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
 `PermissionRequest`, `PermissionResult`, `SessionStart`, `SessionEnd`,
 `TurnStart`, `TurnEnd`, `StopFailure`, `Interrupt`, `PreCompact`, and
-`PostCompact`. `--matcher` is only accepted on the first five. This behavior
+`PostCompact`. `--matcher` is supported on the first six. For `PreModelUse`,
+it matches `provider/model`. The command runs before every matching model
+step, including tool round trips and retries, and receives `CRUSH_PROVIDER` and `CRUSH_MODEL` in its environment.
+A failed or timed-out command blocks the request. This behavior
 is the same however the hook is defined (`hook add` or JSON).
 
 ### How hooks work

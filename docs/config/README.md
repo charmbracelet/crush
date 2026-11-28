@@ -403,7 +403,7 @@ Usage:
 Flags:
       --command string           shell command to run (required)
       --name string              name used for later removal
-      --matcher string           regex tested against the tool name
+      --matcher string           regex tested against the tool name or provider/model
       --timeout int              timeout in seconds (default 30)
 ```
 

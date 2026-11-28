@@ -36,6 +36,8 @@ type Payload struct {
 	Decision             string          `json:"decision,omitempty"`
 	Source               string          `json:"source,omitempty"`
 	Reason               string          `json:"reason,omitempty"`
+	Provider             string          `json:"provider,omitempty"`
+	Model                string          `json:"model,omitempty"`
 	Trigger              string          `json:"trigger,omitempty"`
 }
 
@@ -53,6 +55,8 @@ func BuildPayload(ev Event, cwd string) []byte {
 		Source:               ev.Source,
 		Reason:               ev.Reason,
 		Trigger:              ev.Trigger,
+		Provider:             ev.Provider,
+		Model:                ev.Model,
 	}
 	if ev.Tool != nil {
 		p.ToolName = ev.Tool.Name
@@ -85,6 +89,9 @@ func BuildEnv(ev Event, cwd, projectDir string) []string {
 		fmt.Sprintf("CRUSH_PROJECT_DIR=%s", projectDir),
 		fmt.Sprintf("CLAUDE_PROJECT_DIR=%s", projectDir),
 	)
+	if ev.Name == EventPreModelUse {
+		env = append(env, "CRUSH_PROVIDER="+ev.Provider, "CRUSH_MODEL="+ev.Model)
+	}
 	if ev.Tool == nil {
 		return env
 	}

@@ -1577,7 +1577,7 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
 
-	genCtx, cancel := context.WithCancel(ctx)
+	genCtx, cancel := context.WithCancel(context.WithValue(ctx, tools.SessionIDContextKey, sessionID))
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(sessionID, ac)
 	defer a.activeRequests.CompareAndDelete(sessionID, ac)
@@ -1986,7 +1986,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	if userPrompt == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, titleTimeout)
+	ctx, cancel := context.WithTimeout(context.WithValue(ctx, tools.SessionIDContextKey, sessionID), titleTimeout)
 	defer cancel()
 
 	// Ensure the session always gets a title even if every path below

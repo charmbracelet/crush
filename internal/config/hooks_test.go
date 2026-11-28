@@ -80,3 +80,12 @@ func TestValidateHooksRejectsUnknownEventAndLifecycleMatcher(t *testing.T) {
 	cfg = &Config{Hooks: map[string][]HookConfig{hooks.EventPermissionRequest: {{Command: "true", Matcher: "^bash$"}}}}
 	require.NoError(t, cfg.ValidateHooks())
 }
+
+func TestValidatePreModelUseMatcher(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{Hooks: map[string][]HookConfig{
+		"pre_model_use": {{Command: "true", Matcher: "^local/qwen:"}},
+	}}
+	require.NoError(t, cfg.ValidateHooks())
+	require.Len(t, cfg.Hooks["PreModelUse"], 1)
+}

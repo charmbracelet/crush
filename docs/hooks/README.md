@@ -20,7 +20,7 @@ forward.
   output forms, same exit codes
 - Crush ships with a builtin `crush-hook` skill to write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush supports 13 hook events covering the full agent lifecycle: tool use,
+- Crush supports 14 hook events covering the full agent lifecycle: tool use,
   session management, turn control, permissions, compaction, and error handling
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
@@ -112,8 +112,8 @@ What this means in practice:
   doesn't exist (e.g. `#!/bin/bash` on Windows), Crush falls back to a
   `PATH` lookup of the base name (`bash`) before giving up. A debug-level
   log records the fallback. If the interpreter isn't on `PATH` either, the
-  hook fails cleanly as a non-blocking warning and the agent proceeds as
-  "no opinion".
+  hook fails. `PreModelUse` blocks the request in this case. Other events
+  treat the failure as a warning.
 - **Environment**: every hook sees `CRUSH=1`, `AGENT=crush`, and
   `AI_AGENT=crush` on top of the `CRUSH_*` hook-specific variables. These
   three markers are guaranteed and match what the `bash` tool sets, so
@@ -122,7 +122,7 @@ What this means in practice:
 - **Timeout behavior**: when a hook exceeds its timeout, Crush cancels the
   context and waits a short grace period (~1s) for the interpreter to
   yield. If the hook still hasn't returned, Crush abandons it, logs a
-  warning, and treats the result as "no opinion" so the agent can proceed.
+  warning, and blocks a `PreModelUse` request. Other events proceed.
   Long-running work should honor context cancellation or run in a
   subprocess via a shebang.
 
@@ -167,12 +167,13 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Crush supports 13 hook events. Event names are case-insensitive and accept
+Crush supports 14 hook events. Event names are case-insensitive and accept
 snake_case (`PreToolUse`, `pre_tool_use`, `PRETOOLUSE` all work). An unknown
 event name is a config error.
 
 | Event                | Fires When                                     | Control                                  | Matcher   | Claude Code                 |
 | -------------------- | ---------------------------------------------- | ---------------------------------------- | --------- | --------------------------- |
+| `PreModelUse`        | Before a generation or stream request          | block                                    | provider/model | none                    |
 | `PreToolUse`         | Before a tool runs                             | allow/deny, halt, rewrite input, context | tool name | same                        |
 | `PostToolUse`        | After a tool succeeds                          | halt, replace output, context, feedback  | tool name | same                        |
 | `PostToolUseFailure` | After a tool fails                             | halt, context                            | tool name | same                        |
@@ -188,13 +189,15 @@ event name is a config error.
 | `PostCompact`        | After context compaction                       | observe                                  | —         | same                        |
 
 **Matcher** is a regex tested against the tool name (e.g. `^bash$`,
-`^(edit|write)$`, `^mcp_`). Omit it to match every tool. It is only accepted on
-the events that carry a tool name; configuring one elsewhere is a config error.
+`^(edit|write)$`, `^mcp_`) or, for `PreModelUse`, against `provider/model`.
+Omit it to match every target. `PermissionRequest` and `PermissionResult`
+match the tool name just like the other tool events. Events with a dash in the
+table’s Matcher column reject matchers.
 
-**Scope**: tool and turn events only fire for the **top-level agent**.
-Subagents (the task tool, `agentic_fetch`, and friends) fire none of them,
-so a notification hook on `TurnEnd` speaks once per prompt rather than once
-per delegated turn. The outer subagent tool call itself _is_ hooked.
+**Scope**: tool and turn events fire only for the **top-level agent**.
+`PreModelUse` also fires for subagents. A `TurnEnd` notification therefore
+fires once per top-level prompt. Tool hooks still see the top-level tool
+call that starts a subagent.
 
 **Permission events** fire only when a prompt is actually shown. Calls that a
 `PreToolUse` hook allowed, that are on the allow-list, or that run in YOLO
@@ -206,6 +209,35 @@ its `decision` field says which way it went.
 running turn has been cancelled (so you will see `Interrupt` first). It has a
 two second budget shared by every `SessionEnd` hook, so keep it to enqueueing
 or notifying; do the heavy work elsewhere.
+
+### Before a model request
+
+`PreModelUse` runs before **every matching model step**. Each tool-call round
+trip that sends another model request runs it again. Model-step retries, title
+generation, compaction, and subagent requests also run it when they use a
+matching model.
+A ten-step turn can run the same hook ten or more times. Use an anchored regex
+like `^local/qwen:32b$` for one model, or `^local/qwen:` for a family.
+
+The command receives `provider` and `model` in its JSON stdin payload.
+Use `"$CRUSH_PROVIDER"` and `"$CRUSH_MODEL"` to pass those values as literal
+shell arguments alongside any arguments you configure.
+
+```bash
+hook add PreModelUse --matcher '^local/qwen:' --timeout 60 \
+  --command './hooks/model-ready.sh --min-free-mib 8192 "$CRUSH_PROVIDER" "$CRUSH_MODEL"'
+```
+
+Exit zero when the model is ready. Plain-text stdout has no effect on the
+request. A nonzero exit, timeout, or explicit block prevents the request. Write a short failure reason to stderr so Crush can
+show it. If the hook starts a server or establishes a tunnel, start with a
+fast health check and skip setup when the endpoint is already ready. Make
+setup safe to repeat, including for concurrent requests. Increase the default
+30-second timeout for a slow cold start, as in the example above.
+Crush leaves any service started by the hook running when it exits.
+
+Model discovery runs independently of this hook. If the endpoint is unavailable
+until the hook runs, configure the model explicitly so Crush can select it.
 
 ### What each control field does
 
@@ -321,19 +353,18 @@ Hooks are keyed by event name. Only `command` is required:
 
 When a hook fires, Crush:
 
-1. Filters hooks whose `matcher` regex matches the tool name (no matcher = match
-   all).
+1. Filters hooks by `matcher`, using the tool name for tool events and
+   `provider/model` for `PreModelUse`. An omitted matcher accepts every target.
 2. Deduplicates by `command` (identical commands run once).
 3. Runs all matching hooks **in parallel** through Crush's embedded POSIX
    shell (see [Execution model](#execution-model)).
 4. Waits for all to finish (or time out), then aggregates results **in config
    order**: deny wins over allow, allow wins over none; `updated_input` patches
    shallow-merge in order.
-5. Applies the result **before** permission checks. If the aggregated decision
-   is `deny`, the tool call is blocked and you never see a permission prompt
-   for it. If it's `allow`, Crush treats that as affirmative pre-approval and
-   also skips the prompt. Silence (no decision) falls through to the normal
-   permission flow.
+5. For `PreToolUse`, applies the result **before** permission checks. A
+   `deny` blocks the tool, an `allow` pre-approves it, and silence falls
+   through to the normal permission flow. For `PreModelUse`, a denial
+   blocks the model request.
 
 Note that you can omit `matcher` and match in your shell script instead,
 however you'll incur some additional overhead as Crush will still parse and
@@ -355,6 +386,8 @@ The available environment variables are:
 | `AGENT`                      | Always `crush`.                                |
 | `AI_AGENT`                   | Always `crush`.                                |
 | `CRUSH_EVENT`                | The hook event name (e.g. `PreToolUse`).       |
+| `CRUSH_PROVIDER`             | Provider ID (`PreModelUse` only).             |
+| `CRUSH_MODEL`                | Model ID (`PreModelUse` only).                |
 | `CRUSH_TOOL_NAME`            | The tool being called (e.g. `bash`).           |
 | `CRUSH_SESSION_ID`           | Current session ID.                            |
 | `CRUSH_CWD`                  | Working directory.                             |
@@ -425,6 +458,9 @@ if some_bad_condition; then
   exit 2
 fi
 ```
+
+For `PreModelUse`, any nonzero exit blocks the request. Tool hooks use the
+following exit codes.
 
 | Exit Code | Meaning                                                                                                         |
 | --------- | --------------------------------------------------------------------------------------------------------------- |
@@ -745,7 +781,7 @@ Each entry under a `hooks.<EventName>` array:
   // command when omitted.
   "name": "no-rm-rf",
 
-  // string. Optional. Regex tested against the tool name. Omit to match all.
+  // string. Optional. Regex for tool name or provider/model. Omit to match all.
   "matcher": "^bash$",
 
   // string. Required. Shell command to run.
@@ -773,6 +809,18 @@ Present in every hook event:
 
   // string. Working directory when invoked.
   "cwd": "/home/user/project",
+}
+```
+
+### Stdin payload — PreModelUse
+
+`PreModelUse` extends the common payload with the provider and model IDs:
+
+```jsonc
+{
+  // ...common fields...
+  "provider": "local",
+  "model": "qwen:32b",
 }
 ```
 

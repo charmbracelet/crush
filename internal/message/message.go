@@ -409,10 +409,10 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		// caller, the user expects that delta to land too.
 		wasDirty := p.dirty
 		if !wasDirty {
-			// Nothing left to write, so drop the snapshot. Pending
-			// entries outlive the streams that created them; holding
-			// latest here would pin every finished message's parts
-			// for the life of the process.
+			// Nothing left to write, so drop the snapshot. An entry
+			// for an unfinished message can outlive its stream;
+			// holding latest here would pin that message's parts
+			// until the entry is removed.
 			p.latest = Message{}
 
 			// A finished message needs no baseline: any later update

@@ -35,7 +35,7 @@ func TestCoderPromptRespectsDisabledEditTools(t *testing.T) {
 		cfg.Config().Options.DisabledTools = disabled
 		cfg.SetupAgents()
 
-		c := &coordinator{interactive: true}
+		c := &coordinator{cfg: cfg, interactive: true}
 		coderCfg := cfg.Config().Agents[config.AgentCoder]
 		p, err := loadPrompt(cfg, "coder",
 			prompt.WithWorkingDir(env.workingDir),
@@ -85,17 +85,11 @@ func TestCoderPromptRespectsDisabledEditTools(t *testing.T) {
 	require.NotContains(t, noEditTools, "**Available edit tools:**")
 	require.NotContains(t, noEditTools, "- `write` -")
 
-	// Empty WithToolNames explicitly disables all tools rather than falling
-	// back to Config.Options.DisabledTools.
-	cfg.Config().Options.DisabledTools = nil
-	cfg.SetupAgents()
-	p, err := loadPrompt(cfg, "coder",
-		prompt.WithWorkingDir(env.workingDir),
-		prompt.WithToolNames(nil),
-	)
-	require.NoError(t, err)
-	emptyToolsPrompt, err := p.Build(t.Context(), "mock", "mock-model", cfg)
-	require.NoError(t, err)
-	require.NotContains(t, emptyToolsPrompt, "**Available edit tools:**")
-	require.NotContains(t, emptyToolsPrompt, "**Prefer LSP tools when available:**")
+	// With LSP off, the LSP tools are never attached, so the prompt must not
+	// advertise them.
+	cfg.Config().Options.AutoLSP = new(false)
+	noLSP := buildPrompt(t, nil)
+	require.NotContains(t, noLSP, "- `lsp_replace_symbol` -")
+	require.NotContains(t, noLSP, "**Prefer LSP tools when available:**")
+	require.Contains(t, noLSP, "- `edit` - Single find/replace in a file (exact text matching)")
 }

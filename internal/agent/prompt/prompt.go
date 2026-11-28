@@ -23,14 +23,13 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name         string
-	template     *template.Template
-	now          func() time.Time
-	platform     string
-	workingDir   string
-	canWrite     bool
-	toolNames    []string
-	toolNamesSet bool
+	name       string
+	template   *template.Template
+	now        func() time.Time
+	platform   string
+	workingDir string
+	canWrite   bool
+	toolNames  []string
 
 	// skillOverrides fetches the repository-scoped skill toggle state at
 	// Build time: which skills the repository disabled and which it
@@ -53,21 +52,17 @@ type PromptDat struct {
 	CanWrite           bool
 	// ToolNames are the tools the agent is actually given, which is not
 	// always its whole configured set: some tools depend on the run mode.
-	ToolNames    []string
-	toolNamesSet bool
+	ToolNames []string
 }
 
-// HasTool reports whether the named tool is available to the agent. When
-// ToolNames was provided via WithToolNames, membership is checked against
-// that list; otherwise it falls back to checking Config.Options.DisabledTools.
+// HasTool reports whether the agent is given the named tool.
 func (d PromptDat) HasTool(name string) bool {
-	if d.toolNamesSet {
-		return slices.Contains(d.ToolNames, name)
-	}
-	if d.Config.Options != nil {
-		return !slices.Contains(d.Config.Options.DisabledTools, name)
-	}
-	return true
+	return slices.Contains(d.ToolNames, name)
+}
+
+// Tools returns the subset of names the agent is given, in the order asked.
+func (d PromptDat) Tools(names ...string) []string {
+	return slices.DeleteFunc(slices.Clone(names), func(name string) bool { return !d.HasTool(name) })
 }
 
 type ContextFile struct {
@@ -101,7 +96,6 @@ func WithCanWrite(canWrite bool) Option {
 func WithToolNames(names []string) Option {
 	return func(p *Prompt) {
 		p.toolNames = names
-		p.toolNamesSet = true
 	}
 }
 
@@ -132,7 +126,7 @@ func WithSkillOverrides(disabled, enabled func(ctx context.Context) []string) Op
 // NewPrompt parses promptTemplate up front, so a malformed template fails
 // here instead of on every turn that builds it.
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
-	t, err := template.New(name).Parse(promptTemplate)
+	t, err := template.New(name).Funcs(template.FuncMap{"join": strings.Join}).Parse(promptTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s prompt template: %w", name, err)
 	}
@@ -302,7 +296,6 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		AvailSkillXML: availSkillXML,
 		CanWrite:      p.canWrite,
 		ToolNames:     p.toolNames,
-		toolNamesSet:  p.toolNamesSet,
 	}
 	if isGit {
 		var err error

@@ -326,19 +326,22 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + "Generating prompt...")
 	}
 
+	// room is the rows the frame, header, help and two rows of spacing
+	// leave for the description and the fields.
+	room := area.Dy() - s.Dialog.View.GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() -
+		lipgloss.Height(header) - lipgloss.Height(helpView) - 2
+
 	// Add description if available. It wraps in full when there is
 	// room; on short screens it gives way to the first field and ends
 	// in an ellipsis so the cut is visible.
 	var description string
 	if a.description != "" {
 		descStyle := s.Dialog.Arguments.Description
-		maxLines := area.Dy() - s.Dialog.View.GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() -
-			lipgloss.Height(header) - lipgloss.Height(helpView) - 2 - // extra spacing, as below
-			argumentsFieldHeight - descStyle.GetVerticalFrameSize()
+		maxLines := room - argumentsFieldHeight - descStyle.GetVerticalFrameSize()
 		description = descStyle.Render(clampDialogLines(ansi.Wrap(a.description, width, ""), max(1, maxLines)))
 	}
 
-	availableHeight := area.Dy() - s.Dialog.View.GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() - lipgloss.Height(header) - lipgloss.Height(description) - lipgloss.Height(helpView) - 2 // extra spacing
+	availableHeight := room - lipgloss.Height(description)
 	viewportHeight := min(height, maxViewportHeight, availableHeight)
 
 	a.viewport.SetWidth(width) // -1 for scrollbar
@@ -387,13 +390,7 @@ func (a *Arguments) StopLoading() {
 
 // ShortHelp implements help.KeyMap.
 func (a *Arguments) ShortHelp() []key.Binding {
-	// Esc comes before navigation so it survives truncation on
-	// narrow screens.
-	return []key.Binding{
-		a.keyMap.Confirm,
-		a.keyMap.Close,
-		a.keyMap.Next,
-	}
+	return dialogHelp(a.keyMap.Confirm, a.keyMap.Close, a.keyMap.Next)
 }
 
 // FullHelp implements help.KeyMap.

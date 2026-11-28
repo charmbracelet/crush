@@ -148,10 +148,7 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	ed.input.SetWidth(max(0, inputWidth))
 
 	listView := t.Dialog.List.MarginBottom(0).Height(listHeight).Render(ed.renderSlots(listWidth, listHeight))
-	scrollbar := common.Scrollbar(t, listHeight, len(ed.slots), listHeight, ed.scroll)
-	if scrollbar != "" {
-		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
-	}
+	listView = joinScrollbar(t, listView, listHeight, len(ed.slots), listHeight, ed.scroll)
 	rc.AddPart(listView)
 
 	view := rc.Render()

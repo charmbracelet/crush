@@ -115,7 +115,9 @@ type App struct {
 // New initializes a new application instance. skillsMgr carries the
 // per-workspace skill discovery results computed by the caller; the
 // caller is responsible for constructing it (typically via
-// skills.NewManager + skills.DiscoverFromConfig).
+// skills.NewManager + skills.DiscoverFromConfig). The app takes over the
+// caller's pooled database reference: App.Shutdown releases it, and so
+// does New itself when it fails.
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
@@ -264,10 +266,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		return app, nil
 	}
 	if err := app.InitCoderAgent(ctx); err != nil {
-		// A failed app is never shut down, so release its MCP reference.
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = mcp.Close(closeCtx)
-		cancel()
+		// A failed app is never shut down, so undo what it started.
+		app.abortInit()
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 	go app.refreshCatalogs(ctx, app.AgentCoordinator)
@@ -287,6 +287,23 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	go app.LSPManager.TrackConfigured(ctx)
 
 	return app, nil
+}
+
+// abortInit tears down an app that New is about to fail: it stops the
+// events pipeline and the prompt integrations, and drops the database and
+// MCP references the app holds. Nothing else references a failed app, so
+// without this they would stay held for the life of the process. The
+// database reference is the caller's conn, so it must not be used after
+// New fails.
+func (app *App) abortInit() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	app.herdrClient.Close()
+	for _, cleanup := range app.cleanupFuncs {
+		if err := cleanup(ctx); err != nil {
+			slog.Warn("Failed to clean up app after a failed start", "error", err)
+		}
+	}
 }
 
 // refreshCatalogs updates cached catalogs; taking coordinator avoids racing InitCoderAgent.

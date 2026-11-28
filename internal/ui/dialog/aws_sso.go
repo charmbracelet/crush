@@ -130,7 +130,7 @@ func (m *AWSSSO) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 	width, innerWidth := authWidths(t, area, authDialogMaxWidth)
 	help := renderDialogHelp(t, &m.help, m, innerWidth)
-	view := authFrame(t, width, "AWS SSO Authentication", m.body(innerWidth), help, false)
+	view, _ := authFrame(t, width, "AWS SSO Authentication", m.body(innerWidth), help, nil, false)
 	DrawCenter(scr, area, view)
 	return nil
 }

@@ -156,12 +156,9 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		"",
 	}, "\n")
 	help := renderDialogHelp(t, &m.help, m, contentWidth)
-	view := authFrame(t, width, m.dialogTitle(), body, help, m.isOnboarding)
-
-	cur := m.Cursor()
-	if m.isOnboarding {
-		cur = adjustOnboardingInputCursor(t, cur)
-	}
+	// The input is the first thing in the body.
+	cur := offsetByFrame(t.Dialog.InputPrompt, m.input.Cursor())
+	view, cur := authFrame(t, width, m.dialogTitle(), body, help, cur, m.isOnboarding)
 	authDraw(scr, area, view, cur, m.isOnboarding)
 	return cur
 }
@@ -218,11 +215,6 @@ func (m *APIKeyInput) applyInputState() {
 		m.input.SetStyles(ts)
 		m.input.Focus()
 	}
-}
-
-// Cursor returns the cursor position relative to the dialog.
-func (m *APIKeyInput) Cursor() *tea.Cursor {
-	return InputCursor(m.com.Styles, m.input.Cursor())
 }
 
 // FullHelp returns the full help view.

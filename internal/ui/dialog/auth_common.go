@@ -57,8 +57,9 @@ func authWidths(t *styles.Styles, area uv.Rectangle, maxWidth int) (width, inner
 // authFrame lays out a sign-in dialog width cells wide: the title, the
 // body and the help line on the dialog frame. During onboarding there is
 // no frame, so the title is plain text instead of the gradient title bar,
-// and an empty title is left out.
-func authFrame(t *styles.Styles, width int, title, body, help string, onboarding bool) string {
+// and an empty title is left out. cur, relative to the body, comes back
+// relative to the whole view.
+func authFrame(t *styles.Styles, width int, title, body, help string, cur *tea.Cursor, onboarding bool) (string, *tea.Cursor) {
 	rc := NewRenderContext(t, width)
 	rc.IsOnboarding = onboarding
 	if !onboarding {
@@ -66,9 +67,32 @@ func authFrame(t *styles.Styles, width int, title, body, help string, onboarding
 	} else if title != "" {
 		rc.AddPart(t.Dialog.PrimaryText.Render(title))
 	}
+	if cur != nil {
+		// Whatever renders before the body pushes it down.
+		above := *rc
+		above.IsOnboarding = true
+		if s := above.Render(); s != "" {
+			cur.Y += lipgloss.Height(s)
+		}
+		if !onboarding {
+			cur = offsetByFrame(rc.ViewStyle, cur)
+		}
+	}
 	rc.AddPart(body)
 	rc.Help = help
-	return rc.Render()
+	return rc.Render(), cur
+}
+
+// offsetByFrame moves cur, relative to the content of a block drawn in
+// style, to be relative to the block itself: past its top and left
+// margin, border and padding.
+func offsetByFrame(style lipgloss.Style, cur *tea.Cursor) *tea.Cursor {
+	if cur == nil {
+		return nil
+	}
+	cur.X += style.GetMarginLeft() + style.GetBorderLeftSize() + style.GetPaddingLeft()
+	cur.Y += style.GetMarginTop() + style.GetBorderTopSize() + style.GetPaddingTop()
+	return cur
 }
 
 // authDraw places a rendered sign-in dialog: bottom left during

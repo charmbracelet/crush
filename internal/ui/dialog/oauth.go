@@ -79,9 +79,6 @@ type OAuth struct {
 	codeInput textinput.Model
 	// errMsg is the reason the sign-in failed, shown in the error state.
 	errMsg string
-	// codeInputRow is the paste field's row within the inner content,
-	// recorded on render so the cursor lands on it.
-	codeInputRow int
 }
 
 var _ Dialog = (*OAuth)(nil)
@@ -294,41 +291,17 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 	width, innerWidth := authWidths(t, area, authDialogMaxWidth)
 	title := fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
-	body := m.body(innerWidth)
-	view := authFrame(t, width, title, body, renderDialogHelp(t, &m.help, m, innerWidth), m.isOnboarding)
-	cur := m.cursor()
-	if m.isOnboarding {
-		cur = adjustOnboardingInputCursor(t, cur)
-	}
+	body, cur := m.body(innerWidth)
+	help := renderDialogHelp(t, &m.help, m, innerWidth)
+	view, cur := authFrame(t, width, title, body, help, cur, m.isOnboarding)
 	authDraw(scr, area, view, cur, m.isOnboarding)
 	return cur
 }
 
-// cursor reports the paste field's cursor when it is focused, so the
-// terminal caret sits in the input. It must run after body, which
-// records where the field lands.
-func (m *OAuth) cursor() *tea.Cursor {
-	if !m.codeEntryActive() || !m.codeInput.Focused() {
-		return nil
-	}
-	cur := m.codeInput.Cursor()
-	if cur == nil {
-		return nil
-	}
-	t := m.com.Styles
-	frame := t.Dialog.View
-	input := t.Dialog.InputPrompt
-	const titleHeight = 1
-	cur.X += frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft() +
-		input.GetMarginLeft() + input.GetBorderLeftSize() + input.GetPaddingLeft()
-	cur.Y += frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop() +
-		titleHeight + m.codeInputRow
-	return cur
-}
-
 // body renders the dialog's content for the current state, innerWidth
-// cells wide.
-func (m *OAuth) body(innerWidth int) string {
+// cells wide, and the paste field's cursor within it while the field is
+// focused.
+func (m *OAuth) body(innerWidth int) (string, *tea.Cursor) {
 	var (
 		t               = m.com.Styles
 		linkStyle       = t.Dialog.OAuth.Link
@@ -338,7 +311,7 @@ func (m *OAuth) body(innerWidth int) string {
 	switch m.State {
 	case OAuthStateInitializing:
 		status := authSpinnerLine(t, m.spinner, innerWidth, "Initializing...")
-		return lipgloss.JoinVertical(lipgloss.Left, "", status, "")
+		return lipgloss.JoinVertical(lipgloss.Left, "", status, ""), nil
 
 	case OAuthStateDisplay:
 		// Render each text segment with its own style. Wrapping the
@@ -382,6 +355,7 @@ func (m *OAuth) body(innerWidth int) string {
 
 		elements = append(elements, url, "", waiting, "")
 
+		var cur *tea.Cursor
 		if m.codeEntryActive() {
 			// The manual fallback: the authorization page shows a code
 			// to paste when the redirect cannot come back on its own.
@@ -393,27 +367,31 @@ func (m *OAuth) body(innerWidth int) string {
 					Padding(0, 1).
 					Render("Declined or browser didn't connect? Enter the code from the page:"),
 			)
-			m.codeInputRow = lipgloss.Height(strings.Join(elements, "\n")) +
-				inputStyle.GetMarginTop() + inputStyle.GetBorderTopSize() + inputStyle.GetPaddingTop()
+			if m.codeInput.Focused() {
+				cur = offsetByFrame(inputStyle, m.codeInput.Cursor())
+				if cur != nil {
+					cur.Y += lipgloss.Height(strings.Join(elements, "\n"))
+				}
+			}
 			elements = append(elements, inputStyle.Render(m.codeInput.View()))
 		}
 
-		return lipgloss.JoinVertical(lipgloss.Left, elements...)
+		return lipgloss.JoinVertical(lipgloss.Left, elements...), cur
 
 	case OAuthStateSuccess:
-		return authSuccessBlock(t, innerWidth)
+		return authSuccessBlock(t, innerWidth), nil
 
 	case OAuthStateSaving:
 		status := authSpinnerLine(t, m.spinner, innerWidth, "Fetching models...")
 		// No keys work while saving, so the empty help row below
 		// stands in for the trailing blank line.
-		return lipgloss.JoinVertical(lipgloss.Left, "", status)
+		return lipgloss.JoinVertical(lipgloss.Left, "", status), nil
 
 	case OAuthStateError:
-		return authErrorBlock(t, innerWidth, m.errMsg)
+		return authErrorBlock(t, innerWidth, m.errMsg), nil
 
 	default:
-		return ""
+		return "", nil
 	}
 }
 

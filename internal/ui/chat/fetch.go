@@ -57,8 +57,8 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if opts.HasEmptyResult() {
@@ -125,8 +125,8 @@ func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if opts.HasEmptyResult() {
@@ -179,8 +179,8 @@ func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if opts.HasEmptyResult() {

@@ -1005,6 +1005,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	completedToolCalls := csync.NewMap[string, struct{}]()
 	// Calls that got a reply this turn; the rest are settled when it ends.
 	answeredToolCalls := csync.NewMap[string, struct{}]()
+	// startToolCall stamps when a call begins running, so its duration
+	// covers the run and not the time spent streaming the response or
+	// queued behind other calls. Parallel calls start concurrently.
+	var startMu sync.Mutex
+	startToolCall := func(callID string) {
+		startMu.Lock()
+		defer startMu.Unlock()
+		if currentAssistant == nil || !currentAssistant.StartToolCall(callID, time.Now().UnixMilli()) {
+			return
+		}
+		if err := a.messages.Update(ctx, *currentAssistant); err != nil {
+			slog.Error("Failed to record tool call start", "error", err)
+		}
+	}
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
@@ -1026,10 +1040,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Use latest tools (updated by SetTools when MCP tools
 			// change), filtered for the session's channel and minus MCP
 			// servers disabled for this repository.
-			prepared.Tools = a.filterDisabledMCPTools(
+			prepared.Tools = reportToolStarts(a.filterDisabledMCPTools(
 				callContext,
 				filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates()),
-			)
+			), startToolCall)
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:

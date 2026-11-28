@@ -45,8 +45,8 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, width, header); ok {
+		return block
 	}
 
 	if !opts.HasResult() {

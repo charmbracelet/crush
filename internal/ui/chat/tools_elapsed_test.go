@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,29 +44,45 @@ func TestBaseToolMessageItemElapsedUnknownStart(t *testing.T) {
 	require.Zero(t, canceled.elapsed(), "a canceled call stops counting until its reply lands")
 }
 
-func TestBaseToolMessageItemSpinnerTimer(t *testing.T) {
+func TestRunningToolShowsTookInHeader(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	tc := message.ToolCall{ID: "toolu_1", Name: "view", StartedAtMs: time.Now().UnixMilli()}
+	tc := message.ToolCall{
+		ID:          "toolu_1",
+		Name:        "view",
+		Input:       `{"file_path":"/tmp/a.go"}`,
+		Finished:    true,
+		StartedAtMs: time.Now().Add(-time.Second).UnixMilli(),
+	}
 	item := newBaseToolMessageItem(&sty, tc, nil, &ViewToolRenderContext{}, false)
+	out := ansi.Strip(item.RawRender(120))
+	require.NotContains(t, out, "took", "a quick tool shows no duration")
+	require.NotContains(t, out, "Waiting for tool response", "the waiting line is gone")
 
-	// A quick tool with no active turn has nothing to show yet.
-	require.Empty(t, item.spinnerTimer(), "no turn active, no timer")
-
-	// With a turn active, a quick tool shows the overall turn time.
-	common.StartTurn("session")
-	defer common.StopTurn("session")
-	require.Eventually(t, func() bool {
-		return item.spinnerTimer() == common.Elapsed("session") && item.spinnerTimer() != ""
-	}, time.Second, time.Millisecond, "quick tools show the overall turn time")
-	require.Less(t, item.elapsed(), toolTimerOwnTimeThreshold,
-		"the tool itself is still quick, so its own time must not be shown")
-
-	// Once a tool has been running long enough, its own elapsed time
-	// takes over the suffix.
-	tc.StartedAtMs = time.Now().Add(-15 * time.Second).UnixMilli()
+	tc.StartedAtMs = time.Now().Add(-3 * time.Second).UnixMilli()
 	item.SetToolCall(tc)
-	require.Equal(t, common.FormatDuration(item.elapsed()), item.spinnerTimer(),
-		"long-running tools show their own elapsed time")
+	require.Contains(t, ansi.Strip(item.RawRender(120)), "took=3s", "a long-running tool shows its own duration")
+
+	// A call still queued behind others has not started, so it has no
+	// duration to show.
+	tc.StartedAtMs = 0
+	item.SetToolCall(tc)
+	require.NotContains(t, ansi.Strip(item.RawRender(120)), "took")
+}
+
+func TestToolHeaderShowsTookWithoutOtherParams(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	out := ansi.Strip(toolHeader(&sty, ToolStatusRunning, "Agent", 120, &ToolRenderOpts{
+		Status:  ToolStatusRunning,
+		Elapsed: 3 * time.Second,
+	}))
+	require.Contains(t, out, "Agent (took=3s)", "no placeholder param is needed for a duration-only header")
+
+	header := toolHeader(&sty, ToolStatusRunning, "View", 120, &ToolRenderOpts{Status: ToolStatusRunning}, "/tmp/a.go")
+	block, ok := toolStateBlock(&sty, &ToolRenderOpts{Status: ToolStatusRunning}, 120, header)
+	require.True(t, ok)
+	require.Equal(t, header, block, "a running tool is its header, with no empty body below it")
 }

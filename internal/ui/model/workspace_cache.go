@@ -256,6 +256,13 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	m.probedSession = msg.forSession
 	m.probedSessionBusy = msg.sessionBusy
+	switch {
+	case msg.sessionBusy:
+		m.adoptRunningTurn(msg.forSession)
+	case m.pending.adopted && m.pending.sessionID == msg.forSession:
+		// No RunComplete reached this client for a turn it only adopted.
+		m.endPendingTurn(msg.forSession)
+	}
 	if prevBusy != busy {
 		m.renderPills()
 	}

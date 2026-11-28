@@ -336,6 +336,9 @@ func (a *Anim) buildFrames() {
 	}
 }
 
+// Label returns the current label.
+func (a *Anim) Label() string { return a.settings.Label }
+
 // SetLabel updates the label text and re-renders it.
 func (a *Anim) SetLabel(newLabel string) {
 	a.settings.Label = newLabel

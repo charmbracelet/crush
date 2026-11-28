@@ -250,3 +250,30 @@ func TestAppendContentKeepsContext(t *testing.T) {
 	msg.AppendContent("b")
 	require.Equal(t, TextContent{Text: "ab", Hidden: true, Context: "ctx"}, msg.Content())
 }
+
+func TestStartToolCallSurvivesInputUpdates(t *testing.T) {
+	t.Parallel()
+
+	var msg Message
+	msg.AddToolCall(ToolCall{ID: "1", Name: "bash"})
+	require.Zero(t, msg.ToolCalls()[0].StartedAtMs, "a call that only streamed in has not started")
+
+	require.True(t, msg.StartToolCall("1", 42))
+	msg.AddToolCall(ToolCall{ID: "1", Name: "bash", Input: "{}", Finished: true})
+	msg.FinishToolCall("1")
+	require.Equal(t, int64(42), msg.ToolCalls()[0].StartedAtMs)
+
+	require.False(t, msg.StartToolCall("missing", 1))
+}
+
+func TestReasoningStatesAreDistinct(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{Role: Assistant, Parts: []ContentPart{ReasoningContent{Thinking: "hmm", StartedAt: 1}}}
+	require.True(t, msg.IsStreamingReasoning())
+	require.True(t, msg.HasReasoningAwaitingAnswer())
+
+	msg.FinishThinking()
+	require.False(t, msg.IsStreamingReasoning(), "the reasoning block closed")
+	require.True(t, msg.HasReasoningAwaitingAnswer(), "but no answer has arrived yet")
+}

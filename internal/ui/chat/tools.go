@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -177,6 +178,8 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+	// turnTimer is set while the UI has handed this call's spinner the turn time.
+	turnTimer turnTimerSlot
 }
 
 // LiveOutputItem is implemented by tool items that can show output while
@@ -236,14 +239,25 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
-		// Timer on the pending spinner: quick tools (view, grep, edit)
-		// show the overall turn time, long-running ones their own
-		// elapsed time once it becomes the more useful signal.
-		Suffix:      t.spinnerTimer,
+		Suffix:      t.turnTimer.text,
 		SuffixColor: sty.WorkingTimerColor,
 	})
 
 	return t
+}
+
+// CarriesTurnTimer reports whether the call's spinner is showing, which for
+// most tools is only while the model writes its arguments.
+func (t *baseToolMessageItem) CarriesTurnTimer() bool {
+	return !t.toolCall.Finished && t.status != ToolStatusCanceled && t.result == nil
+}
+
+// SetTurnTimer makes the spinner show sessionID's turn time, or nothing
+// when sessionID is empty.
+func (t *baseToolMessageItem) SetTurnTimer(sessionID string) {
+	if t.turnTimer.set(sessionID) {
+		t.Bump()
+	}
 }
 
 // NewToolMessageItem creates a new [ToolMessageItem] based on the tool call name.
@@ -489,25 +503,8 @@ func (t *baseToolMessageItem) elapsed() time.Duration {
 	return common.ElapsedSince(time.UnixMilli(start), time.UnixMilli(end))
 }
 
-// toolTimerOwnTimeThreshold is how long a tool call must run before its
-// own elapsed time takes over the pending spinner's timer. Quick tools
-// (view, grep, edit) never cross it and keep showing the overall turn
-// time, which is the more useful signal for them; long-running ones
-// (bash, fetch, sub-agents) switch to their own duration once it starts
-// to matter.
-const toolTimerOwnTimeThreshold = 10 * time.Second
-
-// spinnerTimer returns the timer text shown next to the pending
-// spinner: the overall turn time while the tool is quick, its own
-// elapsed time once it has been running long enough to matter. Empty
-// when no turn is active and the start time is unknown, so renders of
-// restored sessions are unaffected.
-func (t *baseToolMessageItem) spinnerTimer() string {
-	if d := t.elapsed(); d >= toolTimerOwnTimeThreshold {
-		return common.FormatDuration(d)
-	}
-	return common.CurrentElapsed()
-}
+// toolTimerThreshold is how long a call must run before its header shows took=.
+const toolTimerThreshold = 2 * time.Second
 
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
@@ -701,23 +698,10 @@ func unescapePartialString(s string) string {
 	}
 }
 
-// waitingForToolMessage builds the "Waiting for tool response..." label,
-// including how long the tool has been running and, when a turn is
-// active, the total elapsed turn time.
-func waitingForToolMessage(opts *ToolRenderOpts) string {
-	msg := "Waiting for tool response"
-	if opts.Elapsed > 0 {
-		msg += fmt.Sprintf(" for %s", common.FormatDuration(opts.Elapsed))
-	}
-	if total := common.CurrentElapsed(); total != "" {
-		msg += fmt.Sprintf(" (%s total)", total)
-	}
-	return msg + "..."
-}
-
-// toolEarlyStateContent handles error/cancelled/pending states before content rendering.
-// Returns the rendered output and true if early state was handled.
-func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
+// toolStateBlock renders everything a non-finished tool shows: the error,
+// cancellation or permission-wait text under its header. A running tool has
+// no body, so it is only the header, whose took= shows its progress.
+func toolStateBlock(sty *styles.Styles, opts *ToolRenderOpts, width int, header string) (string, bool) {
 	var msg string
 	switch opts.Status {
 	case ToolStatusError:
@@ -725,24 +709,13 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
 	case ToolStatusAwaitingPermission:
-		msg = sty.Tool.StateWaiting.Render("Requesting permission...") + toolTimerSuffix(sty)
+		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
 	case ToolStatusRunning:
-		msg = sty.Tool.StateWaiting.Render(waitingForToolMessage(opts))
+		return header, true
 	default:
 		return "", false
 	}
-	return msg, true
-}
-
-// toolTimerSuffix renders the live turn timer shown next to tool calls
-// that are still in flight. Returns an empty string when no turn is
-// active, so renders of persisted sessions are unaffected.
-func toolTimerSuffix(sty *styles.Styles) string {
-	elapsed := common.CurrentElapsed()
-	if elapsed == "" {
-		return ""
-	}
-	return " " + lipgloss.NewStyle().Foreground(sty.WorkingTimerColor).Render(elapsed)
+	return joinToolParts(header, msg), true
 }
 
 // toolErrorContent formats an error message with an ERROR or WARN tag.
@@ -779,35 +752,33 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 	}
 }
 
-// toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-// When opts.ExpandedContent is true, the output wraps instead of truncating,
-// unless the tool is compact (nested in an agent tree), which always truncates.
-func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
+// toolParamList formats a header's main parameter and its options as
+// "main (key=value, ...)". An empty main parameter leaves just the options.
+func toolParamList(sty *styles.Styles, main string, pairs []string, width int, opts *ToolRenderOpts) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
 	const minSpaceForMainParam = 30
-	if len(params) == 0 {
+	if main == "" && len(pairs) == 0 {
 		return ""
 	}
 
-	mainParam := params[0]
-
-	// Build key=value pairs from remaining params (consecutive key, value pairs).
 	var kvPairs []string
-	for i := 1; i+1 < len(params); i += 2 {
-		if params[i+1] != "" {
-			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s", params[i], params[i+1]))
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if pairs[i+1] != "" {
+			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s", pairs[i], pairs[i+1]))
 		}
 	}
 
 	// Try to include key=value pairs if there's enough space.
-	output := mainParam
+	output := main
 	if len(kvPairs) > 0 {
 		partsStr := strings.Join(kvPairs, ", ")
-		if remaining := width - lipgloss.Width(partsStr) - 3; remaining >= minSpaceForMainParam {
-			// main param is syntax highlighted so style the param as well
-			pairs := sty.Tool.ParamMain.Render(fmt.Sprintf("(%s)", partsStr))
-			output = fmt.Sprintf("%s %s", mainParam, pairs)
+		if main == "" || width-lipgloss.Width(partsStr)-3 >= minSpaceForMainParam {
+			rendered := sty.Tool.ParamMain.Render(fmt.Sprintf("(%s)", partsStr))
+			output = rendered
+			if main != "" {
+				output = fmt.Sprintf("%s %s", main, rendered)
+			}
 		}
 	}
 
@@ -855,9 +826,20 @@ func capLineWidths(s string, width int) string {
 // toolHeader builds the tool header line: "● ToolName params..."
 // When opts.ExpandedContent is true, long parameters wrap instead of truncating.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
+	var main string
+	var pairs []string
+	if len(params) > 0 {
+		main = params[0]
+		pairs = params[1:]
+	}
+	// Show how long the call ran (or has been running), but only once it
+	// has taken long enough to matter; on quick tools it is noise.
+	if opts != nil && opts.Elapsed >= toolTimerThreshold {
+		pairs = append(slices.Clip(pairs), "took", common.FormatDuration(opts.Elapsed))
+	}
 	prefix := toolHeaderPrefix(sty, status, name, opts)
 	prefixWidth := lipgloss.Width(prefix)
-	paramsStr := toolParamList(sty, params, width-prefixWidth, opts)
+	paramsStr := toolParamList(sty, main, pairs, width-prefixWidth, opts)
 
 	// When expanded, toolParamList may return multiple lines. Indent
 	// continuation lines to align with the first line's param text.

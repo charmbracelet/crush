@@ -1785,6 +1785,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// tea.Sequence.
 	m.subAgentsRunning = m.runningSubAgents()
 	if m.state == uiChat {
+		// Any update may also have moved the turn's tail, which decides
+		// where the turn time shows.
+		m.syncPendingItem()
 		if cmd := m.ensureAnimating(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2057,12 +2060,6 @@ func (m *UI) setMessagePlanFlags(items []chat.MessageItem) {
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 
-	// The real message carries its own spinner from here on.
-	if msg.Role == message.Assistant && m.pending.sessionID == msg.SessionID {
-		m.handOffPendingTurn()
-	}
-	defer m.syncPendingItem()
-
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
 		// message already exists, skip
@@ -2250,9 +2247,11 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		existingToolItem := m.chat.MessageItem(tc.ID)
 		if toolItem, ok := existingToolItem.(chat.ToolMessageItem); ok {
 			existingToolCall := toolItem.ToolCall()
-			// only update if finished state changed or input changed
-			// to avoid clearing the cache
-			if (tc.Finished && !existingToolCall.Finished) || tc.Input != existingToolCall.Input {
+			// Only update when finished state, input, or start time changed,
+			// to avoid clearing the cache. The start time lands after the
+			// input finishes, once the call actually begins running.
+			if (tc.Finished && !existingToolCall.Finished) || tc.Input != existingToolCall.Input ||
+				tc.StartedAtMs != existingToolCall.StartedAtMs {
 				toolItem.SetToolCall(tc)
 			}
 		}

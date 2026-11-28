@@ -23,7 +23,7 @@ import (
 // rendered output.
 //
 // The message has no text content and no Finish part, so
-// IsThinking() returns true and the render path skips the
+// HasReasoningAwaitingAnswer() returns true and the render path skips the
 // "Thought for" footer — keeping the rendered height computation
 // simple.
 func thinkingMessageWithLines(id string, count int) *message.Message {
@@ -84,7 +84,7 @@ func renderedThinkingHeight(t *testing.T, item *AssistantMessageItem, width int)
 // thinking block in the default (collapsed) state still renders at
 // most a small bounded height — the last `maxCollapsedThinkingHeight`
 // lines plus the truncation hint. The thinking message keeps
-// IsThinking() == true, so the optional "Thought for" footer is
+// HasReasoningAwaitingAnswer() == true, so the optional "Thought for" footer is
 // suppressed and the section height equals the box height.
 func TestThinkingWindow_CollapsedCapPreserved(t *testing.T) {
 	t.Parallel()

@@ -121,8 +121,8 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if tool == "mcp-find" {
@@ -220,7 +220,7 @@ func (d *DockerMCPToolRenderContext) makeHeader(sty *styles.Styles, tool string,
 		icon = sty.Tool.IconPending.Render()
 	}
 	prefix := fmt.Sprintf("%s %s ", icon, d.formatToolName(sty, tool))
-	return prefix + toolParamList(sty, params, width-lipgloss.Width(prefix), opts)
+	return prefix + toolParamList(sty, params[0], params[1:], width-lipgloss.Width(prefix), opts)
 }
 
 func (d *DockerMCPToolRenderContext) formatToolName(sty *styles.Styles, tool string) string {

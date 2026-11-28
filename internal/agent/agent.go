@@ -243,6 +243,8 @@ type sessionAgent struct {
 	// prompts is every prompt's text as read at startup; summarize and
 	// generateTitle take theirs from it. Nil falls back to the built-ins.
 	prompts map[string]string
+	// compactSummaries writes summaries from an extraction of the session.
+	compactSummaries bool
 	// permissions answers whether the user is being asked about tool
 	// calls at all. Nil in tests and anywhere that never needs to know.
 	permissions permission.Service
@@ -304,6 +306,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	CompactSummaries     bool // Summaries are written from an extraction of the session.
 	Sessions             session.Service
 	Messages             message.Service
 	Permissions          permission.Service
@@ -333,6 +336,7 @@ func NewSessionAgent(
 		cfg:                  opts.Cfg,
 		prompts:              opts.Prompts,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		compactSummaries:     opts.CompactSummaries,
 		permissions:          opts.Permissions,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		notify:               opts.Notify,
@@ -1565,7 +1569,8 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 		return fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
+	thinkingEnabled := largeModel.CatwalkCfg.CanReason() && largeModel.ModelCfg.Think
+	summaryPromptText, aiMsgs := a.summaryInput(currentSession, msgs, largeModel, thinkingEnabled)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1594,9 +1599,19 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	// Route <analysis> blocks to the reasoning display, the rest to content.
+	router := newAnalysisRouter(
+		func(text string) error {
+			summaryMessage.AppendReasoningContent(text)
+			return a.messages.Update(genCtx, summaryMessage)
+		},
+		func(text string) error {
+			summaryMessage.AppendContent(text)
+			return a.messages.Update(genCtx, summaryMessage)
+		},
+	)
 
-	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
+	streamCall := fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
@@ -1627,10 +1642,14 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
+			return router.write(text)
 		},
-	})
+	}
+
+	resp, err := agent.Stream(genCtx, streamCall)
+	if flushErr := router.flush(); flushErr != nil && err == nil {
+		err = flushErr
+	}
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {
@@ -2610,21 +2629,6 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
-}
-
-// buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo) string {
-	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
-	if len(todos) > 0 {
-		sb.WriteString("\n\n## Current Todo List\n\n")
-		for _, t := range todos {
-			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
-		}
-		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
-		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
-	}
-	return sb.String()
 }
 
 func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []any {

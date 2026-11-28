@@ -38,11 +38,14 @@ func drawArguments(a *Arguments, w, h int) []string {
 // on wide and narrow screens instead of truncating it away.
 func TestArgumentsHelpShowsEsc(t *testing.T) {
 	t.Parallel()
+	a := newTestArguments(t, "")
+	esc := a.keyMap.Close.Help()
+	require.Equal(t, esc.Desc, escLabel(a.ShortHelp()), "esc must be in the help")
 	for _, w := range []int{100, 40} {
 		a := newTestArguments(t, "")
 		scr := uv.NewScreenBuffer(w, 30)
 		a.Draw(scr, image.Rect(0, 0, w, 30))
-		require.Containsf(t, scr.String(), "esc", "esc hint missing at %d cols:\n%s", w, scr.String())
+		require.Containsf(t, scr.String(), esc.Key+" "+esc.Desc, "esc hint missing at %d cols:\n%s", w, scr.String())
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // SingleChoice is an inline single-choice question component.
@@ -228,5 +229,5 @@ func (d *SingleChoice) renderItem(i int, ch question.Choice, active bool, innerW
 		style = d.Styles.Editor.QuestionSelected
 	}
 	barWidth := 2 // "┃ " or "  ", applied by buildLines
-	return style.Render(wrapIndent(ch.Label, innerWidth-barWidth, ""))
+	return style.Render(ansi.Wrap(ch.Label, innerWidth-barWidth, ""))
 }

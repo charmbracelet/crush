@@ -243,27 +243,6 @@ func newContentLine(text string) contentLine {
 	return contentLine{text: text, choiceIdx: -1}
 }
 
-// sectionHeight returns the visual line count of a text block
-// wrapped at width.
-func sectionHeight(text string, width int) int {
-	if text == "" {
-		return 0
-	}
-	return strings.Count(ansi.Wrap(text, width, ""), "\n") + 1
-}
-
-// wrapIndent wraps text at width and prefixes every continuation
-// line with indent so multi-line content aligns under the first
-// line's content rather than flush left.
-func wrapIndent(text string, width int, indent string) string {
-	wrapped := ansi.Wrap(text, width, "")
-	lines := strings.Split(wrapped, "\n")
-	for i := 1; i < len(lines); i++ {
-		lines[i] = indent + lines[i]
-	}
-	return strings.Join(lines, "\n")
-}
-
 // questionGutter is the indent of everything under a question's
 // header (descriptions, choices, editors), matching the choice bar.
 const questionGutter = "  "
@@ -273,9 +252,7 @@ const questionGutter = "  "
 // first word rather than back at the left edge.
 func questionHeader(sty *styles.Styles, focused bool, text string, width int) string {
 	icon := questionIconPrompt(sty, focused)
-	iconWidth := lipgloss.Width(icon)
-	return icon + sty.Editor.QuestionUnselected.Render(
-		wrapIndent(text, max(1, width-iconWidth), strings.Repeat(" ", iconWidth)))
+	return strings.Join(wrapHanging(text, width, icon, sty.Editor.QuestionUnselected), "\n")
 }
 
 // questionDescription renders a question's markdown description at
@@ -305,7 +282,7 @@ func drawStyledText(scr uv.Screen, area uv.Rectangle, text string) int {
 		return 0
 	}
 	uv.NewStyledString(text).Draw(scr, area)
-	return strings.Count(text, "\n") + 1
+	return blockHeight(text)
 }
 
 // buildLines renders the entire choice list into a flat slice of
@@ -357,7 +334,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 		}
 		hang(itemFn(i, ch, active, innerWidth))
 		if ch.Description != "" {
-			hang(bodyStyle.Render(wrapIndent(ch.Description, innerWidth-lipgloss.Width(bar), "")))
+			hang(bodyStyle.Render(ansi.Wrap(ch.Description, innerWidth-lipgloss.Width(bar), "")))
 		}
 
 		// Inline note editor or saved note for this choice.

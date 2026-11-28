@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -225,8 +224,6 @@ func (d *MultiChoice) renderItem(i int, ch question.Choice, active bool, innerWi
 	if d.selected[i] {
 		check = d.Styles.Editor.QuestionCheckOn.Render() + " "
 	}
-	checkWidth := lipgloss.Width(check)
 	barWidth := 2 // "┃ " or "  ", applied by buildLines
-	labelIndent := strings.Repeat(" ", checkWidth)
-	return check + style.Render(wrapIndent(ch.Label, innerWidth-barWidth-checkWidth, labelIndent))
+	return strings.Join(wrapHanging(ch.Label, innerWidth-barWidth, check, style), "\n")
 }

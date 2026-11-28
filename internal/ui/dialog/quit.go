@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // QuitID is the identifier for the quit dialog.
@@ -310,21 +309,4 @@ func quitHeight(width int, warning string) int {
 		h += rows(warning) + 1
 	}
 	return h
-}
-
-// balancedWrap wraps s to at most width columns using the narrowest width
-// that still needs the same number of lines, so a wrapped sentence splits
-// into lines of similar length instead of leaving one word on its own.
-func balancedWrap(s string, width int) string {
-	wrapped := ansi.Wrap(s, width, "")
-	lines := strings.Count(wrapped, "\n")
-	if lines == 0 {
-		return wrapped
-	}
-	for w := ansi.StringWidth(s)/(lines+1) + 1; w < width; w++ {
-		if b := ansi.Wrap(s, w, ""); strings.Count(b, "\n") == lines {
-			return b
-		}
-	}
-	return wrapped
 }

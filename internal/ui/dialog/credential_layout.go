@@ -73,14 +73,6 @@ func (l credentialLayout) fit(height int) (string, int) {
 	return strings.Join(lines, "\n"), above
 }
 
-// blockHeight is the row count of s, counting an empty block as none.
-func blockHeight(s string) int {
-	if s == "" {
-		return 0
-	}
-	return lipgloss.Height(s)
-}
-
 func blankRows(n int) []string {
 	return make([]string, n)
 }

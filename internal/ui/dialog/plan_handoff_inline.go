@@ -224,7 +224,7 @@ func (p *PlanHandoffInline) Height(width int) int {
 		return p.choiceLayout(width).height
 	}
 	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
-	return sectionHeight(planHandoffFeedbackPrompt, max(1, width-planHandoffIndent-lipgloss.Width(iconPrompt))) +
+	return len(wrapLines(planHandoffFeedbackPrompt, width-planHandoffIndent-lipgloss.Width(iconPrompt))) +
 		1 + p.editor.Height() + 1
 }
 

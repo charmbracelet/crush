@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // newQuestionTextarea creates a configured textarea for question
@@ -209,12 +208,6 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, not
 			*lines = append(*lines, contentLine{text: bar + ln, cursorItem: isActive, choiceIdx: -1})
 		}
 	}
-}
-
-// wrapLines word-wraps plain text at width (hard-breaking words
-// longer than a line) and returns its visual lines.
-func wrapLines(text string, width int) []string {
-	return strings.Split(ansi.Wrap(text, max(width, 1), ""), "\n")
 }
 
 // savedNoteHeight returns the rows a saved note occupies when drawn

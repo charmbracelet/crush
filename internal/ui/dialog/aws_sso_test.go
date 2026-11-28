@@ -28,11 +28,7 @@ func TestAWSSSOShowsWholeURL(t *testing.T) {
 		m := newTestAWSSSO()
 		m.SetURL(testSSOURL)
 		lines := drawFits(t, m, w, 30)
-		var joined strings.Builder
-		for _, l := range lines {
-			joined.WriteString(strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│")))
-		}
-		require.Contains(t, joined.String(), testSSOURL, "width %d", w)
+		requireLinkDrawn(t, lines, testSSOURL, w)
 		require.NotContains(t, strings.Join(lines, "\n"), "…│")
 	}
 
@@ -63,4 +59,31 @@ func TestAWSSSOSuccessMatchesOAuth(t *testing.T) {
 	require.Contains(t, lines[row], "│ Authentication successful!")
 	require.Equal(t, "│", strings.Trim(strings.TrimSpace(lines[row-1]), " │")+"│", "blank line above")
 	require.Equal(t, "│", strings.Trim(strings.TrimSpace(lines[row+1]), " │")+"│", "blank line below")
+}
+
+// TestAWSSSOLeavesEnterToHelp verifies the dialog does not repeat the
+// help bar with "press enter" instructions.
+func TestAWSSSOLeavesEnterToHelp(t *testing.T) {
+	t.Parallel()
+
+	m := newTestAWSSSO()
+	m.SetURL(testSSOURL)
+	out := strings.Join(drawFits(t, m, 100, 30), "\n")
+	require.NotContains(t, out, "Press enter")
+	require.Contains(t, out, "enter open in browser")
+}
+
+// TestAWSSSOEscLabels verifies esc cancels while signing in, exits once
+// it has failed, and that success uses the shared finish keys.
+func TestAWSSSOEscLabels(t *testing.T) {
+	t.Parallel()
+
+	m := newTestAWSSSO()
+	require.Equal(t, cancelKey.Help().Desc, escLabel(m.ShortHelp()), "waiting")
+	m.Finish("boom")
+	require.Equal(t, CloseKey.Help().Desc, escLabel(m.ShortHelp()), "failed")
+
+	m = newTestAWSSSO()
+	m.Finish("")
+	require.Equal(t, finishKey("close").Keys(), m.ShortHelp()[0].Keys(), "finished")
 }

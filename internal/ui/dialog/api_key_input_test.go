@@ -97,15 +97,19 @@ func TestAPIKeyInputConfigPathWraps(t *testing.T) {
 func TestAPIKeyInputHelpMatchesState(t *testing.T) {
 	t.Parallel()
 
-	cases := map[APIKeyInputState]struct{ want, notWant []string }{
-		APIKeyInputStateInitial:   {want: []string{"enter submit", "esc exit"}},
-		APIKeyInputStateError:     {want: []string{"enter submit", "esc exit"}},
-		APIKeyInputStateVerifying: {notWant: []string{"enter submit", "esc exit"}},
-		APIKeyInputStateVerified:  {want: []string{"enter save & continue"}, notWant: []string{"esc exit"}},
+	cases := map[APIKeyInputState]struct {
+		want, notWant []string
+		esc           string
+	}{
+		APIKeyInputStateInitial:   {want: []string{"enter submit"}, esc: CloseKey.Help().Desc},
+		APIKeyInputStateError:     {want: []string{"enter submit"}, esc: CloseKey.Help().Desc},
+		APIKeyInputStateVerifying: {notWant: []string{"enter submit"}},
+		APIKeyInputStateVerified:  {want: []string{"enter save & continue"}},
 	}
 	for st, c := range cases {
 		m := newTestAPIKeyInput()
 		m.state = st
+		require.Equal(t, c.esc, escLabel(m.ShortHelp()), "state %d", st)
 		out := strings.Join(drawFits(t, m, 100, 30), "\n")
 		for _, w := range c.want {
 			require.Contains(t, out, w, "state %d", st)

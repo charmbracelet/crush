@@ -202,3 +202,12 @@ func TestAuthMethodCardsCenteredWithMargin(t *testing.T) {
 		requireAuthCardAreasMatch(t, false, w, 30)
 	}
 }
+
+// TestAuthMethodTitle verifies the dialog names the provider in the
+// shared sign-in title phrasing.
+func TestAuthMethodTitle(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join(drawFits(t, newTestAuthMethod(), 100, 30), "\n")
+	require.Contains(t, out, "Authenticate with OpenAI")
+}

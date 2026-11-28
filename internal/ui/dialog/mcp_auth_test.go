@@ -34,7 +34,7 @@ func TestMCPAuthErrorCanSkipToNextServer(t *testing.T) {
 	require.Contains(t, out, "Authentication failed.")
 	require.Contains(t, out, "oauth: invalid_grant")
 	require.Contains(t, out, "s skip")
-	require.Contains(t, out, "esc exit")
+	require.Equal(t, CloseKey.Help().Desc, escLabel(m.ShortHelp()))
 
 	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: 's', Text: "s"}))
 	require.Equal(t, MCPAuthStatePrompt, m.state)
@@ -56,15 +56,15 @@ func TestMCPAuthHelpKeepsEscWhenNarrow(t *testing.T) {
 	for _, st := range []MCPAuthState{MCPAuthStatePrompt, MCPAuthStateAuthenticating} {
 		m := newTestMCPAuth("linear", "notion")
 		m.state = st
+		require.Equal(t, cancelKey.Help().Desc, escLabel(m.ShortHelp()), "state %d", st)
 		out := strings.Join(drawFits(t, m, 40, 30), "\n")
-		require.Contains(t, out, "esc cancel", "state %d", st)
+		require.Contains(t, out, "esc "+cancelKey.Help().Desc, "state %d", st)
 	}
 }
 
-// TestMCPAuthLinkWrapsAsOneToken verifies a long authorization URL is
-// broken at fixed widths rather than at its hyphens, so every line but
-// the last fills the row and the whole URL reads back in order.
-func TestMCPAuthLinkWrapsAsOneToken(t *testing.T) {
+// TestMCPAuthDrawsWholeURL verifies a long authorization URL is drawn
+// whole, broken to the content width rather than truncated.
+func TestMCPAuthDrawsWholeURL(t *testing.T) {
 	t.Parallel()
 
 	const url = "https://auth.example.com/authorize?client-id=abc-def-ghi&redirect-uri=http%3A%2F%2Flocalhost&state=xyz-123"
@@ -72,19 +72,59 @@ func TestMCPAuthLinkWrapsAsOneToken(t *testing.T) {
 		m := newTestMCPAuth("linear")
 		m.authURLFn = func(string) string { return url }
 		m.state = MCPAuthStateAuthenticating
-		var rows []string
-		for _, l := range drawFits(t, m, w, 30) {
-			l = strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│"))
-			if len(rows) > 0 || strings.HasPrefix(l, "https://") {
-				if l == "" {
-					break
-				}
-				rows = append(rows, l)
-			}
-		}
-		require.Equal(t, url, strings.Join(rows, ""), "width %d", w)
-		for i := 1; i < len(rows)-1; i++ {
-			require.Len(t, rows[i], len(rows[0]), "width %d row %d", w, i)
-		}
+		requireLinkDrawn(t, drawFits(t, m, w, 30), url, w)
 	}
+}
+
+// TestMCPAuthLeavesEnterToHelp verifies the dialog does not repeat the
+// help bar with "press enter" instructions.
+func TestMCPAuthLeavesEnterToHelp(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join(drawFits(t, newTestMCPAuth("linear", "notion"), 100, 30), "\n")
+	require.NotContains(t, out, "Press enter")
+	require.Contains(t, out, "enter open browser")
+}
+
+// TestMCPAuthTitleShowsQueueProgress verifies the title names the server
+// and, with several queued, how far through the queue it is.
+func TestMCPAuthTitleShowsQueueProgress(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join(drawFits(t, newTestMCPAuth("linear", "notion"), 100, 30), "\n")
+	require.Contains(t, out, "Authenticate with linear (1/2)")
+
+	out = strings.Join(drawFits(t, newTestMCPAuth("linear"), 100, 30), "\n")
+	require.Contains(t, out, "Authenticate with linear")
+	require.NotContains(t, out, "(1/1)")
+}
+
+// TestMCPAuthEscLabels verifies esc cancels while signing in and exits
+// once the server has failed; the last server's success uses the shared
+// finish keys, while earlier ones keep esc for leaving the queue.
+func TestMCPAuthEscLabels(t *testing.T) {
+	t.Parallel()
+
+	m := newTestMCPAuth("linear")
+	require.Equal(t, cancelKey.Help().Desc, escLabel(m.ShortHelp()), "prompt")
+	m.state = MCPAuthStateError
+	require.Equal(t, CloseKey.Help().Desc, escLabel(m.ShortHelp()), "failed")
+	m.state = MCPAuthStateSuccess
+	require.Equal(t, finishKey("finish").Keys(), m.ShortHelp()[0].Keys(), "finished")
+
+	m = newTestMCPAuth("linear", "notion")
+	m.state = MCPAuthStateSuccess
+	require.Equal(t, CloseKey.Help().Desc, escLabel(m.ShortHelp()), "more queued")
+}
+
+// TestMCPAuthSpinnerSingleSpace verifies the waiting status puts exactly
+// one space between the spinner and its text.
+func TestMCPAuthSpinnerSingleSpace(t *testing.T) {
+	t.Parallel()
+
+	m := newTestMCPAuth("linear")
+	m.state = MCPAuthStateAuthenticating
+	out := strings.Join(drawFits(t, m, 100, 30), "\n")
+	require.Contains(t, out, "Waiting for authorization...")
+	require.NotContains(t, out, "  Waiting for authorization...")
 }

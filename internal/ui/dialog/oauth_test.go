@@ -83,7 +83,8 @@ func TestOAuthBusyStatesShowTitleAndHelp(t *testing.T) {
 		out := strings.Join(drawFits(t, m, w, 30), "\n")
 		require.Contains(t, out, "Grok")
 		require.Contains(t, out, "Initializing...")
-		require.Contains(t, out, "esc cancel")
+		require.Contains(t, out, "esc "+escLabel(m.ShortHelp()))
+		require.Equal(t, cancelKey.Help().Desc, escLabel(m.ShortHelp()))
 
 		m.State = OAuthStateSaving
 		out = strings.Join(drawFits(t, m, w, 30), "\n")
@@ -101,8 +102,9 @@ func TestOAuthHelpKeepsEscWhenNarrow(t *testing.T) {
 		for _, userCode := range []string{"", "ABCD-EFGH"} {
 			m := newTestOAuth(codeEntry)
 			m.HandleMsg(ActionInitiateOAuth{UserCode: userCode, VerificationURL: "https://example.com/device"})
+			require.Equal(t, cancelKey.Help().Desc, escLabel(m.ShortHelp()), "codeEntry=%v userCode=%q", codeEntry, userCode)
 			out := strings.Join(drawFits(t, m, 40, 30), "\n")
-			require.Contains(t, out, "esc cancel", "codeEntry=%v userCode=%q", codeEntry, userCode)
+			require.Contains(t, out, "esc "+cancelKey.Help().Desc, "codeEntry=%v userCode=%q", codeEntry, userCode)
 		}
 	}
 }
@@ -122,36 +124,73 @@ func TestOAuthErrorShowsReason(t *testing.T) {
 	}
 }
 
-// TestOAuthURLWrapsAsOneToken verifies the URL is broken at fixed widths
-// rather than at hyphens: every line but the last fills the content
-// width, and the lines rejoin into the exact URL.
-func TestOAuthURLWrapsAsOneToken(t *testing.T) {
+// TestOAuthDrawsWholeURL verifies the verification URL is drawn whole,
+// broken to the content width rather than truncated.
+func TestOAuthDrawsWholeURL(t *testing.T) {
 	t.Parallel()
 
 	for _, w := range []int{100, 40} {
 		m := newTestOAuth(false)
 		m.HandleMsg(ActionInitiateOAuth{VerificationURL: testOAuthURL})
-		lines := drawFits(t, m, w, 30)
-		var parts []string
-		var widths []int
-		in := false
-		for _, l := range lines {
-			text := strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│"))
-			if strings.HasPrefix(text, "https://") {
-				in = true
-			}
-			if !in {
-				continue
-			}
-			if text == "" {
-				break
-			}
-			parts = append(parts, text)
-			widths = append(widths, len(text))
-		}
-		require.Equal(t, testOAuthURL, strings.Join(parts, ""), "width %d", w)
-		for i := 0; i < len(widths)-1; i++ {
-			require.Equal(t, widths[0], widths[i], "line %d broke early at width %d", i, w)
-		}
+		requireLinkDrawn(t, drawFits(t, m, w, 30), testOAuthURL, w)
 	}
+}
+
+// TestOAuthInstructionsMatchFlow verifies each flow's "Press enter"
+// instruction says what enter does, and that the help bar agrees.
+func TestOAuthInstructionsMatchFlow(t *testing.T) {
+	t.Parallel()
+
+	browser := newTestOAuth(false)
+	browser.HandleMsg(ActionInitiateOAuth{VerificationURL: testOAuthURL})
+	device := newTestOAuth(false)
+	device.HandleMsg(ActionInitiateOAuth{UserCode: "ABCD-EFGH", VerificationURL: "https://example.com/device"})
+
+	for name, c := range map[string]struct {
+		m    *OAuth
+		copy oauthFlowCopy
+	}{"browser": {browser, browserFlowCopy}, "device": {device, deviceFlowCopy}} {
+		out := strings.Join(drawFits(t, c.m, 100, 30), "\n")
+		require.Contains(t, out, "Press enter to "+c.copy.enterHint, name)
+		require.Contains(t, out, c.copy.waiting, name)
+		require.Equal(t, c.copy.enterHelp, c.m.ShortHelp()[0].Help().Desc, name)
+	}
+	require.NotEqual(t, browserFlowCopy, deviceFlowCopy)
+}
+
+// TestOAuthEscLabels verifies esc cancels while signing in and exits once
+// the sign-in has failed, and that a finished sign-in is acknowledged
+// with the shared finish keys.
+func TestOAuthEscLabels(t *testing.T) {
+	t.Parallel()
+
+	m := newTestOAuth(false)
+	require.Equal(t, cancelKey.Help().Desc, escLabel(m.ShortHelp()), "starting")
+	m.HandleMsg(ActionInitiateOAuth{VerificationURL: "https://example.com/device"})
+	require.Equal(t, cancelKey.Help().Desc, escLabel(m.ShortHelp()), "waiting")
+	m.State = OAuthStateError
+	require.Equal(t, CloseKey.Help().Desc, escLabel(m.ShortHelp()), "failed")
+	m.State = OAuthStateSuccess
+	require.Equal(t, finishKey("finish").Keys(), m.ShortHelp()[0].Keys(), "finished")
+}
+
+// TestOAuthTitle verifies the dialog names the provider in the shared
+// sign-in title phrasing.
+func TestOAuthTitle(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join(drawFits(t, newTestOAuth(false), 100, 30), "\n")
+	require.Contains(t, out, "Authenticate with Grok")
+}
+
+// TestOAuthSpinnerSingleSpace verifies the saving status puts exactly one
+// space between the spinner and its text.
+func TestOAuthSpinnerSingleSpace(t *testing.T) {
+	t.Parallel()
+
+	m := newTestOAuth(false)
+	m.State = OAuthStateSaving
+	out := strings.Join(drawFits(t, m, 100, 30), "\n")
+	require.Contains(t, out, "Fetching models...")
+	require.NotContains(t, out, "  Fetching models...")
 }

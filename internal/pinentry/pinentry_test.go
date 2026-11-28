@@ -485,3 +485,46 @@ func TestServiceBacksOffDuringLongCommands(t *testing.T) {
 	defer done2()
 	require.Eventually(t, func() bool { return calls.Load() >= n+3 }, 5*time.Second, time.Millisecond)
 }
+
+func TestServiceStopsPollingForLingeringGPG(t *testing.T) {
+	t.Parallel()
+
+	s := newTestService()
+	s.pollInterval = time.Millisecond
+	s.touchGrace = 5 * time.Millisecond
+	s.touchMax = 100 * time.Millisecond
+	var calls atomic.Int64
+	// A gpg process that outlives the command, such as an unrelated
+	// interactive gpg session in another terminal.
+	s.lister = func(context.Context) ([]Proc, error) {
+		calls.Add(1)
+		return []Proc{{PID: 20, Name: "gpg"}}, nil
+	}
+
+	ctx := t.Context()
+	s.Start(ctx)
+	sub := s.Subscribe(ctx)
+
+	expectEvent := func(want Event) {
+		t.Helper()
+		select {
+		case ev := <-sub:
+			require.Equal(t, want, ev.Payload)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for event %+v", want)
+		}
+	}
+
+	done := s.TrackCommand()
+	expectEvent(Event{TouchPending: true})
+	done()
+
+	// Past the maximum touch wait the hint is cleared, and polling stops
+	// even though gpg is still around.
+	expectEvent(Event{})
+	require.Eventually(t, func() bool {
+		n := calls.Load()
+		time.Sleep(50 * time.Millisecond)
+		return calls.Load() == n
+	}, 5*time.Second, time.Millisecond)
+}

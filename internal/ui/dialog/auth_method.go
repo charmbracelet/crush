@@ -3,6 +3,7 @@ package dialog
 import (
 	"cmp"
 	"image"
+	"slices"
 	"strings"
 	"time"
 
@@ -167,11 +168,36 @@ func (m *AuthMethod) handleMouseClick(msg tea.MouseClickMsg) Action {
 	}
 }
 
+// cardLayout is how the two auth cards share the dialog: side by side
+// or stacked, each w by h cells, with gap cells between them when side
+// by side.
+type cardLayout struct {
+	stacked bool
+	w, h    int
+	gap     int
+}
+
+// authMethodLayout fits the cards to innerWidth, inset by
+// authMethodCardMargin on both sides, at full height.
+func authMethodLayout(innerWidth int) cardLayout {
+	l := cardLayout{h: authMethodCardHeight}
+	space := innerWidth - 2*authMethodCardMargin
+	l.w = max(0, (space-authMethodCardGap)/2)
+	if l.w < authMethodMinCardWidth {
+		l.stacked = true
+		l.w = max(0, space)
+		return l
+	}
+	// The gap takes up any odd leftover cell so the margins on both
+	// sides match and the pair sits exactly centered.
+	l.gap = space - 2*l.w
+	return l
+}
+
 // Draw implements Dialog.
 func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	width := max(0, min(defaultAuthMethodDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	width, innerWidth := authWidths(t, area, defaultAuthMethodDialogMaxWidth)
 
 	prompt := t.Dialog.AuthMethod.Prompt.Width(innerWidth).Render("How would you like to authenticate?")
 	if !m.isOnboarding {
@@ -180,16 +206,6 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	prompt += "\n"
 
-	cardWidth := max(0, (innerWidth-authMethodCardGap-2*authMethodCardMargin)/2)
-	sideBySide := cardWidth >= authMethodMinCardWidth
-	// The gap takes up any odd leftover cell so the margins on both sides
-	// match and the pair sits exactly centered.
-	cardGap := authMethodCardGap
-	if sideBySide {
-		cardGap = innerWidth - 2*authMethodCardMargin - 2*cardWidth
-	} else {
-		cardWidth = max(0, innerWidth-2*authMethodCardMargin)
-	}
 	// The OAuth card names the account the sign-in uses, which is
 	// provider-specific: ChatGPT for OpenAI, Grok for xAI.
 	oauthCardLabel := "ChatGPT Account\nwith Subscription"
@@ -197,94 +213,63 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		oauthCardLabel = "Grok Account\nwith Subscription"
 	}
 
-	render := func(cardHeight int) string {
-		rc := NewRenderContext(t, width)
+	rc := NewRenderContext(t, width)
+	rc.IsOnboarding = m.isOnboarding
+	if !m.isOnboarding {
 		rc.Title = "Authenticate with " + cmp.Or(m.provider.Name, string(m.provider.ID))
-		rc.AddPart(prompt)
+	}
+	rc.AddPart(prompt)
+	rc.Help = "\n" + renderDialogHelp(t, &m.help, m, innerWidth)
+	cardsAt := nextPartOrigin(rc)
 
-		oauthCard := m.renderCard(oauthCardLabel, m.selected == 0, cardWidth, cardHeight)
-		apiKeyCard := m.renderCard("API Key", m.selected == 1, cardWidth, cardHeight)
-		var cards string
-		if sideBySide {
-			row := lipgloss.JoinHorizontal(lipgloss.Top, oauthCard, strings.Repeat(" ", cardGap), apiKeyCard)
-			cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, row)
-		} else {
-			stack := lipgloss.JoinVertical(lipgloss.Left, oauthCard, apiKeyCard)
-			cards = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, stack)
+	layout := authMethodLayout(innerWidth)
+	render := func(l cardLayout) string {
+		oauthCard := m.renderCard(oauthCardLabel, m.selected == 0, l.w, l.h)
+		apiKeyCard := m.renderCard("API Key", m.selected == 1, l.w, l.h)
+		cards := lipgloss.JoinVertical(lipgloss.Left, oauthCard, apiKeyCard)
+		if !l.stacked {
+			cards = lipgloss.JoinHorizontal(lipgloss.Top, oauthCard, strings.Repeat(" ", l.gap), apiKeyCard)
 		}
-		rc.AddPart(cards)
-
-		rc.Help = "\n" + renderDialogHelp(t, &m.help, m, innerWidth)
-
-		if m.isOnboarding {
-			rc.Title = ""
-			rc.IsOnboarding = true
-		}
-		return rc.Render()
+		withCards := *rc
+		withCards.Parts = append(slices.Clip(rc.Parts),
+			lipgloss.NewStyle().Padding(0, authMethodCardMargin).Render(cards))
+		return withCards.Render()
 	}
 
 	// Shrink the cards to fit a short screen; stacked cards share the cut.
-	cardHeight := authMethodCardHeight
-	view := render(cardHeight)
+	view := render(layout)
 	if over := lipgloss.Height(view) - area.Dy(); over > 0 {
 		cards := 1
-		if !sideBySide {
+		if layout.stacked {
 			cards = 2
 		}
-		cardHeight = max(authMethodMinCardHeight, cardHeight-(over+cards-1)/cards)
-		view = render(cardHeight)
+		layout.h = max(authMethodMinCardHeight, layout.h-(over+cards-1)/cards)
+		view = render(layout)
 	}
-	m.updateCardAreas(area, view, sideBySide, cardWidth, cardGap, innerWidth, cardHeight, lipgloss.Height(prompt))
-	if m.isOnboarding {
-		DrawOnboardingCursor(scr, area, view, nil)
-	} else {
-		DrawCenter(scr, area, view)
-	}
-	return nil
-}
-
-// updateCardAreas records where each card lands on screen so mouse clicks
-// can be mapped back to a choice.
-func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide bool, cardWidth, cardGap, innerWidth, cardHeight, promptHeight int) {
-	m.oauthCardArea = image.Rectangle{}
-	m.apiKeyCardArea = image.Rectangle{}
 
 	viewWidth, viewHeight := lipgloss.Size(view)
 	viewWidth = min(viewWidth, area.Dx())
 	viewHeight = min(viewHeight, area.Dy())
-	var frame lipgloss.Style
-	var origin image.Point
+	origin := common.CenterRect(area, viewWidth, viewHeight).Min
 	if m.isOnboarding {
 		origin = common.BottomLeftRect(area, viewWidth, viewHeight).Min
-	} else {
-		frame = m.com.Styles.Dialog.View
-		origin = common.CenterRect(area, viewWidth, viewHeight).Min
 	}
-	contentLeft := origin.X + frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
-	contentTop := origin.Y + frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
+	m.updateCardAreas(origin.Add(cardsAt).Add(image.Pt(authMethodCardMargin, 0)), layout)
 
-	// Lines above the cards: the prompt block (which wraps on narrow
-	// screens and carries its surrounding blank lines), plus the title
-	// outside onboarding.
-	cardsTop := contentTop + promptHeight
-	if !m.isOnboarding {
-		cardsTop++
-	}
+	authDraw(scr, area, view, nil, m.isOnboarding)
+	return nil
+}
 
-	groupWidth := cardWidth
-	if sideBySide {
-		groupWidth = 2*cardWidth + cardGap
+// updateCardAreas records where each card lands on screen, with the first
+// card's top-left corner at at, so mouse clicks can be mapped back to a
+// choice.
+func (m *AuthMethod) updateCardAreas(at image.Point, l cardLayout) {
+	m.oauthCardArea = image.Rect(at.X, at.Y, at.X+l.w, at.Y+l.h)
+	next := image.Pt(l.w+l.gap, 0)
+	if l.stacked {
+		next = image.Pt(0, l.h)
 	}
-	cardsLeft := contentLeft + max(0, (innerWidth-groupWidth)/2)
-
-	m.oauthCardArea = image.Rect(cardsLeft, cardsTop, cardsLeft+cardWidth, cardsTop+cardHeight)
-	if sideBySide {
-		left := cardsLeft + cardWidth + cardGap
-		m.apiKeyCardArea = image.Rect(left, cardsTop, left+cardWidth, cardsTop+cardHeight)
-	} else {
-		top := cardsTop + cardHeight
-		m.apiKeyCardArea = image.Rect(cardsLeft, top, cardsLeft+cardWidth, top+cardHeight)
-	}
+	m.apiKeyCardArea = m.oauthCardArea.Add(next)
 }
 
 // renderCard renders one auth option as a bordered card with its label

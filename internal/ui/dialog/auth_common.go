@@ -1,6 +1,8 @@
 package dialog
 
 import (
+	"image"
+
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -68,19 +70,30 @@ func authFrame(t *styles.Styles, width int, title, body, help string, cur *tea.C
 		rc.AddPart(t.Dialog.PrimaryText.Render(title))
 	}
 	if cur != nil {
-		// Whatever renders before the body pushes it down.
-		above := *rc
-		above.IsOnboarding = true
-		if s := above.Render(); s != "" {
-			cur.Y += lipgloss.Height(s)
-		}
-		if !onboarding {
-			cur = offsetByFrame(rc.ViewStyle, cur)
-		}
+		origin := nextPartOrigin(rc)
+		cur.X += origin.X
+		cur.Y += origin.Y
 	}
 	rc.AddPart(body)
 	rc.Help = help
 	return rc.Render(), cur
+}
+
+// nextPartOrigin is where the next part added to rc lands in its rendered
+// view: below the title and the parts so far, inside the frame. It
+// assumes no gap between parts, as the sign-in dialogs use.
+func nextPartOrigin(rc *RenderContext) image.Point {
+	above := *rc
+	above.IsOnboarding = true
+	above.Help = ""
+	origin := tea.NewCursor(0, 0)
+	if s := above.Render(); s != "" {
+		origin.Y = lipgloss.Height(s)
+	}
+	if !rc.IsOnboarding {
+		origin = offsetByFrame(rc.ViewStyle, origin)
+	}
+	return image.Pt(origin.X, origin.Y)
 }
 
 // offsetByFrame moves cur, relative to the content of a block drawn in

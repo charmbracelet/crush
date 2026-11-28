@@ -68,12 +68,12 @@ func (c *controllerV1) handlePostWorkspaceTheme(w http.ResponseWriter, r *http.R
 // its own colors until the host changes theme again. It runs after the
 // stream subscribed, so an update racing the attach is delivered again by
 // the event loop rather than lost; clients drop the duplicate.
-func (c *controllerV1) replayHostTheme(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, workspaceID string) {
+func (c *controllerV1) replayHostTheme(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, workspaceID string) error {
 	st, err := c.backend.GetHostTheme(workspaceID)
 	if err != nil || st.Theme == nil {
-		return
+		return nil
 	}
-	c.writeEvent(w, r, flusher, pubsub.Event[proto.HostThemeState]{
+	return c.writeEvent(w, r, flusher, pubsub.Event[proto.HostThemeState]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: st,
 	})
@@ -82,16 +82,20 @@ func (c *controllerV1) replayHostTheme(w http.ResponseWriter, r *http.Request, f
 // replayClientSessions writes the session each client of the workspace
 // views to a client that just attached its event stream, so that it knows
 // the sessions of the clients that were already there. It runs after the
-// stream subscribed, like replayHostTheme.
-func (c *controllerV1) replayClientSessions(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, workspaceID string) {
+// stream subscribed, like replayHostTheme. Both return an error only when
+// the stream can no longer be written to.
+func (c *controllerV1) replayClientSessions(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, workspaceID string) error {
 	sessions, err := c.backend.ClientSessions(workspaceID)
 	if err != nil {
-		return
+		return nil
 	}
 	for _, s := range sessions {
-		c.writeEvent(w, r, flusher, pubsub.Event[proto.ClientSession]{
+		if err := c.writeEvent(w, r, flusher, pubsub.Event[proto.ClientSession]{
 			Type:    pubsub.UpdatedEvent,
 			Payload: s,
-		})
+		}); err != nil {
+			return err
+		}
 	}
+	return nil
 }

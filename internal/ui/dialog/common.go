@@ -3,6 +3,7 @@ package dialog
 import (
 	"cmp"
 	"image/color"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -430,4 +431,11 @@ func (rc *RenderContext) Render() string {
 		return content
 	}
 	return dialogStyle.Render(content)
+}
+
+// ChromeHeight is the height Render adds around one more body part: title, gaps, parts so far, help and frame.
+func (rc *RenderContext) ChromeHeight() int {
+	probe := *rc
+	probe.Parts = append(slices.Clip(rc.Parts), " ")
+	return lipgloss.Height(probe.Render()) - 1
 }

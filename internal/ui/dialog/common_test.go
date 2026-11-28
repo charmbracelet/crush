@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -73,4 +74,25 @@ func TestShortHelpLineAlwaysMarksDroppedHints(t *testing.T) {
 	// Too narrow for anything but the ellipsis.
 	require.Equal(t, "…", ansi.Strip(shortHelpLine(&h, bindings, 3)))
 	require.Empty(t, shortHelpLine(&h, bindings, 0))
+}
+
+// TestRenderContextChromeHeight verifies ChromeHeight leaves exactly the
+// room a body of any height needs to fill the rendered dialog.
+func TestRenderContextChromeHeight(t *testing.T) {
+	t.Parallel()
+	com := newPickerTestCommon()
+	for _, gap := range []int{0, 1} {
+		for _, withPart := range []bool{false, true} {
+			rc := NewRenderContext(com.Styles, 40)
+			rc.Title = "Title"
+			rc.Gap = gap
+			rc.Help = "help"
+			if withPart {
+				rc.AddPart("input")
+			}
+			chrome := rc.ChromeHeight()
+			rc.AddPart("a\nb\nc")
+			require.Equal(t, chrome+3, lipgloss.Height(rc.Render()), "gap=%d part=%v", gap, withPart)
+		}
+	}
 }

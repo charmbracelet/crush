@@ -15,6 +15,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// RequestTimeout bounds how long the prompt server holds a request, so a
+// stuck ssh cannot hold the socket forever.
+const RequestTimeout = 10 * time.Minute
+
 // socketRequest is what the askpass wrapper subprocess sends to the
 // Crush process hosting the socket.
 type socketRequest struct {
@@ -156,8 +160,7 @@ func handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	// Bound the wait so a stuck ssh cannot hold the socket forever.
-	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	reqCtx, cancel := context.WithTimeout(ctx, RequestTimeout)
 	defer cancel()
 
 	// The wrapper sends nothing after its request, so a read only

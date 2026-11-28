@@ -180,6 +180,19 @@ func TestNoticeHoldsUntilDoneWithoutBlockingPrompts(t *testing.T) {
 	require.Equal(t, "touch", (<-notifications).Payload.RequestID)
 }
 
+// TestNoticeWithoutSubscriberReturns verifies a notice nobody can show
+// returns at once instead of holding the askpass helper until ctx ends.
 func TestNoticeWithoutSubscriberReturns(t *testing.T) {
-	NewPrompts().Notice(t.Context(), PromptRequest{Kind: KindTouch})
+	t.Parallel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		NewPrompts().Notice(t.Context(), PromptRequest{Kind: KindTouch})
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("notice without a subscriber blocked")
+	}
 }

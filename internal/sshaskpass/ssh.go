@@ -8,20 +8,28 @@ import (
 )
 
 // ClassifyPrompt maps an OpenSSH askpass prompt to the credential kind
-// and a short key/account hint for the dialog. Passive security key
-// touches become KindTouch (surfaced as a warning and confirmed
-// automatically); genuine decision questions (host key acceptance,
-// ssh-add key use) become KindConfirm; everything else is treated as a
-// secret prompt.
+// and, for secret prompts, a short key/account hint for the dialog.
+// Passive security key touches become KindTouch (surfaced as a warning
+// until the touch lands, never answered); genuine decision questions
+// (host key acceptance, ssh-add key use) become KindConfirm; everything
+// else is treated as a secret prompt.
 func ClassifyPrompt(prompt string) (kind Kind, keyInfo string) {
-	lower := strings.ToLower(strings.TrimSpace(prompt))
+	kind = promptKind(strings.ToLower(strings.TrimSpace(prompt)))
+	if kind == KindPassword {
+		keyInfo = keyInfoFromPrompt(prompt)
+	}
+	return kind, keyInfo
+}
+
+// promptKind classifies a lowercased prompt by the answer it needs.
+func promptKind(lower string) Kind {
 	switch {
 	case isTouchPrompt(lower):
-		return KindTouch, ""
+		return KindTouch
 	case isConfirmPrompt(lower):
-		return KindConfirm, ""
+		return KindConfirm
 	default:
-		return KindPassword, keyInfoFromPrompt(prompt)
+		return KindPassword
 	}
 }
 
@@ -30,36 +38,16 @@ func ClassifyPrompt(prompt string) (kind Kind, keyInfo string) {
 // short title for the dialog heading and a human-readable description
 // of what is being asked for. The raw prompt is preserved on the result.
 func ParsePrompt(prompt string) PromptRequest {
-	kind, keyInfo := ClassifyPrompt(prompt)
 	lower := strings.ToLower(prompt)
-
-	// ssh-add asks "Allow use of key ...?" with the key path inline,
-	// which ClassifyPrompt leaves out because confirmations never hide
-	// an account behind it.
-	if kind == KindConfirm && strings.Contains(lower, "allow use of key") {
-		keyInfo = keyInfoFromPrompt(prompt)
-	}
-
+	kind := promptKind(lower)
 	style := classifyStyle(lower, kind)
-	message := style.message(prompt, keyInfo)
-
-	// Host key questions are only answerable with the host and the
-	// fingerprint in view, both of which OpenSSH puts in the prompt.
-	if style == styleHostKey {
-		host, keyType, fingerprint := hostKeyFromPrompt(prompt)
-		keyInfo = fingerprint
-		if host != "" {
-			message = "OpenSSH has not seen " + host + " before. Trust its " +
-				strings.TrimSpace(keyType+" key") + "?"
-		}
-	}
-
+	keyInfo := style.keyInfo(prompt)
 	return PromptRequest{
 		Prompt:  prompt,
 		Kind:    kind,
 		KeyInfo: keyInfo,
 		Title:   style.title(),
-		Message: message,
+		Message: style.message(prompt, keyInfo),
 	}
 }
 
@@ -173,6 +161,21 @@ func (s promptStyle) title() string {
 	}
 }
 
+// keyInfo extracts the hint shown under the message: the fingerprint for
+// host key questions (only answerable with it in view), nothing for
+// touches, and the account or key path for everything else.
+func (s promptStyle) keyInfo(prompt string) string {
+	switch s {
+	case styleTouch:
+		return ""
+	case styleHostKey:
+		_, _, fingerprint := hostKeyFromPrompt(prompt)
+		return fingerprint
+	default:
+		return keyInfoFromPrompt(prompt)
+	}
+}
+
 // message describes what OpenSSH is asking for, in friendly terms.
 // Phrasing Crush does not recognize falls back to the raw prompt text.
 func (s promptStyle) message(prompt, keyInfo string) string {
@@ -180,6 +183,10 @@ func (s promptStyle) message(prompt, keyInfo string) string {
 	case styleTouch:
 		return "Tap your security key to continue."
 	case styleHostKey:
+		if host, keyType, _ := hostKeyFromPrompt(prompt); host != "" {
+			return "OpenSSH has not seen " + host + " before. Trust its " +
+				strings.TrimSpace(keyType+" key") + "?"
+		}
 		return "OpenSSH has not seen this host before. Trust its key?"
 	case styleKeyUse:
 		if keyInfo != "" {

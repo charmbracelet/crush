@@ -3,9 +3,9 @@
 // sftp, ssh-add, or anything that shells out to OpenSSH such as
 // git-over-ssh or rsync) run with SSH_ASKPASS pointed at a hidden Crush
 // subcommand that forwards the prompt over a Unix socket to the Crush
-// process that owns the terminal; the UI shows a masked password dialog
-// or, for confirmations (security key touches, host key acceptance), a
-// confirm dialog.
+// process that owns the terminal; the UI shows a masked password dialog,
+// a confirm dialog for decisions (host key acceptance, ssh-add key use),
+// or a status warning while a security key waits for a touch.
 package sshaskpass
 
 import (
@@ -31,14 +31,14 @@ const (
 	KindConfirm Kind = "confirm"
 	// KindTouch is a passive security key touch (FIDO user presence, a
 	// "touch your device" instruction). The physical touch is the
-	// approval, so the UI just surfaces a warning and confirms
-	// automatically; no input is collected.
+	// approval, so the UI just surfaces a warning until it lands; no
+	// input is collected and no answer is sent.
 	KindTouch Kind = "touch"
 )
 
 // PromptRequest describes a credential or confirmation the user must
 // provide. It is published over pubsub and rendered by the UI as a
-// masked-input or confirm dialog, or auto-confirmed as a touch warning.
+// masked-input or confirm dialog, or shown as a touch warning.
 // The resolved secret is never carried on this type.
 type PromptRequest struct {
 	// ID identifies the request; used to correlate the response.
@@ -137,12 +137,9 @@ func (s *Prompts) SubscribeNotifications(ctx context.Context) <-chan pubsub.Even
 func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error) {
 	// Without a listener the prompt would hang until the context dies;
 	// callers use ErrNoPrompter to abort cleanly instead.
-	if s.broker.GetSubscriberCount() == 0 {
+	req, ok := s.stamp(req)
+	if !ok {
 		return "", ErrNoPrompter
-	}
-
-	if req.ID == "" {
-		req.ID = uuid.New().String()
 	}
 	if req.Kind == "" {
 		req.Kind = KindPassword
@@ -193,15 +190,25 @@ func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error)
 // a resolution notification and drop the notice. Notices do not take a
 // turn, so a pending touch never holds up a credential prompt.
 func (s *Prompts) Notice(ctx context.Context, req PromptRequest) {
-	if s.broker.GetSubscriberCount() == 0 {
+	req, ok := s.stamp(req)
+	if !ok {
 		return
-	}
-	if req.ID == "" {
-		req.ID = uuid.New().String()
 	}
 	s.broker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, req)
 	<-ctx.Done()
 	s.notify(req.ID)
+}
+
+// stamp gives req an ID if it has none, and reports false when nobody is
+// subscribed to answer or show it.
+func (s *Prompts) stamp(req PromptRequest) (PromptRequest, bool) {
+	if s.broker.GetSubscriberCount() == 0 {
+		return req, false
+	}
+	if req.ID == "" {
+		req.ID = uuid.New().String()
+	}
+	return req, true
 }
 
 // notify publishes a resolution so clients close the matching dialog.

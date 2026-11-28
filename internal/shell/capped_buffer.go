@@ -57,6 +57,13 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// size returns how many bytes the buffer holds in memory.
+func (b *cappedBuffer) size() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return cap(b.head) + cap(b.ring)
+}
+
 func (b *cappedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()

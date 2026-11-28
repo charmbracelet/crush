@@ -441,3 +441,53 @@ func TestBackgroundShellManager_PruneDropsOldestFinished(t *testing.T) {
 
 	require.NoError(t, manager.Kill(t.Context(), bgShell.ID))
 }
+
+func TestBackgroundShellManager_PruneBoundsFinishedOutput(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	manager.maxFinishedOutput = 2*1024 + 512
+	out := []byte(strings.Repeat("x", 1024))
+	now := time.Now().Unix()
+	for i := range 4 {
+		id := fmt.Sprintf("done-%d", i)
+		track(manager, id, now+int64(i))
+		_, err := manager.shells[id].stdout.Write(out)
+		require.NoError(t, err)
+	}
+	track(manager, "running", 0)
+	_, err := manager.shells["running"].stdout.Write([]byte(strings.Repeat("x", 4096)))
+	require.NoError(t, err)
+
+	manager.mu.Lock()
+	running := manager.prune()
+	manager.mu.Unlock()
+	require.Equal(t, 1, running)
+
+	for _, id := range []string{"done-0", "done-1"} {
+		_, ok := manager.Get(id)
+		require.False(t, ok, "oldest finished jobs beyond the byte budget are dropped")
+	}
+	for _, id := range []string{"done-2", "done-3", "running"} {
+		_, ok := manager.Get(id)
+		require.True(t, ok, "newer finished jobs and running jobs are kept")
+	}
+}
+
+func TestBackgroundShellManager_PrunesWhenJobFinishes(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	bgShell, err := manager.Start(t.Context(), nil, t.TempDir(), nil, CoreutilsTurtle, "sleep 0.5", "", testMaxJobs)
+	require.NoError(t, err)
+
+	manager.mu.Lock()
+	track(manager, "stale", time.Now().Add(-CompletedJobRetention).Unix()-1)
+	manager.mu.Unlock()
+
+	bgShell.Wait()
+	_, ok := manager.Get("stale")
+	require.False(t, ok, "finishing a job prunes without waiting for the next Start")
+	_, ok = manager.Get(bgShell.ID)
+	require.True(t, ok, "the job that just finished stays readable")
+}

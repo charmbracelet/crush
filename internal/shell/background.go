@@ -19,6 +19,9 @@ const (
 	// CompletedJobRetention is how long a finished job's output stays
 	// readable.
 	CompletedJobRetention = 8 * time.Hour
+	// MaxFinishedOutputBytes bounds the output kept by all finished jobs
+	// together. The oldest are dropped first.
+	MaxFinishedOutputBytes = 64 << 20
 )
 
 // BackgroundShell represents a shell running in the background.
@@ -42,6 +45,8 @@ type BackgroundShell struct {
 type BackgroundShellManager struct {
 	mu     sync.Mutex
 	shells map[string]*BackgroundShell
+	// maxFinishedOutput is the byte budget for finished jobs' output.
+	maxFinishedOutput int
 }
 
 var (
@@ -52,7 +57,10 @@ var (
 
 // newBackgroundShellManager creates a new BackgroundShellManager instance.
 func newBackgroundShellManager() *BackgroundShellManager {
-	return &BackgroundShellManager{shells: map[string]*BackgroundShell{}}
+	return &BackgroundShellManager{
+		shells:            map[string]*BackgroundShell{},
+		maxFinishedOutput: MaxFinishedOutputBytes,
+	}
 }
 
 // GetBackgroundShellManager returns the singleton background shell manager.
@@ -109,17 +117,24 @@ func (m *BackgroundShellManager) Start(ctx context.Context, owner any, workingDi
 
 		bgShell.exitErr = err
 		bgShell.completedAt.Store(time.Now().Unix())
+
+		// Reclaim older finished jobs now rather than on the next Start,
+		// which may never come.
+		m.mu.Lock()
+		m.prune()
+		m.mu.Unlock()
 	}()
 
 	return bgShell, nil
 }
 
-// prune drops finished jobs that are past retention or beyond
-// MaxFinishedJobs, and reports how many jobs are still running. Callers
-// must hold m.mu.
+// prune drops finished jobs that are past retention, beyond
+// MaxFinishedJobs, or beyond the finished output byte budget, and reports
+// how many jobs are still running. Callers must hold m.mu.
 func (m *BackgroundShellManager) prune() (running int) {
 	cutoff := time.Now().Add(-CompletedJobRetention).Unix()
 	var finished []*BackgroundShell
+	var kept int
 	for id, shell := range m.shells {
 		switch at := shell.completedAt.Load(); {
 		case at == 0:
@@ -128,16 +143,24 @@ func (m *BackgroundShellManager) prune() (running int) {
 			delete(m.shells, id)
 		default:
 			finished = append(finished, shell)
+			kept += shell.outputSize()
 		}
 	}
 
-	if over := len(finished) - MaxFinishedJobs; over > 0 {
-		slices.SortFunc(finished, func(a, b *BackgroundShell) int {
-			return cmp.Compare(a.completedAt.Load(), b.completedAt.Load())
-		})
-		for _, shell := range finished[:over] {
-			delete(m.shells, shell.ID)
+	over := len(finished) - MaxFinishedJobs
+	if over <= 0 && kept <= m.maxFinishedOutput {
+		return running
+	}
+	slices.SortFunc(finished, func(a, b *BackgroundShell) int {
+		return cmp.Compare(a.completedAt.Load(), b.completedAt.Load())
+	})
+	for _, shell := range finished {
+		if over <= 0 && kept <= m.maxFinishedOutput {
+			break
 		}
+		delete(m.shells, shell.ID)
+		kept -= shell.outputSize()
+		over--
 	}
 	return running
 }
@@ -260,6 +283,11 @@ func (bs *BackgroundShell) GetOutput() (stdout string, stderr string, done bool,
 	default:
 		return bs.stdout.String(), bs.stderr.String(), false, nil
 	}
+}
+
+// outputSize returns how many bytes of output the shell holds.
+func (bs *BackgroundShell) outputSize() int {
+	return bs.stdout.size() + bs.stderr.size()
 }
 
 // OutputSeq returns a counter that increments whenever stdout or stderr

@@ -58,10 +58,12 @@ const (
 )
 
 const (
-	defaultPollInterval = 100 * time.Millisecond
-	defaultReopenWindow = 300 * time.Millisecond
-	defaultTouchGrace   = 800 * time.Millisecond
-	defaultTouchMax     = 3 * time.Minute
+	defaultPollInterval     = 100 * time.Millisecond
+	defaultSlowPollInterval = time.Second
+	defaultFastWindow       = 5 * time.Second
+	defaultReopenWindow     = 300 * time.Millisecond
+	defaultTouchGrace       = 800 * time.Millisecond
+	defaultTouchMax         = 3 * time.Minute
 )
 
 // Service watches the process table for terminal-based pinentry dialogs
@@ -87,23 +89,32 @@ type Service struct {
 	ctrlL bool
 	last  Event
 
-	lister       Lister
+	lister Lister
+	// pollInterval is the polling rate while a command recently started,
+	// gpg is around, or a dialog is active.
 	pollInterval time.Duration
-	reopenWindow time.Duration
-	touchGrace   time.Duration
-	touchMax     time.Duration
+	// slowPollInterval is the polling rate once tracked commands have run
+	// for fastWindow without any of the above, so long-running background
+	// jobs do not keep listing processes at the full rate.
+	slowPollInterval time.Duration
+	fastWindow       time.Duration
+	reopenWindow     time.Duration
+	touchGrace       time.Duration
+	touchMax         time.Duration
 }
 
 // NewService creates a new pinentry watcher service.
 func NewService() *Service {
 	return &Service{
-		Broker:       pubsub.NewBroker[Event](),
-		wake:         make(chan struct{}, 1),
-		lister:       psLister,
-		pollInterval: defaultPollInterval,
-		reopenWindow: defaultReopenWindow,
-		touchGrace:   defaultTouchGrace,
-		touchMax:     defaultTouchMax,
+		Broker:           pubsub.NewBroker[Event](),
+		wake:             make(chan struct{}, 1),
+		lister:           psLister,
+		pollInterval:     defaultPollInterval,
+		slowPollInterval: defaultSlowPollInterval,
+		fastWindow:       defaultFastWindow,
+		reopenWindow:     defaultReopenWindow,
+		touchGrace:       defaultTouchGrace,
+		touchMax:         defaultTouchMax,
 	}
 }
 
@@ -123,7 +134,8 @@ func TrackCommand() func() {
 }
 
 // TrackCommand marks the start of a shell command, keeping the watcher
-// polling at full rate while it runs. The returned function marks the end
+// polling while it runs: at full rate at first, then more slowly if the
+// command keeps running without gpg showing up. The returned function marks the end
 // of the command and is safe to call multiple times.
 func (s *Service) TrackCommand() func() {
 	s.mu.Lock()
@@ -170,11 +182,28 @@ func (s *Service) Start(ctx context.Context) {
 }
 
 // loop polls the process table while shell commands are tracked or a
-// pinentry dialog is active, and sleeps otherwise.
+// pinentry dialog is active, and sleeps otherwise. It polls at
+// pollInterval for fastWindow after a command starts and while gpg or a
+// dialog is around, and at slowPollInterval otherwise.
 func (s *Service) loop(ctx context.Context) {
+	// Since Go 1.23, Stop and Reset never leave a stale value in timer.C.
+	timer := time.NewTimer(s.pollInterval)
+	timer.Stop()
+	defer timer.Stop()
+
+	var lastActive time.Time
 	for {
+		// A command that started since the last poll restarts the fast
+		// polling window.
+		select {
+		case <-s.wake:
+			lastActive = time.Now()
+		default:
+		}
+
+		now := time.Now()
 		s.mu.Lock()
-		busy := s.tracked > 0 || s.state != stateIdle || !s.gpgWait.IsZero()
+		busy, active := s.busyLocked(now)
 		s.mu.Unlock()
 
 		if !busy {
@@ -182,14 +211,31 @@ func (s *Service) loop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-s.wake:
+				lastActive = time.Now()
 			}
 			continue
 		}
+		if active {
+			lastActive = now
+		}
 
+		interval := s.pollInterval
+		var wake <-chan struct{}
+		if now.Sub(lastActive) >= s.fastWindow {
+			// While polling slowly, a new command switches back to the
+			// fast rate at once.
+			interval = s.slowPollInterval
+			wake = s.wake
+		}
+		timer.Reset(interval)
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(s.pollInterval):
+		case <-wake:
+			timer.Stop()
+			lastActive = time.Now()
+			continue
+		case <-timer.C:
 		}
 
 		procs, err := s.lister(ctx)
@@ -199,6 +245,15 @@ func (s *Service) loop(ctx context.Context) {
 		}
 		s.tick(time.Now(), procs)
 	}
+}
+
+// busyLocked reports whether the watcher should poll, and whether it should
+// poll at the fast rate regardless of how long commands have been running.
+// Callers must hold s.mu.
+func (s *Service) busyLocked(_ time.Time) (busy, active bool) {
+	gpg := !s.gpgWait.IsZero()
+	active = s.state != stateIdle || gpg
+	return s.tracked > 0 || active, active
 }
 
 // tick advances the watcher state machine with a process table snapshot.

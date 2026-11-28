@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -448,4 +449,39 @@ func TestServiceDetectsRealProcess(t *testing.T) {
 	require.NoError(t, gpgCmd.Process.Kill())
 	_ = gpgCmd.Wait()
 	expectEvent(Event{})
+}
+
+func TestServiceBacksOffDuringLongCommands(t *testing.T) {
+	t.Parallel()
+
+	s := newTestService()
+	s.pollInterval = time.Millisecond
+	s.slowPollInterval = time.Hour
+	s.fastWindow = 200 * time.Millisecond
+	var calls atomic.Int64
+	s.lister = func(context.Context) ([]Proc, error) {
+		calls.Add(1)
+		return nil, nil
+	}
+
+	ctx := t.Context()
+	s.Start(ctx)
+
+	// A command starts: fast polling.
+	done := s.TrackCommand()
+	defer done()
+	require.Eventually(t, func() bool { return calls.Load() >= 3 }, 5*time.Second, time.Millisecond)
+
+	// The command keeps running without gpg: polling slows down.
+	require.Eventually(t, func() bool {
+		n := calls.Load()
+		time.Sleep(50 * time.Millisecond)
+		return calls.Load() == n
+	}, 5*time.Second, time.Millisecond)
+
+	// Another command starts: back to fast polling at once.
+	n := calls.Load()
+	done2 := s.TrackCommand()
+	defer done2()
+	require.Eventually(t, func() bool { return calls.Load() >= n+3 }, 5*time.Second, time.Millisecond)
 }

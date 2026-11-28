@@ -422,6 +422,9 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
+	// sidebarFiles memoizes the sidebar's modified files section, which
+	// renders every changed file; see sidebarFilesSection.
+	sidebarFiles sidebarFilesCache
 
 	// Sidebar scroll state for virtual scrolling.
 	sidebarOffset           int  // current scroll offset in lines
@@ -5513,6 +5516,7 @@ func (m *UI) previewTheme(s styles.Styles) {
 func (m *UI) refreshStyles() {
 	t := m.com.Styles
 	m.invalidateSkillItems()
+	m.sidebarFiles = sidebarFilesCache{}
 	m.header.refresh()
 	if m.layout.sidebar.Dx() > 0 {
 		m.cacheSidebarLogo(m.layout.sidebar.Dx())

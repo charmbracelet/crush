@@ -95,6 +95,12 @@ const hyperCreditsPollInterval = 60 * time.Second
 // has to be polled to stay current.
 const gitBranchPollInterval = 5 * time.Second
 
+// gitBranchBlurredPollInterval replaces gitBranchPollInterval while the
+// terminal window is known to be unfocused. Each poll also wakes the TTL
+// backstop, which re-probes every workspace state and redraws, so an idle,
+// unfocused Crush polls rarely. The branch is read again on focus.
+const gitBranchBlurredPollInterval = 30 * time.Second
+
 // gitBranchFetchTimeout bounds one branch read. Locally this is a file
 // read; in client/server mode it is a request to the server.
 const gitBranchFetchTimeout = 10 * time.Second
@@ -222,8 +228,9 @@ type (
 		branch string
 	}
 
-	// gitBranchPollMsg is sent by the git branch poll timer.
-	gitBranchPollMsg struct{}
+	// gitBranchPollMsg is sent by the git branch poll timer. gen is the
+	// poll generation the timer was armed for.
+	gitBranchPollMsg struct{ gen uint64 }
 )
 
 // UI represents the main user interface model.
@@ -554,6 +561,10 @@ type UI struct {
 	// locally and a request in client/server mode, so renders take it from
 	// here rather than asking the workspace per frame.
 	gitBranch string
+	// gitBranchPollGen is the generation of the live branch poll timer. A
+	// tick from an older generation belongs to a superseded timer and is
+	// dropped, so restarting the poll never runs two timers at once.
+	gitBranchPollGen uint64
 
 	// nerdFonts reports whether the terminal renders Nerd Font glyphs.
 	nerdFonts bool
@@ -944,7 +955,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uv.UnknownOscEvent:
 		m.updateNotificationBackend()
 	case tea.FocusMsg:
+		slowPoll := m.gitBranchPollDelay() == gitBranchBlurredPollInterval
 		m.notifyWindowFocused = true
+		if slowPoll {
+			// The branch poll slowed down while unfocused: catch up on
+			// checkouts made in the meantime and restart the poll at the
+			// regular interval, superseding the slow timer.
+			m.gitBranchPollGen++
+			cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
+		}
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
 	case dialog.CollapseInlineMsg:
@@ -1661,7 +1680,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case nerdFontsMsg:
 		m.nerdFonts = bool(msg)
 	case gitBranchPollMsg:
-		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
+		if cmd := m.handleGitBranchPoll(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2949,9 +2970,29 @@ func (m *UI) fetchGitBranch() tea.Cmd {
 
 // gitBranchTicker schedules the next git branch poll.
 func (m *UI) gitBranchTicker() tea.Cmd {
-	return tea.Tick(gitBranchPollInterval, func(time.Time) tea.Msg {
-		return gitBranchPollMsg{}
+	gen := m.gitBranchPollGen
+	return tea.Tick(m.gitBranchPollDelay(), func(time.Time) tea.Msg {
+		return gitBranchPollMsg{gen: gen}
 	})
+}
+
+// handleGitBranchPoll reads the branch and re-arms the poll timer, unless
+// the tick belongs to a superseded timer.
+func (m *UI) handleGitBranchPoll(msg gitBranchPollMsg) tea.Cmd {
+	if msg.gen != m.gitBranchPollGen {
+		return nil
+	}
+	return tea.Batch(m.fetchGitBranch(), m.gitBranchTicker())
+}
+
+// gitBranchPollDelay is the delay before the next git branch poll. It is
+// longer while the window is known to be unfocused; terminals that do not
+// report focus always poll at the regular interval.
+func (m *UI) gitBranchPollDelay() time.Duration {
+	if m.caps.ReportFocusEvents && !m.notifyWindowFocused {
+		return gitBranchBlurredPollInterval
+	}
+	return gitBranchPollInterval
 }
 
 // restoreModelFromSession checks the last assistant message in the

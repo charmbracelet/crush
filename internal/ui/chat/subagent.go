@@ -83,20 +83,37 @@ func (s *SubAgentReportItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 
 func (s *SubAgentReportItem) Render(width int) string {
 	// Same left gutter the tool items use, so a report lines up with the
-	// tool calls around it instead of sitting in its own column.
-	prefix := s.sty.Messages.ToolCallBlurred.Render()
+	// tool calls around it instead of sitting in its own column. The
+	// prefixed output only depends on the width and the focus variant; a
+	// highlight is applied on top and is never cached, since it changes on
+	// every step of a selection drag.
+	var key uint64
 	if s.focused {
-		prefix = s.sty.Messages.ToolCallFocused.Render()
+		key = 1
 	}
-	lines := strings.Split(s.RawRender(width-MessageLeftPaddingTotal), "\n")
-	for i, ln := range lines {
-		lines[i] = prefix + ln
+	out, ok := s.getCachedPrefixedRender(width, key)
+	if !ok {
+		prefix := s.sty.Messages.ToolCallBlurred.Render()
+		if s.focused {
+			prefix = s.sty.Messages.ToolCallFocused.Render()
+		}
+		raw := s.RawRender(width - MessageLeftPaddingTotal)
+		out = prefix + strings.ReplaceAll(raw, "\n", "\n"+prefix)
+		s.setCachedPrefixedRender(out, width, key)
 	}
-	out := strings.Join(lines, "\n")
+	if !s.isHighlighted() {
+		return out
+	}
 	return s.renderHighlighted(out, width, lipgloss.Height(out))
 }
 
+// RawRender renders the report without the gutter prefix. The result is
+// cached by width: the report text never changes after construction, and
+// ToggleExpanded and theme changes clear the cache.
 func (s *SubAgentReportItem) RawRender(width int) string {
+	if cached, _, ok := s.getCachedRender(width); ok {
+		return cached
+	}
 	cappedWidth := cappedMessageWidth(width)
 
 	status := ToolStatusSuccess
@@ -108,5 +125,7 @@ func (s *SubAgentReportItem) RawRender(width int) string {
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	// Already padded to sit under the header text.
 	body := toolOutputMarkdownContent(s.sty, s.output, bodyWidth, s.expandedContent)
-	return joinToolParts(header, body)
+	out := joinToolParts(header, body)
+	s.setCachedRender(out, width, lipgloss.Height(out))
+	return out
 }

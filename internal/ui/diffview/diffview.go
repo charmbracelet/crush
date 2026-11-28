@@ -464,8 +464,11 @@ outer:
 		afterLine := h.ToLine
 
 		for j, l := range h.Lines {
-			// print ellipis if we don't have enough space to print the rest of the diff
-			hasReachedHeight := dv.height > 0 && printedLines+1 == dv.height
+			// Print an ellipsis if there is no room for the rest of the diff.
+			// A hunk header on the last row moves printedLines past the
+			// height, so compare with >= to stop there too; rows past the
+			// height are clipped by MaxHeight anyway.
+			hasReachedHeight := dv.height > 0 && printedLines+1 >= dv.height
 			isLastHunk := i+1 == len(dv.unified.Hunks)
 			isLastLine := j+1 == len(h.Lines)
 			if hasReachedHeight && (!isLastHunk || !isLastLine) {
@@ -594,8 +597,11 @@ outer:
 		afterLine := h.toLine
 
 		for j, l := range h.lines {
-			// print ellipis if we don't have enough space to print the rest of the diff
-			hasReachedHeight := dv.height > 0 && printedLines+1 == dv.height
+			// Print an ellipsis if there is no room for the rest of the diff.
+			// A hunk header on the last row moves printedLines past the
+			// height, so compare with >= to stop there too; rows past the
+			// height are clipped by MaxHeight anyway.
+			hasReachedHeight := dv.height > 0 && printedLines+1 >= dv.height
 			isLastHunk := i+1 == len(dv.unified.Hunks)
 			isLastLine := j+1 == len(h.lines)
 			if hasReachedHeight && (!isLastHunk || !isLastLine) {

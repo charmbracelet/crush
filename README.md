@@ -643,6 +643,15 @@ The global paths we looks for skills are:
   - `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`
 - Additional paths configured via `options.skills_paths`
 
+To replace the default global paths (for example, to stop loading
+`~/.claude/skills`), list the ones you want with `option global-skill-path`:
+
+```bash
+option global-skill-path ~/.config/crush/skills
+```
+
+`$CRUSH_SKILLS_DIR` still takes priority when it is set.
+
 On top of that, we _also_ load skills in your project from the following
 relative paths:
 

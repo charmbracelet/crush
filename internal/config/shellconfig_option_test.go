@@ -3,6 +3,7 @@ package config_test
 import (
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -116,6 +117,17 @@ option skill-path ./mine`)
 	require.Contains(t, paths, "./mine")
 	require.NotContains(t, paths, "./inherited-a")
 	require.NotContains(t, paths, "./inherited-b")
+}
+
+func TestShellConfigOptionGlobalSkillPathReplacesDefaults(t *testing.T) {
+	t.Setenv("CRUSH_SKILLS_DIR", "")
+	store := loadCrushSh(t, `option global-skill-path /only/mine`)
+
+	paths := store.Config().Options.SkillsPaths
+	require.Contains(t, paths, "/only/mine")
+	for _, dir := range config.GlobalSkillsDirs(nil) {
+		require.NotContains(t, paths, dir)
+	}
 }
 
 func TestShellConfigOptionUnknownKeyFails(t *testing.T) {

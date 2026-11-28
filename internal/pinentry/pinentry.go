@@ -21,6 +21,7 @@ package pinentry
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -84,6 +85,11 @@ type Service struct {
 	// starts when the last dialog closes, and set on the first gpg
 	// sighting when no dialog ever appears (cached credentials).
 	gpgWait time.Time
+	// gpgPIDs are the gpg processes seen on the last poll. A gpg that is
+	// not among them restarts a touch clock that ran past touchMax, since
+	// the watcher may sleep through the exit of a lingering gpg and never
+	// see gpg go away in between.
+	gpgPIDs []int
 	// ctrlL tracks whether the currently active pinentry dialog redraws
 	// on Ctrl-L (ncurses flavors).
 	ctrlL bool
@@ -135,8 +141,8 @@ func TrackCommand() func() {
 
 // TrackCommand marks the start of a shell command, keeping the watcher
 // polling while it runs: at full rate at first, then more slowly if the
-// command keeps running without gpg showing up. The returned function marks the end
-// of the command and is safe to call multiple times.
+// command keeps running without gpg showing up. The returned function
+// marks the end of the command and is safe to call multiple times.
 func (s *Service) TrackCommand() func() {
 	s.mu.Lock()
 	s.tracked++
@@ -250,15 +256,19 @@ func (s *Service) loop(ctx context.Context) {
 // busyLocked reports whether the watcher should poll, and whether it should
 // poll at the fast rate regardless of how long commands have been running.
 // Callers must hold s.mu.
-func (s *Service) busyLocked(_ time.Time) (busy, active bool) {
-	gpg := !s.gpgWait.IsZero()
+func (s *Service) busyLocked(now time.Time) (busy, active bool) {
+	// gpg keeps the watcher busy only for as long as a touch hint can be
+	// shown. Any gpg on the system matches, so an unrelated long-lived gpg
+	// must not keep polling going forever once commands finish. A shown
+	// hint keeps it busy for one more tick, which clears the hint.
+	gpg := !s.gpgWait.IsZero() && (s.last.TouchPending || now.Sub(s.gpgWait) <= s.touchMax)
 	active = s.state != stateIdle || gpg
 	return s.tracked > 0 || active, active
 }
 
 // tick advances the watcher state machine with a process table snapshot.
 func (s *Service) tick(now time.Time, procs []Proc) {
-	pin, ctrlL, gpg := classify(procs)
+	pin, ctrlL, gpgPIDs := classify(procs)
 
 	s.mu.Lock()
 	// justReleased marks the tick in which the handover is released.
@@ -292,13 +302,25 @@ func (s *Service) tick(now time.Time, procs []Proc) {
 		s.ctrlL = false
 	}
 
+	newGPG := false
+	for _, pid := range gpgPIDs {
+		if !slices.Contains(s.gpgPIDs, pid) {
+			newGPG = true
+			break
+		}
+	}
+	s.gpgPIDs = append(s.gpgPIDs[:0], gpgPIDs...)
+
+	gpg := len(gpgPIDs) > 0
+	expired := now.Sub(s.gpgWait) > s.touchMax
 	if !gpg {
 		s.gpgWait = time.Time{}
-	} else if s.state != stateIdle || s.gpgWait.IsZero() {
+	} else if s.state != stateIdle || s.gpgWait.IsZero() || (newGPG && expired) {
 		// While a dialog is open (or may reopen), gpg waiting is explained
 		// by the dialog itself: keep resetting the touch clock so the
 		// grace period starts when the last dialog closes. When no dialog
-		// is involved, the clock starts at the first gpg sighting.
+		// is involved, the clock starts at the first gpg sighting, and
+		// again when a new gpg shows up after the previous wait expired.
 		s.gpgWait = now
 	}
 

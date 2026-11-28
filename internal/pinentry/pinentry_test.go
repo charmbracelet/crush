@@ -44,12 +44,12 @@ func TestClassify(t *testing.T) {
 	handover, ctrlL, gpg := classify([]Proc{{PID: 1, Name: "pinentry-curses"}, {PID: 2, Name: "gpg"}})
 	require.True(t, handover)
 	require.True(t, ctrlL)
-	require.True(t, gpg)
+	require.Equal(t, []int{2}, gpg)
 
 	handover, ctrlL, gpg = classify([]Proc{{PID: 1, Name: "pinentry-tty"}})
 	require.True(t, handover)
 	require.False(t, ctrlL, "pinentry-tty reads raw bytes; Ctrl-L would corrupt the passphrase")
-	require.False(t, gpg)
+	require.Empty(t, gpg)
 
 	handover, ctrlL, _ = classify([]Proc{{PID: 1, Name: "pinentry"}})
 	require.True(t, handover)
@@ -59,13 +59,13 @@ func TestClassify(t *testing.T) {
 	handover, ctrlL, gpg = classify([]Proc{{PID: 1, Name: "pinentry-mac"}, {PID: 2, Name: "pinentry-qt"}})
 	require.False(t, handover)
 	require.False(t, ctrlL)
-	require.False(t, gpg)
+	require.Empty(t, gpg)
 
 	// gpg-agent is not gpg.
 	handover, ctrlL, gpg = classify([]Proc{{PID: 1, Name: "gpg-agent"}})
 	require.False(t, handover)
 	require.False(t, ctrlL)
-	require.False(t, gpg)
+	require.Empty(t, gpg)
 }
 
 func TestResolveFlavor(t *testing.T) {
@@ -253,6 +253,33 @@ func TestWatcherTouchExpiry(t *testing.T) {
 	// drop the hint.
 	tickAll(s, now, gpgOnly, 100*time.Millisecond, 5)
 	require.Equal(t, Event{}, s.last)
+}
+
+func TestWatcherTouchAfterLingeringGPG(t *testing.T) {
+	t.Parallel()
+
+	s := newTestService()
+	s.touchGrace = 100 * time.Millisecond
+	s.touchMax = 500 * time.Millisecond
+	now := time.Now()
+	lingering := []Proc{{PID: 20, Name: "gpg"}}
+
+	// An unrelated gpg outlives the touch wait: the hint is dropped and
+	// the same process does not bring it back.
+	now = tickAll(s, now, lingering, 100*time.Millisecond, 8)
+	require.Equal(t, Event{}, s.last)
+	now = tickAll(s, now, lingering, 100*time.Millisecond, 5)
+	require.Equal(t, Event{}, s.last, "a lingering gpg must not re-arm the touch hint")
+
+	// The watcher sleeps through the exit of the lingering gpg, and the
+	// next command's gpg is already there on the first poll: a new touch
+	// wait starts.
+	now = now.Add(time.Hour)
+	fresh := []Proc{{PID: 30, Name: "gpg"}}
+	s.tick(now, fresh)
+	require.Equal(t, Event{}, s.last)
+	tickAll(s, now.Add(100*time.Millisecond), fresh, 100*time.Millisecond, 2)
+	require.Equal(t, Event{TouchPending: true}, s.last)
 }
 
 func TestWatcherDialogReappearsDuringTouchWait(t *testing.T) {
@@ -484,4 +511,98 @@ func TestServiceBacksOffDuringLongCommands(t *testing.T) {
 	done2 := s.TrackCommand()
 	defer done2()
 	require.Eventually(t, func() bool { return calls.Load() >= n+3 }, 5*time.Second, time.Millisecond)
+}
+
+func TestServiceStopsPollingForLingeringGPG(t *testing.T) {
+	t.Parallel()
+
+	s := newTestService()
+	s.pollInterval = time.Millisecond
+	s.touchGrace = 5 * time.Millisecond
+	s.touchMax = 100 * time.Millisecond
+	var calls atomic.Int64
+	// A gpg process that outlives the command, such as an unrelated
+	// interactive gpg session in another terminal.
+	s.lister = func(context.Context) ([]Proc, error) {
+		calls.Add(1)
+		return []Proc{{PID: 20, Name: "gpg"}}, nil
+	}
+
+	ctx := t.Context()
+	s.Start(ctx)
+	sub := s.Subscribe(ctx)
+
+	expectEvent := func(want Event) {
+		t.Helper()
+		select {
+		case ev := <-sub:
+			require.Equal(t, want, ev.Payload)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for event %+v", want)
+		}
+	}
+
+	done := s.TrackCommand()
+	expectEvent(Event{TouchPending: true})
+	done()
+
+	// Past the maximum touch wait the hint is cleared, and polling stops
+	// even though gpg is still around.
+	expectEvent(Event{})
+	require.Eventually(t, func() bool {
+		n := calls.Load()
+		time.Sleep(50 * time.Millisecond)
+		return calls.Load() == n
+	}, 5*time.Second, time.Millisecond)
+}
+
+func TestServiceTouchAfterLingeringGPGExitsWhileIdle(t *testing.T) {
+	t.Parallel()
+
+	s := newTestService()
+	s.pollInterval = time.Millisecond
+	s.touchGrace = 5 * time.Millisecond
+	s.touchMax = 100 * time.Millisecond
+	var procs atomic.Pointer[[]Proc]
+	lingering := []Proc{{PID: 20, Name: "gpg"}}
+	procs.Store(&lingering)
+	var calls atomic.Int64
+	s.lister = func(context.Context) ([]Proc, error) {
+		calls.Add(1)
+		return *procs.Load(), nil
+	}
+
+	ctx := t.Context()
+	s.Start(ctx)
+	sub := s.Subscribe(ctx)
+
+	expectEvent := func(want Event) {
+		t.Helper()
+		select {
+		case ev := <-sub:
+			require.Equal(t, want, ev.Payload)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for event %+v", want)
+		}
+	}
+
+	// A gpg outlives its command and the touch wait, and the watcher
+	// goes idle.
+	done := s.TrackCommand()
+	expectEvent(Event{TouchPending: true})
+	done()
+	expectEvent(Event{})
+	require.Eventually(t, func() bool {
+		n := calls.Load()
+		time.Sleep(50 * time.Millisecond)
+		return calls.Load() == n
+	}, 5*time.Second, time.Millisecond)
+
+	// The lingering gpg exits while the watcher is idle, and the next
+	// command's gpg is visible on the first poll: the hint still shows.
+	fresh := []Proc{{PID: 30, Name: "gpg"}}
+	procs.Store(&fresh)
+	done = s.TrackCommand()
+	defer done()
+	expectEvent(Event{TouchPending: true})
 }

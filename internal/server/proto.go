@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -245,8 +247,30 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	c.replayHostTheme(w, r, flusher, id)
-	c.replayClientSessions(w, r, flusher, id)
+	// Once events were dropped for this client the stream ends anyway, so
+	// fail a write that is blocked on a client that stopped reading.
+	// Otherwise the loop below never gets to see the overflow, and the
+	// subscription stays attached for as long as the client is stalled.
+	stopUnblock := unblockWritesOnOverflow(flusher, overflow)
+	defer stopUnblock()
+	writeFailed := func(err error) {
+		select {
+		case <-overflow:
+			slog.Warn("Closing event stream of a client that fell behind",
+				"workspace", id, "client_id", clientID)
+		default:
+			c.server.logDebug(r, "Stopping event stream", "error", err)
+		}
+	}
+
+	if err := c.replayHostTheme(w, r, flusher, id); err != nil {
+		writeFailed(err)
+		return
+	}
+	if err := c.replayClientSessions(w, r, flusher, id); err != nil {
+		writeFailed(err)
+		return
+	}
 
 	for {
 		select {
@@ -273,31 +297,69 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			if !c.deliverToClient(r.Context(), id, clientID, ev.Payload) {
 				continue
 			}
-			c.writeEvent(w, r, flusher, ev.Payload)
+			if err := c.writeEvent(w, r, flusher, ev.Payload); err != nil {
+				writeFailed(err)
+				return
+			}
 		case sev, ok := <-sessions:
 			if !ok {
 				sessions = nil
 				continue
 			}
-			c.writeEvent(w, r, flusher, sev)
+			if err := c.writeEvent(w, r, flusher, sev); err != nil {
+				writeFailed(err)
+				return
+			}
 		}
 	}
 }
 
+// unblockWritesOnOverflow expires the stream's write deadline as soon as
+// overflow closes, so that a write blocked on a client that stopped
+// reading fails instead of hanging until the client resumes. A stream
+// that never overflows keeps writing without a deadline, so a client that
+// only pauses loses nothing. The returned func stops the watcher and waits
+// for it; it must run before the handler returns, since the response may
+// not be used after that.
+func unblockWritesOnOverflow(flusher *http.ResponseController, overflow <-chan struct{}) func() {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		select {
+		case <-overflow:
+			// A writer that cannot take a deadline is left as it is; the
+			// handler still ends the stream once its write returns.
+			_ = flusher.SetWriteDeadline(time.Now())
+		case <-done:
+		}
+	})
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
+
 // writeEvent wraps a workspace event in its SSE envelope and writes it to
-// the stream. Events with no wire form are skipped.
-func (c *controllerV1) writeEvent(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, ev any) {
+// the stream. Events with no wire form are skipped. It returns an error
+// when the stream can no longer be written to, in which case the caller
+// ends the stream.
+func (c *controllerV1) writeEvent(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, ev any) error {
 	wrapped := wrapEvent(ev)
 	if wrapped == nil {
-		return
+		return nil
 	}
 	data, err := json.Marshal(wrapped)
 	if err != nil {
 		c.server.logError(r, "Failed to marshal event", "error", err)
-		return
+		return nil
 	}
-	fmt.Fprintf(w, "data: %s\n\n", data)
-	flusher.Flush()
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return err
+	}
+	if err := flusher.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
 }
 
 // handleGetWorkspaceLSPs lists LSP clients for a workspace.

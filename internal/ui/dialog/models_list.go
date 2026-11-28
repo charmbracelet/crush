@@ -30,13 +30,23 @@ func NewModelsList(sty *styles.Styles, groups ...ModelGroup) *ModelsList {
 	return f
 }
 
-// Len returns the number of model items across all groups.
-func (f *ModelsList) Len() int {
+// modelCount returns the number of model items across all groups, filtered or not.
+func (f *ModelsList) modelCount() int {
 	n := 0
 	for _, g := range f.groups {
 		n += len(g.Items)
 	}
 	return n
+}
+
+// HasModels reports whether any group has a model, whatever the filter.
+func (f *ModelsList) HasModels() bool {
+	return f.modelCount() > 0
+}
+
+// VisibleCount returns the number of rows the filter leaves, headers and spacers included.
+func (f *ModelsList) VisibleCount() int {
+	return f.Len()
 }
 
 // SetGroups sets the model groups and updates the list items.
@@ -63,7 +73,7 @@ func (f *ModelsList) SetFilter(q string) {
 // SetSelected sets the selected item index. It overrides the base method to
 // skip non-model items.
 func (f *ModelsList) SetSelected(index int) {
-	if index < 0 || index >= f.Len() {
+	if index < 0 || index >= f.modelCount() {
 		f.List.SetSelected(index)
 		return
 	}
@@ -76,7 +86,7 @@ func (f *ModelsList) SetSelected(index int) {
 		}
 		f.List.SetSelected(index + 1)
 		index++
-		if index >= f.Len() {
+		if index >= f.modelCount() {
 			return
 		}
 	}
@@ -190,7 +200,7 @@ func (f *ModelsList) VisibleItems() []list.Item {
 		return items
 	}
 
-	filterableItems := make([]list.FilterableItem, 0, f.Len())
+	filterableItems := make([]list.FilterableItem, 0, f.modelCount())
 	for _, g := range f.groups {
 		for _, item := range g.Items {
 			filterableItems = append(filterableItems, item)

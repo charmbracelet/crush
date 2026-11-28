@@ -379,10 +379,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	f.addInput()
 
 	msg := emptyNoMatches
-	if m.list.Len() == 0 {
+	if !m.list.HasModels() {
 		msg = "No models available."
 	}
-	f.addList(m.list, m.list.List.Len() == 0, msg, nil)
+	f.addList(m.list, m.list.VisibleCount() == 0, msg, nil)
 
 	cur := m.Cursor()
 	view := f.Render()

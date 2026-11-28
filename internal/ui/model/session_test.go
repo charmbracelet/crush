@@ -10,6 +10,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewSessionFilePaths(t *testing.T) {
+	t.Parallel()
+
+	file := func(path string) SessionFile {
+		return SessionFile{LatestVersion: history.File{Path: path}}
+	}
+
+	require.Equal(t, []string{"/a.go", "/b.go"}, newSessionFilePaths(nil, []SessionFile{file("/a.go"), file("/b.go")}))
+	require.Equal(t, []string{"/c.go"}, newSessionFilePaths(
+		[]SessionFile{file("/a.go"), file("/b.go")},
+		[]SessionFile{file("/b.go"), file("/c.go"), file("/a.go")},
+	))
+	require.Empty(t, newSessionFilePaths(
+		[]SessionFile{file("/a.go")},
+		[]SessionFile{file("/a.go")},
+	))
+}
+
 func TestFileList(t *testing.T) {
 	t.Parallel()
 

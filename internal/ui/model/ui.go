@@ -1098,12 +1098,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sessionFilesUpdatesMsg:
+		cmds = append(cmds, m.startLSPs(newSessionFilePaths(m.sessionFiles, msg.sessionFiles)))
 		m.sessionFiles = msg.sessionFiles
-		var paths []string
-		for _, f := range msg.sessionFiles {
-			paths = append(paths, f.LatestVersion.Path)
-		}
-		cmds = append(cmds, m.startLSPs(paths))
 
 	case modeSwitchedMsg:
 		m.modeSwitching = false

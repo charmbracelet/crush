@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/mcpname"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -43,7 +44,10 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		params = make(map[string]any)
 	}
 
-	tool := strings.TrimPrefix(opts.ToolCall.Name, "mcp_"+config.DockerMCPName+"_")
+	tool := opts.ToolCall.Name
+	if parts, ok := mcpname.Parse(tool); ok {
+		tool = parts.Tool
+	}
 
 	mainParam := opts.ToolCall.Input
 	extraArgs := map[string]string{}
@@ -277,7 +281,7 @@ func (d *DockerMCPToolRenderContext) makeCompactHeader(sty *styles.Styles, tool 
 	return toolHeader(sty, ToolStatusSuccess, name, width, &ToolRenderOpts{Compact: true}, params...)
 }
 
-// IsDockerMCPTool returns true if the tool name is a Docker MCP tool.
+// IsDockerMCPTool reports whether name is an unhashed Docker MCP tool name.
 func IsDockerMCPTool(name string) bool {
-	return strings.HasPrefix(name, "mcp_"+config.DockerMCPName+"_")
+	return mcpname.IsServer(name, config.DockerMCPName)
 }

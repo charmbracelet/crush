@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"image"
 	"strings"
+	"unsafe"
 
 	"charm.land/lipgloss/v2"
 	mcp "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 )
@@ -60,6 +62,46 @@ func (m *UI) modelInfo(width int) string {
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
 }
 
+// sidebarFilesKey identifies the inputs of a rendered sidebar files section.
+// m.sessionFiles is only ever replaced as a whole, never changed in place, so
+// its backing array and length identify its contents. The key's pointer
+// keeps that array alive, so a later slice can never reuse its address.
+type sidebarFilesKey struct {
+	files  *SessionFile
+	n      int
+	cwd    string
+	width  int
+	styles *styles.Styles
+}
+
+// sidebarFilesCache holds the last rendered sidebar files section. It is
+// reset by refreshStyles, since a theme change replaces the styles in place.
+type sidebarFilesCache struct {
+	key     sidebarFilesKey
+	section string
+	valid   bool
+}
+
+// sidebarFilesSection returns the sidebar's modified files section,
+// rendering it only when the session files, working directory, width or
+// styles changed. The section lists every changed file, so rebuilding it on
+// every frame would make each frame cost grow with the number of files.
+func (m *UI) sidebarFilesSection(cwd string, width int) string {
+	key := sidebarFilesKey{
+		files:  unsafe.SliceData(m.sessionFiles),
+		n:      len(m.sessionFiles),
+		cwd:    cwd,
+		width:  width,
+		styles: m.com.Styles,
+	}
+	if m.sidebarFiles.valid && m.sidebarFiles.key == key {
+		return m.sidebarFiles.section
+	}
+	section := m.filesInfo(cwd, width, fileChangeCount(m.sessionFiles), true)
+	m.sidebarFiles = sidebarFilesCache{key: key, section: section, valid: true}
+	return section
+}
+
 // updateSidebarScrollState renders the sidebar content and computes scroll
 // state (scrollability, max offset, clamp) before drawing. This keeps all
 // state mutation in the update path rather than in the draw function.
@@ -98,7 +140,7 @@ func (m *UI) updateSidebarScrollState() {
 	mcpSection := m.mcpInfo(contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
 	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
 	channels := m.channelStatusItems()
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
+	filesSection := m.sidebarFilesSection(m.com.Workspace.WorkingDir(), contentWidth)
 
 	// Build the scrollable content. The subagent section renders empty
 	// until something is dispatched, so it takes no space in a session

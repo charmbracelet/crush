@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -87,15 +86,12 @@ func (s *themeSpacer) Render(width int) string { return strings.Repeat("\n", s.h
 
 // ThemeItem represents a single theme entry in the picker.
 type ThemeItem struct {
-	*list.Versioned
+	pickerRow
 	name       string
 	label      string
 	isCurrent  bool
 	overridden bool
 	t          *styles.Styles
-	m          fuzzy.Match
-	cache      rowCache
-	focused    bool
 	hideInfo   bool
 
 	mode        themesMode
@@ -609,7 +605,7 @@ func (th *Theme) setThemeItems() {
 
 	// "New Theme…" sentinel — no divider above it.
 	items = append(items, &ThemeItem{
-		Versioned: &list.Versioned{},
+		pickerRow: newPickerRow(),
 		name:      newThemeItemName,
 		label:     "New Theme…",
 		t:         th.com.Styles,
@@ -669,7 +665,7 @@ func (th *Theme) newThemeItem(info styles.ThemeInfo, currentTheme string) *Theme
 		label += " (overridden)"
 	}
 	item := &ThemeItem{
-		Versioned:  &list.Versioned{},
+		pickerRow:  newPickerRow(),
 		name:       info.Name,
 		label:      label,
 		isCurrent:  strings.EqualFold(info.Name, currentTheme),
@@ -703,22 +699,6 @@ func (r *ThemeItem) ID() string {
 	return r.name
 }
 
-func (r *ThemeItem) SetFocused(focused bool) {
-	if r.focused != focused {
-		r.cache = nil
-		r.Bump()
-	}
-	r.focused = focused
-}
-
-func (r *ThemeItem) SetMatch(m fuzzy.Match) {
-	if !sameFuzzyMatch(r.m, m) {
-		r.cache = nil
-		r.Bump()
-	}
-	r.m = m
-}
-
 // InfoText returns the secondary text shown on the right of the item.
 func (r *ThemeItem) InfoText() string {
 	if r.isCurrent {
@@ -732,9 +712,8 @@ func (r *ThemeItem) SetHideInfo(v bool) {
 	if r.hideInfo == v {
 		return
 	}
-	r.cache = nil
 	r.hideInfo = v
-	r.Bump()
+	r.invalidate()
 }
 
 func (r *ThemeItem) InputValue() string {
@@ -780,5 +759,5 @@ func (r *ThemeItem) Render(width int) string {
 		}
 	}
 
-	return renderItem(s, r.label, info, r.focused, width, &r.cache, &r.m)
+	return r.render(s, r.label, info, width)
 }

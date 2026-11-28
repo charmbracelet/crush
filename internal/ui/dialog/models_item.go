@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 )
 
 // ModelGroup represents a group of model items.
@@ -65,16 +64,13 @@ func (m *ModelGroup) Render(width int) string {
 
 // ModelItem represents a list item for a model type.
 type ModelItem struct {
-	*list.Versioned
+	pickerRow
 
 	prov      catwalk.Provider
 	model     catwalk.Model
 	modelType ModelType
 
-	cache        rowCache
 	t            *styles.Styles
-	m            fuzzy.Match
-	focused      bool
 	showProvider bool
 }
 
@@ -98,12 +94,11 @@ var _ ListItem = &ModelItem{}
 // NewModelItem creates a new ModelItem.
 func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool) *ModelItem {
 	return &ModelItem{
-		Versioned:    list.NewVersioned(),
+		pickerRow:    newPickerRow(),
 		prov:         prov,
 		model:        model,
 		modelType:    typ,
 		t:            t,
-		cache:        make(rowCache),
 		showProvider: showProvider,
 	}
 }
@@ -124,31 +119,5 @@ func (m *ModelItem) Render(width int) string {
 	if m.showProvider {
 		providerInfo = string(m.prov.Name)
 	}
-	styles := ListItemStyles{
-		ItemBlurred:     m.t.Dialog.NormalItem,
-		ItemFocused:     m.t.Dialog.SelectedItem,
-		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, &m.cache, &m.m)
-}
-
-// SetFocused implements ListItem.
-func (m *ModelItem) SetFocused(focused bool) {
-	if m.focused == focused {
-		return
-	}
-	m.cache = nil
-	m.focused = focused
-	m.Bump()
-}
-
-// SetMatch implements ListItem.
-func (m *ModelItem) SetMatch(fm fuzzy.Match) {
-	if sameFuzzyMatch(m.m, fm) {
-		return
-	}
-	m.cache = nil
-	m.m = fm
-	m.Bump()
+	return m.render(defaultListItemStyles(m.t), m.model.Name, providerInfo, width)
 }

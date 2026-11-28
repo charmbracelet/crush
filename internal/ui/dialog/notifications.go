@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -55,13 +54,10 @@ type Notifications struct {
 
 // NotificationItem represents a notification style list item.
 type NotificationItem struct {
-	*list.Versioned
+	pickerRow
 	style     NotificationStyle
 	isCurrent bool
 	t         *styles.Styles
-	m         fuzzy.Match
-	cache     rowCache
-	focused   bool
 }
 
 var (
@@ -275,7 +271,7 @@ func (n *Notifications) setItems() {
 			continue
 		}
 		item := &NotificationItem{
-			Versioned: list.NewVersioned(),
+			pickerRow: newPickerRow(),
 			style:     style,
 			isCurrent: style.ID == currentStyle,
 			t:         n.com.Styles,
@@ -301,37 +297,11 @@ func (n *NotificationItem) ID() string {
 	return n.style.ID
 }
 
-// SetFocused sets the focus state of the notification item.
-func (n *NotificationItem) SetFocused(focused bool) {
-	if n.focused == focused {
-		return
-	}
-	n.cache = nil
-	n.focused = focused
-	n.Bump()
-}
-
-// SetMatch sets the fuzzy match for the notification item.
-func (n *NotificationItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(n.m, m) {
-		return
-	}
-	n.cache = nil
-	n.m = m
-	n.Bump()
-}
-
 // Render returns the string representation of the notification item.
 func (n *NotificationItem) Render(width int) string {
 	info := ""
 	if n.isCurrent {
 		info = "current"
 	}
-	st := ListItemStyles{
-		ItemBlurred:     n.t.Dialog.NormalItem,
-		ItemFocused:     n.t.Dialog.SelectedItem,
-		InfoTextBlurred: n.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: n.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(st, n.style.Title, info, n.focused, width, &n.cache, &n.m)
+	return n.render(defaultListItemStyles(n.t), n.style.Title, info, width)
 }

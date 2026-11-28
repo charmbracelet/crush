@@ -17,7 +17,7 @@ func TestHasThemeItem(t *testing.T) {
 		&themeSpacer{Versioned: &list.Versioned{}},
 	}))
 	require.True(t, hasThemeItem([]list.Item{
-		&ThemeItem{Versioned: &list.Versioned{}, name: "charmtone"},
+		&ThemeItem{pickerRow: newPickerRow(), name: "charmtone"},
 	}))
 }
 
@@ -27,17 +27,17 @@ func TestHasThemeItem(t *testing.T) {
 func TestThemeRefreshStylesReachesFilteredOutRows(t *testing.T) {
 	t.Parallel()
 	th := NewTheme(newPickerTestCommon())
-	alpha := &ThemeItem{Versioned: &list.Versioned{}, name: "alpha", label: "alpha", t: th.com.Styles}
-	beta := &ThemeItem{Versioned: &list.Versioned{}, name: "beta", label: "beta", t: th.com.Styles}
+	alpha := &ThemeItem{pickerRow: newPickerRow(), name: "alpha", label: "alpha", t: th.com.Styles}
+	beta := &ThemeItem{pickerRow: newPickerRow(), name: "beta", label: "beta", t: th.com.Styles}
 	th.list.SetItems(alpha, beta)
 	alpha.Render(40)
 	beta.Render(40)
-	require.NotNil(t, beta.cache)
+	require.True(t, beta.cache.ok)
 
 	th.list.SetFilter("alpha")
 	th.RefreshStyles()
-	require.Nil(t, alpha.cache)
-	require.Nil(t, beta.cache, "a row hidden by the filter must drop its cached colors too")
+	require.False(t, alpha.cache.ok)
+	require.False(t, beta.cache.ok, "a row hidden by the filter must drop its cached colors too")
 }
 
 // TestSectionHeadersKeepRightPadding verifies picker section headers end

@@ -178,48 +178,11 @@ func (p *PlanHandoffInline) RefreshStyles() {
 }
 
 // RefreshStyles implements [StyleRefresher].
-func (c *CommandItem) RefreshStyles() {
-	c.cache = nil
-	c.Bump()
-}
-
-// RefreshStyles implements [StyleRefresher].
-func (m *ModelItem) RefreshStyles() {
-	m.cache = nil
-	m.Bump()
-}
-
-// RefreshStyles implements [StyleRefresher].
 func (s *SessionItem) RefreshStyles() {
-	s.cache = nil
+	s.pickerRow.RefreshStyles()
 	if s.sessionsMode == sessionsModeUpdating {
 		s.updateTitleInput.SetStyles(sessionRenameInputStyles(s.t))
 	}
-	s.Bump()
-}
-
-// RefreshStyles implements [StyleRefresher].
-func (r *ReasoningItem) RefreshStyles() {
-	r.cache = nil
-	r.Bump()
-}
-
-// RefreshStyles implements [StyleRefresher].
-func (c *ChannelItem) RefreshStyles() {
-	c.cache = nil
-	c.Bump()
-}
-
-// RefreshStyles implements [StyleRefresher].
-func (n *NotificationItem) RefreshStyles() {
-	n.cache = nil
-	n.Bump()
-}
-
-// RefreshStyles implements [StyleRefresher].
-func (i *ThemeItem) RefreshStyles() {
-	i.cache = nil
-	i.Bump()
 }
 
 // RefreshStyles implements [StyleRefresher]. Headers are cached by the

@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/sahilm/fuzzy"
 )
 
 // ChannelsID is the identifier for the channels dialog.
@@ -21,20 +20,17 @@ const ChannelsID = "channels"
 
 // ChannelItem wraps a channel server's ClientInfo as a filterable list item.
 type ChannelItem struct {
-	*list.Versioned
-	info    mcp.ClientInfo
-	t       *styles.Styles
-	m       fuzzy.Match
-	cache   rowCache
-	focused bool
+	pickerRow
+	info mcp.ClientInfo
+	t    *styles.Styles
 }
 
-var _ ListItem = &ChannelItem{Versioned: list.NewVersioned()}
+var _ ListItem = &ChannelItem{pickerRow: newPickerRow()}
 
 // NewChannelItem creates a new ChannelItem.
 func NewChannelItem(t *styles.Styles, info mcp.ClientInfo) *ChannelItem {
 	return &ChannelItem{
-		Versioned: list.NewVersioned(),
+		pickerRow: newPickerRow(),
 		t:         t,
 		info:      info,
 	}
@@ -53,36 +49,9 @@ func (c *ChannelItem) ID() string {
 	return c.info.Name
 }
 
-// SetFocused implements ListItem.
-func (c *ChannelItem) SetFocused(focused bool) {
-	if c.focused == focused {
-		return
-	}
-	c.cache = nil
-	c.focused = focused
-	c.Bump()
-}
-
-// SetMatch implements ListItem.
-func (c *ChannelItem) SetMatch(match fuzzy.Match) {
-	if sameFuzzyMatch(c.m, match) {
-		return
-	}
-	c.cache = nil
-	c.m = match
-	c.Bump()
-}
-
 // Render implements ListItem.
 func (c *ChannelItem) Render(width int) string {
-	itemStyles := ListItemStyles{
-		ItemBlurred:     c.t.Dialog.NormalItem,
-		ItemFocused:     c.t.Dialog.SelectedItem,
-		InfoTextBlurred: c.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
-	}
-
-	return renderItem(itemStyles, c.info.Name, c.infoText(), c.focused, width, &c.cache, &c.m)
+	return c.render(defaultListItemStyles(c.t), c.info.Name, c.infoText(), width)
 }
 
 // infoText is the status shown beside the server name: its connection state,

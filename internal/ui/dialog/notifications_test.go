@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -30,9 +29,9 @@ func drawNotifications(n *Notifications, w, h int) string {
 func TestNotificationItemCachesRender(t *testing.T) {
 	t.Parallel()
 	com := newPickerTestCommon()
-	item := &NotificationItem{Versioned: &list.Versioned{}, style: NotificationStyle{ID: "bell", Title: "Bell"}, t: com.Styles}
+	item := &NotificationItem{pickerRow: newPickerRow(), style: NotificationStyle{ID: "bell", Title: "Bell"}, t: com.Styles}
 	first := item.Render(40)
-	require.Len(t, item.cache, 1)
+	require.True(t, item.cache.ok)
 	require.Equal(t, first, item.Render(40))
 
 	item.SetFocused(true)

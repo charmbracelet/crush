@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,11 +17,11 @@ var ctrlR = tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
 func TestSessionItemCachesRender(t *testing.T) {
 	t.Parallel()
 	com := newPickerTestCommon()
-	item := &SessionItem{Versioned: &list.Versioned{}, Session: session.Session{ID: "a", Title: "alpha", UpdatedAt: time.Now().Unix()}, t: com.Styles}
+	item := &SessionItem{pickerRow: newPickerRow(), Session: session.Session{ID: "a", Title: "alpha", UpdatedAt: time.Now().Unix()}, t: com.Styles}
 	first := item.Render(40)
-	require.Len(t, item.cache, 1)
+	require.True(t, item.cache.ok)
 	require.Equal(t, first, item.Render(40))
-	require.Len(t, item.cache, 1, "a repeat render at the same width reuses the line")
+	require.True(t, item.cache.ok, "a repeat render at the same width reuses the line")
 
 	item.SetFocused(true)
 	require.NotEqual(t, first, item.Render(40), "focus change must invalidate the cache")
@@ -33,7 +32,7 @@ func TestSessionItemCachesRender(t *testing.T) {
 func TestSessionItemRefreshesRelativeTime(t *testing.T) {
 	t.Parallel()
 	com := newPickerTestCommon()
-	item := &SessionItem{Versioned: &list.Versioned{}, Session: session.Session{ID: "a", Title: "alpha", UpdatedAt: time.Now().Unix()}, t: com.Styles}
+	item := &SessionItem{pickerRow: newPickerRow(), Session: session.Session{ID: "a", Title: "alpha", UpdatedAt: time.Now().Unix()}, t: com.Styles}
 	require.Contains(t, item.Render(60), "now")
 
 	// The same session, a few minutes later.

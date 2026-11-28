@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -42,14 +41,11 @@ type Reasoning struct {
 
 // ReasoningItem represents a reasoning effort list item.
 type ReasoningItem struct {
-	*list.Versioned
+	pickerRow
 	effort    string
 	title     string
 	isCurrent bool
 	t         *styles.Styles
-	m         fuzzy.Match
-	cache     rowCache
-	focused   bool
 }
 
 var (
@@ -251,7 +247,7 @@ func (r *Reasoning) setReasoningItems() error {
 	for i, level := range levels {
 		display := cmp.Or(level.Display, common.FormatReasoningEffort(level.Value))
 		item := &ReasoningItem{
-			Versioned: list.NewVersioned(),
+			pickerRow: newPickerRow(),
 			effort:    level.Value,
 			title:     display,
 			isCurrent: level.Value == currentEffort,
@@ -279,37 +275,11 @@ func (r *ReasoningItem) ID() string {
 	return r.effort
 }
 
-// SetFocused sets the focus state of the reasoning item.
-func (r *ReasoningItem) SetFocused(focused bool) {
-	if r.focused == focused {
-		return
-	}
-	r.cache = nil
-	r.focused = focused
-	r.Bump()
-}
-
-// SetMatch sets the fuzzy match for the reasoning item.
-func (r *ReasoningItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(r.m, m) {
-		return
-	}
-	r.cache = nil
-	r.m = m
-	r.Bump()
-}
-
 // Render returns the string representation of the reasoning item.
 func (r *ReasoningItem) Render(width int) string {
 	info := ""
 	if r.isCurrent {
 		info = "current"
 	}
-	styles := ListItemStyles{
-		ItemBlurred:     r.t.Dialog.NormalItem,
-		ItemFocused:     r.t.Dialog.SelectedItem,
-		InfoTextBlurred: r.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: r.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(styles, r.title, info, r.focused, width, &r.cache, &r.m)
+	return r.render(defaultListItemStyles(r.t), r.title, info, width)
 }

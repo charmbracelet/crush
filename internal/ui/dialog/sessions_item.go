@@ -1,14 +1,11 @@
 package dialog
 
 import (
-	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -43,14 +40,11 @@ type ListItem interface {
 
 // SessionItem wraps a [session.Session] to implement the [ListItem] interface.
 type SessionItem struct {
-	*list.Versioned
+	pickerRow
 	session.Session
 	t                *styles.Styles
 	sessionsMode     sessionsMode
-	m                fuzzy.Match
-	cache            rowCache
 	updateTitleInput textinput.Model
-	focused          bool
 	hideInfo         bool
 }
 
@@ -64,16 +58,6 @@ func (s *SessionItem) Filter() string {
 // ID returns the unique identifier of the session.
 func (s *SessionItem) ID() string {
 	return s.Session.ID
-}
-
-// SetMatch sets the fuzzy match for the session item.
-func (s *SessionItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(s.m, m) {
-		return
-	}
-	s.cache = nil
-	s.m = m
-	s.Bump()
 }
 
 // InputValue returns the updated title value
@@ -105,9 +89,8 @@ func (s *SessionItem) SetHideInfo(v bool) {
 	if s.hideInfo == v {
 		return
 	}
-	s.cache = nil
 	s.hideInfo = v
-	s.Bump()
+	s.invalidate()
 }
 
 // Render returns the string representation of the session item.
@@ -139,117 +122,7 @@ func (s *SessionItem) Render(width int) string {
 		}
 	}
 
-	return renderItem(styles, s.Title, info, s.focused, width, &s.cache, &s.m)
-}
-
-type ListItemStyles struct {
-	ItemBlurred     lipgloss.Style
-	ItemFocused     lipgloss.Style
-	InfoTextBlurred lipgloss.Style
-	InfoTextFocused lipgloss.Style
-}
-
-// rowCache holds a list row's rendered lines, keyed by everything that
-// changes the line besides its styles, focus and match: those reset the
-// cache to nil when they change.
-type rowCache map[rowCacheKey]string
-
-// rowCacheKey is the input a row was rendered from. The info text is
-// part of it because some of it changes on its own, like a session's
-// "1 minute ago".
-type rowCacheKey struct {
-	width int
-	title string
-	info  string
-}
-
-// renderItem renders a list row, reusing and filling the cache at cache.
-// It takes the item's cache field by pointer so the first render can
-// create it; a cache passed by value would be filled and thrown away.
-func renderItem(t ListItemStyles, title string, info string, focused bool, width int, cache *rowCache, m *fuzzy.Match) string {
-	if *cache == nil {
-		*cache = make(rowCache)
-	}
-	key := rowCacheKey{width: width, title: title, info: info}
-	if cached, ok := (*cache)[key]; ok {
-		return cached
-	}
-
-	style := t.ItemBlurred
-	if focused {
-		style = t.ItemFocused
-	}
-
-	// Build content to the width left after the item style's own padding,
-	// so the final rendered line is exactly `width` wide. Otherwise the
-	// padding pushes the line past the list width and it wraps.
-	lineWidth := max(0, width-style.GetHorizontalFrameSize())
-
-	var infoText string
-	var infoWidth int
-	if len(info) > 0 {
-		// Cap the info column so a long value (e.g. a provider name) can
-		// truncate instead of overflowing the row or squeezing the title
-		// to nothing; the title keeps at least half the width.
-		if maxInfo := lineWidth / 2; lipgloss.Width(info)+2 > maxInfo {
-			info = ansi.Truncate(info, max(0, maxInfo-2), "…")
-		}
-		infoText = fmt.Sprintf(" %s ", info)
-		if focused {
-			infoText = t.InfoTextFocused.Render(infoText)
-		} else {
-			infoText = t.InfoTextBlurred.Render(infoText)
-		}
-
-		infoWidth = lipgloss.Width(infoText)
-	}
-
-	title = ansi.Truncate(title, max(0, lineWidth-infoWidth), "…")
-	titleWidth := lipgloss.Width(title)
-	gap := strings.Repeat(" ", max(0, lineWidth-titleWidth-infoWidth))
-	content := title
-	if m != nil && len(m.MatchedIndexes) > 0 {
-		var lastPos int
-		parts := make([]string, 0)
-		ranges := matchedRanges(m.MatchedIndexes)
-		for _, rng := range ranges {
-			start, stop := bytePosToVisibleCharPos(title, rng)
-			if start > lastPos {
-				parts = append(parts, ansi.Cut(title, lastPos, start))
-			}
-			// NOTE: We're using [ansi.Style] here instead of [lipglosStyle]
-			// because we can control the underline start and stop more
-			// precisely via [ansi.AttrUnderline] and [ansi.AttrNoUnderline]
-			// which only affect the underline attribute without interfering
-			// with other style attributes.
-			parts = append(
-				parts,
-				ansi.NewStyle().Underline(true).String(),
-				ansi.Cut(title, start, stop+1),
-				ansi.NewStyle().Underline(false).String(),
-			)
-			lastPos = stop + 1
-		}
-		if lastPos < ansi.StringWidth(title) {
-			parts = append(parts, ansi.Cut(title, lastPos, ansi.StringWidth(title)))
-		}
-
-		content = strings.Join(parts, "")
-	}
-
-	content = style.Render(content + gap + infoText)
-	(*cache)[key] = content
-	return content
-}
-
-// SetFocused sets the focus state of the session item.
-func (s *SessionItem) SetFocused(focused bool) {
-	if s.focused == focused {
-		return
-	}
-	s.cache = nil
-	s.focused = focused
-	s.Bump()
+	return s.render(styles, s.Title, info, width)
 }
 
 // sessionItems takes a slice of [session.Session]s and convert them to a slice
@@ -257,7 +130,7 @@ func (s *SessionItem) SetFocused(focused bool) {
 func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Session) []list.FilterableItem {
 	items := make([]list.FilterableItem, len(sessions))
 	for i, s := range sessions {
-		item := &SessionItem{Versioned: list.NewVersioned(), Session: s, t: t, sessionsMode: mode}
+		item := &SessionItem{pickerRow: newPickerRow(), Session: s, t: t, sessionsMode: mode}
 		if mode == sessionsModeUpdating {
 			item.updateTitleInput = textinput.New()
 			item.updateTitleInput.SetVirtualCursor(false)

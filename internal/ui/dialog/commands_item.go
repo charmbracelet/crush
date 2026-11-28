@@ -4,15 +4,13 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 )
 
 // CommandItem wraps a uicmd.Command to implement the ListItem interface.
 type CommandItem struct {
-	*list.Versioned
+	pickerRow
 	id          string
 	title       string
 	shortcut    string
@@ -20,18 +18,15 @@ type CommandItem struct {
 	action      Action
 	aliases     []string
 	t           *styles.Styles
-	m           fuzzy.Match
-	cache       rowCache
-	focused     bool
 	hideInfo    bool
 }
 
-var _ ListItem = &CommandItem{Versioned: list.NewVersioned()}
+var _ ListItem = &CommandItem{pickerRow: newPickerRow()}
 
 // NewCommandItem creates a new CommandItem.
 func NewCommandItem(t *styles.Styles, id, title, shortcut string, action Action) *CommandItem {
 	return &CommandItem{
-		Versioned: list.NewVersioned(),
+		pickerRow: newPickerRow(),
 		id:        id,
 		t:         t,
 		title:     title,
@@ -70,26 +65,6 @@ func (c *CommandItem) ID() string {
 	return c.id
 }
 
-// SetFocused implements ListItem.
-func (c *CommandItem) SetFocused(focused bool) {
-	if c.focused == focused {
-		return
-	}
-	c.cache = nil
-	c.focused = focused
-	c.Bump()
-}
-
-// SetMatch implements ListItem.
-func (c *CommandItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(c.m, m) {
-		return
-	}
-	c.cache = nil
-	c.m = m
-	c.Bump()
-}
-
 // Action returns the action associated with the command item.
 func (c *CommandItem) Action() Action {
 	return c.action
@@ -111,24 +86,17 @@ func (c *CommandItem) SetHideInfo(v bool) {
 	if c.hideInfo == v {
 		return
 	}
-	c.cache = nil
 	c.hideInfo = v
-	c.Bump()
+	c.invalidate()
 }
 
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
-	styles := ListItemStyles{
-		ItemBlurred:     c.t.Dialog.NormalItem,
-		ItemFocused:     c.t.Dialog.SelectedItem,
-		InfoTextBlurred: c.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
-	}
 	shortcut := c.shortcut
 	if c.hideInfo {
 		shortcut = ""
 	}
-	rendered := renderItem(styles, c.title, shortcut, c.focused, width, &c.cache, &c.m)
+	rendered := c.render(defaultListItemStyles(c.t), c.title, shortcut, width)
 	if c.description != "" {
 		descStyle := c.t.Dialog.SecondaryText
 		if c.focused {

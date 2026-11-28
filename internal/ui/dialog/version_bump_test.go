@@ -142,7 +142,7 @@ func TestSessionItem_MutatorsBumpVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	item := &SessionItem{
-		Versioned: list.NewVersioned(),
+		pickerRow: newPickerRow(),
 		Session:   session.Session{ID: "sess-1", Title: "My Session"},
 		t:         &sty,
 	}
@@ -183,7 +183,7 @@ func TestReasoningItem_MutatorsBumpVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	item := &ReasoningItem{
-		Versioned: list.NewVersioned(),
+		pickerRow: newPickerRow(),
 		effort:    "medium",
 		title:     "Medium",
 		t:         &sty,

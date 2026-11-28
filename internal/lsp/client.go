@@ -267,6 +267,12 @@ func (c *Client) Restart() error {
 
 	c.SetServerState(StateStopped)
 
+	// None of the files are open in the new server instance, even if
+	// closing some of them failed above.
+	for uri := range c.openFiles.Seq2() {
+		c.openFiles.Del(uri)
+	}
+
 	// Diagnostics from the old server instance are stale. The new server
 	// republishes them for the files reopened below.
 	c.clearDiagnostics()
@@ -301,12 +307,23 @@ func (c *Client) Restart() error {
 		return err
 	}
 
-	for _, uri := range openFiles {
-		if err := c.OpenFile(initCtx, uri); err != nil {
-			slog.Warn("Failed to reopen file after restart", "file", uri, "error", err)
+	c.reopenFiles(initCtx, openFiles)
+	return nil
+}
+
+// reopenFiles opens the files with the given URIs, the keys of openFiles,
+// in the LSP server.
+func (c *Client) reopenFiles(ctx context.Context, uris []string) {
+	for _, uri := range uris {
+		path, err := protocol.DocumentURI(uri).Path()
+		if err != nil {
+			slog.Warn("Failed to convert URI to path", "uri", uri, "error", err)
+			continue
+		}
+		if err := c.OpenFile(ctx, path); err != nil {
+			slog.Warn("Failed to reopen file after restart", "file", path, "error", err)
 		}
 	}
-	return nil
 }
 
 // ServerState represents the state of an LSP server

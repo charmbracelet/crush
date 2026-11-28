@@ -93,15 +93,7 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 	case spinner.TickMsg:
 		switch m.state {
 		case MCPAuthStatePrompt, MCPAuthStateAuthenticating:
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			cmds := []tea.Cmd{}
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			if len(cmds) > 0 {
-				return ActionCmd{tea.Batch(cmds...)}
-			}
+			return m.tickSpinner(msg)
 		}
 
 	case tea.KeyPressMsg:

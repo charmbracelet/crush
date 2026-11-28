@@ -185,34 +185,21 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 			cmd := m.copyURL()
 			return ActionCmd{cmd}
 
-		case key.Matches(msg, m.keyMap.Submit):
+		case key.Matches(msg, m.keyMap.Submit), key.Matches(msg, CloseKey):
 			switch m.State {
 			case OAuthStateSuccess:
 				return m.confirmAndSelectModel()
 
 			case OAuthStateSaving:
-				// Save in progress; ignore submits until it finishes.
+				// Save in progress; ignore enter and esc until it finishes.
 				return nil
-
-			default:
-				cmd := m.copyCodeAndOpenURL()
-				return ActionCmd{cmd}
 			}
-
-		case key.Matches(msg, CloseKey):
-			switch m.State {
-			case OAuthStateSuccess:
-				return m.confirmAndSelectModel()
-
-			case OAuthStateSaving:
-				// Save in progress; ignore submits until it finishes.
-				return nil
-
-			default:
+			if key.Matches(msg, CloseKey) {
 				// Cancel the in-flight authorization so a dismissed dialog
 				// does not leave a poller or loopback listener behind.
 				return ActionCloseOAuth{Cmd: m.oAuthProvider.stopPolling}
 			}
+			return ActionCmd{m.copyCodeAndOpenURL()}
 		}
 
 	case ActionInitiateOAuth:

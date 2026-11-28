@@ -265,22 +265,25 @@ func newlineBefore(content string, until int) int {
 func (s *streamingMarkdown) isSafeBoundaryIncremental(content string, p int) bool {
 	delta := content[len(s.stablePrefix):p]
 
+	// (2b) HTML and link-ref hazards in the delta. Checked before the
+	// fence parity because it stops at the first hazard line, while
+	// counting fences always scans the whole delta.
+	if deltaHasHTMLorRef(delta) {
+		return false
+	}
+
 	// (2) Fence parity: base count + delta count must be even.
 	if (s.baseFenceCount+countFenceLines(delta))%2 != 0 {
 		return false
 	}
 
-	// (2b) HTML and link-ref hazards in the delta.
-	if deltaHasHTMLorRef(delta) {
-		return false
-	}
+	lastLine := lastNonBlankLine(content[:p])
 
 	// (2b) List hazard: if a list marker exists anywhere in the
 	// full prefix (base OR delta), the last non-blank line before
 	// the boundary must not be an indented continuation paragraph.
 	hasListMarker := s.baseHasListMarker || chunkHasListMarker(delta)
 	if hasListMarker {
-		lastLine := lastNonBlankLine(content[:p])
 		if lastLine != "" && !isListItemMarker(strings.TrimLeft(lastLine, " \t")) {
 			if len(lastLine) > 0 && (lastLine[0] == ' ' || lastLine[0] == '\t') {
 				return false
@@ -289,7 +292,6 @@ func (s *streamingMarkdown) isSafeBoundaryIncremental(content string, p int) boo
 	}
 
 	// (3) Last non-blank line must not open a construct.
-	lastLine := lastNonBlankLine(content[:p])
 	if lastLine != "" && lineOpensConstruct(lastLine) {
 		return false
 	}
@@ -765,15 +767,20 @@ func isFenceLine(line string) bool {
 }
 
 // lastNonBlankLine returns the last non-blank line of s, or ""
-// when every line is blank.
+// when every line is blank. It scans backwards from the end, so the cost
+// is bounded by the trailing blank lines rather than the whole of s.
 func lastNonBlankLine(s string) string {
-	last := ""
-	for line := range splitLines(s) {
-		if strings.TrimSpace(line) != "" {
-			last = line
+	end := len(s)
+	for {
+		start := strings.LastIndexByte(s[:end], '\n') + 1
+		if line := s[start:end]; strings.TrimSpace(line) != "" {
+			return line
 		}
+		if start == 0 {
+			return ""
+		}
+		end = start - 1
 	}
-	return last
 }
 
 // firstNonBlankLine returns the first non-blank line of s, or ""
@@ -957,13 +964,12 @@ func isHTMLBlockOpener(line string) bool {
 
 	// Type 1: <script | <pre | <style | <textarea (case-insensitive)
 	// followed by whitespace, '>', end-of-line, or other non-name
-	// terminators. Use a permissive HasPrefix check on lowercase.
-	low := strings.ToLower(rest)
+	// terminators. Use a permissive case-insensitive HasPrefix check.
 	for _, t := range []string{"<script", "<pre", "<style", "<textarea"} {
-		if strings.HasPrefix(low, t) {
+		if hasPrefixFoldASCII(rest, t) {
 			next := byte(0)
-			if len(low) > len(t) {
-				next = low[len(t)]
+			if len(rest) > len(t) {
+				next = rest[len(t)]
 			}
 			if next == 0 || next == ' ' || next == '\t' || next == '>' {
 				return true
@@ -988,6 +994,25 @@ func isHTMLBlockOpener(line string) bool {
 	}
 	if j >= len(rest) || !isASCIILetter(rest[j]) {
 		return false
+	}
+	return true
+}
+
+// hasPrefixFoldASCII reports whether s starts with prefix, ignoring ASCII
+// case. prefix must be lowercase ASCII. Unlike lowercasing s first, it
+// does not allocate.
+func hasPrefixFoldASCII(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i := range len(prefix) {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != prefix[i] {
+			return false
+		}
 	}
 	return true
 }

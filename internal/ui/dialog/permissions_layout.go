@@ -32,8 +32,6 @@ const (
 	simpleHeightRatio = 0.8
 	// splitModeMinWidth is the minimum width to enable split diff mode.
 	splitModeMinWidth = 140
-	// layoutSpacingLines is the number of empty lines used for layout spacing.
-	layoutSpacingLines = 4
 	// minWindowWidth is the minimum window width before forcing fullscreen.
 	minWindowWidth = 77
 	// minWindowHeight is the minimum window height before forcing fullscreen.
@@ -73,50 +71,69 @@ func (p *Permissions) contentViewportHeight(maxHeight, fixedHeight, contentHeigh
 	}
 	// A small window makes the dialog as large as the window, but simple
 	// content still shrinks to fit rather than padding out empty rows.
-	return min(max(contentHeight, 3), room)
+	return min(max(contentHeight, minContentLines), room)
 }
 
 // minContentLines is how many rows of the request content (the command or
 // diff) the dialog tries to keep visible when the window is short.
 const minContentLines = 3
 
-// fitChrome trims the fixed chrome around the content viewport so the
-// content keeps at least minContent rows within innerHeight (the dialog
-// height inside its frame). The request content is what the user is
-// approving, so it wins over decoration: spacer lines go first, then the
-// stacked buttons collapse onto one compact row when it fits, then the
-// help line goes, and finally the header is cut down from the bottom. The
-// returned spacing is the number of blank lines to reserve.
-func (p *Permissions) fitChrome(innerHeight, minContent, contentWidth int, header, buttons, helpView string) (string, string, string, int) {
+// permChrome is the fixed chrome around the content viewport: the header,
+// the button row(s) and the help line (empty when dropped), and whether
+// blank rows separate the parts.
+type permChrome struct {
+	header, buttons, help string
+	gaps                  bool
+}
+
+// parts returns the dialog's rows top to bottom around content, which is
+// left out (with its gap) when empty, as is the help line.
+func (c permChrome) parts(content string) []string {
+	var gap []string
+	if c.gaps {
+		gap = []string{""}
+	}
+	parts := []string{c.header}
+	if content != "" {
+		parts = append(append(parts, gap...), content)
+	}
+	parts = append(append(parts, gap...), c.buttons)
+	if c.help != "" {
+		parts = append(append(parts, gap...), c.help)
+	}
+	return parts
+}
+
+// height is how many rows the chrome takes around a content viewport.
+func (c permChrome) height() int {
+	return lipgloss.Height(strings.Join(c.parts(" "), "\n")) - 1
+}
+
+// fitChrome drops gaps, stacks of buttons and help until the content shows
+// in full, and cuts the header only when even minContent does not fit.
+func fitChrome(innerHeight, wantContent, minContent int, c permChrome, compact string) permChrome {
 	minContent = max(minContent, 1)
-	spacing := layoutSpacingLines
-	short := func() bool {
-		used := lipgloss.Height(header) + lipgloss.Height(buttons) + spacing
-		if helpView != "" {
-			used += lipgloss.Height(helpView)
-		}
-		return innerHeight-used < minContent
+	wantContent = max(wantContent, minContent)
+	short := func(n int) bool { return innerHeight-c.height() < n }
+	// Decoration gives way until the content shows in full.
+	if short(wantContent) {
+		c.gaps = false
 	}
-	if !short() {
-		return header, buttons, helpView, spacing
+	if short(wantContent) && compact != "" && lipgloss.Height(c.buttons) > 1 {
+		c.buttons = compact
 	}
-	spacing = 0
-	if short() && lipgloss.Height(buttons) > 1 {
-		if compact := p.renderButtonGroupPadded(" ", 1); lipgloss.Width(compact) <= contentWidth {
-			buttons = lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center).Render(compact)
-		}
+	if short(wantContent) {
+		c.help = ""
 	}
-	if short() {
-		helpView = ""
-	}
-	if short() {
-		lines := slices.DeleteFunc(strings.Split(header, "\n"), func(l string) bool {
+	// The header only shrinks when even the minimum content does not fit.
+	if short(minContent) {
+		lines := slices.DeleteFunc(strings.Split(c.header, "\n"), func(l string) bool {
 			return strings.TrimSpace(ansi.Strip(l)) == ""
 		})
-		keep := innerHeight - lipgloss.Height(buttons) - minContent
-		header = strings.Join(lines[:max(1, min(len(lines), keep))], "\n")
+		keep := innerHeight - lipgloss.Height(c.buttons) - minContent
+		c.header = strings.Join(lines[:max(1, min(len(lines), keep))], "\n")
 	}
-	return header, buttons, helpView, spacing
+	return c
 }
 
 func (p *Permissions) renderHeader(contentWidth int) string {
@@ -230,17 +247,12 @@ func prettyName(name string) string {
 	return stringext.Capitalize(name)
 }
 
-// renderButtonGroup renders the permission buttons joined by spacing. On a
+// renderButtonGroup renders the permission buttons joined by spacing,
+// with the given horizontal button padding (zero keeps the default). On a
 // flagged request the approving buttons are painted in the negative style,
 // because approving is the destructive choice here and it should not wear
 // the same inviting highlight it does on an ordinary prompt.
-func (p *Permissions) renderButtonGroup(spacing string) string {
-	return p.renderButtonGroupPadded(spacing, 0)
-}
-
-// renderButtonGroupPadded is renderButtonGroup with a custom horizontal
-// button padding; zero keeps the default.
-func (p *Permissions) renderButtonGroupPadded(spacing string, padding int) string {
+func (p *Permissions) renderButtonGroup(spacing string, padding int) string {
 	t := p.com.Styles
 	approveStyles := t
 	if p.permission.Danger != "" {
@@ -284,7 +296,7 @@ func (p *Permissions) sessionButtonLabel(o permissionOption) (string, int) {
 }
 
 func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
-	content := p.renderButtonGroup("  ")
+	content := p.renderButtonGroup("  ", 0)
 
 	// Center when stacked or when the dialog fills the screen; otherwise
 	// hug the right edge next to the content. Right-aligning across a
@@ -294,7 +306,7 @@ func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 		align = lipgloss.Center
 	}
 	if lipgloss.Width(content) > contentWidth {
-		content = p.renderButtonGroup("\n")
+		content = p.renderButtonGroup("\n", 0)
 		align = lipgloss.Center
 	}
 

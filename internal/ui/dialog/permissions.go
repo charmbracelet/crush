@@ -391,13 +391,21 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if p.hasDiffView() {
 		minContent = minContentLines
 	}
-	header, buttons, helpView, spacing := p.fitChrome(maxHeight-dialogStyle.GetVerticalFrameSize(),
-		minContent, contentWidth, header, buttons, helpView)
-	fixedHeight := lipgloss.Height(header) + lipgloss.Height(buttons) +
-		dialogStyle.GetVerticalFrameSize() + spacing
-	if helpView != "" {
-		fixedHeight += lipgloss.Height(helpView)
+	// The compact row replaces stacked buttons in a short window, when it
+	// fits the content width.
+	var compact string
+	if row := p.renderButtonGroup(" ", 1); lipgloss.Width(row) <= contentWidth {
+		compact = lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center).Render(row)
 	}
+	// Simple content asks for its full height; diffs only for the minimum,
+	// since they fill whatever is left anyway.
+	wantContent := contentHeight
+	if p.hasDiffView() {
+		wantContent = minContent
+	}
+	chrome := fitChrome(maxHeight-dialogStyle.GetVerticalFrameSize(), wantContent, minContent,
+		permChrome{header: header, buttons: buttons, help: helpView, gaps: true}, compact)
+	fixedHeight := chrome.height() + dialogStyle.GetVerticalFrameSize()
 	availableHeight := p.contentViewportHeight(maxHeight, fixedHeight, contentHeight)
 
 	// Determine if scrollbar is needed.
@@ -430,22 +438,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		content = joinScrollbar(t, content, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
 	}
 
-	// Blank spacer lines are dropped by fitChrome when the window is too
-	// short to afford them.
-	var gap []string
-	if spacing > 0 {
-		gap = []string{""}
-	}
-	parts := []string{header}
-	if content != "" {
-		parts = append(append(parts, gap...), content)
-	}
-	parts = append(append(parts, gap...), buttons)
-	if helpView != "" {
-		parts = append(append(parts, gap...), helpView)
-	}
-
-	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	innerContent := lipgloss.JoinVertical(lipgloss.Left, chrome.parts(content)...)
 	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
 	return nil
 }

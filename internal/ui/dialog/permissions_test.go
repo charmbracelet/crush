@@ -160,7 +160,7 @@ func TestPermissions_DangerousButtonsLookDifferent(t *testing.T) {
 	ordinary.selectedOption = optionIndex(PermissionAllow)
 	dangerous.selectedOption = optionIndex(PermissionAllow)
 
-	require.NotEqual(t, ordinary.renderButtonGroup("  "), dangerous.renderButtonGroup("  "))
+	require.NotEqual(t, ordinary.renderButtonGroup("  ", 0), dangerous.renderButtonGroup("  ", 0))
 }
 
 // TestPermissions_EscapeDenies verifies that escape denies the request.
@@ -216,7 +216,7 @@ func TestPermissions_BashSessionButtonNamesProgram(t *testing.T) {
 				SessionProgram: program,
 			},
 		})
-		return ansi.Strip(p.renderButtonGroup("  "))
+		return ansi.Strip(p.renderButtonGroup("  ", 0))
 	}
 
 	require.Contains(t, buttons("git"), "Allow git for Session")
@@ -350,5 +350,22 @@ func TestPermissions_ShortContentFitsShortWindow(t *testing.T) {
 				drawFits(t, p, w, h)
 			}
 		}
+	}
+}
+
+// TestPermissions_ShortWindowFavorsContent verifies a short window drops
+// spacing and help before it hides any of the request being approved.
+func TestPermissions_ShortWindowFavorsContent(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s, Workspace: permissionsTestWorkspace{}}
+	p := NewPermissions(com, permission.PermissionRequest{
+		ID:       "perm-test",
+		ToolName: "mcp_linear_create_issue",
+		Params:   `{"title":"a","team":"b","priority":1}`,
+	})
+	out := strings.Join(drawFits(t, p, 60, 14), "\n")
+	for _, want := range []string{`"title"`, `"team"`, `"priority"`} {
+		require.Contains(t, out, want)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -61,6 +62,34 @@ type ClientSession struct {
 	// channelCapable reports whether the server declared the claude/channel
 	// capability, whether or not it was opted in.
 	channelCapable bool
+	// lastOK is the time, in Unix nanoseconds, of the last request that
+	// succeeded on this session, or zero after a failure.
+	lastOK atomic.Int64
+}
+
+// recentHealthWindow is how long after a successful request a remote
+// session is trusted without pinging it again.
+const recentHealthWindow = 15 * time.Second
+
+// markOK records that a request on the session just succeeded.
+func (s *ClientSession) markOK() { s.lastOK.Store(time.Now().UnixNano()) }
+
+// markFailed forgets the last success so the next request pings first.
+func (s *ClientSession) markFailed() { s.lastOK.Store(0) }
+
+// noteResult records the outcome of a request on the session.
+func (s *ClientSession) noteResult(err error) {
+	if err != nil {
+		s.markFailed()
+		return
+	}
+	s.markOK()
+}
+
+// recentlyOK reports whether a request succeeded within the window.
+func (s *ClientSession) recentlyOK() bool {
+	last := s.lastOK.Load()
+	return last != 0 && time.Since(time.Unix(0, last)) < recentHealthWindow
 }
 
 // Close cancels the session context and then closes the underlying session.
@@ -847,7 +876,14 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 
 	// Fast path: reuse a healthy session without taking the renewal lock.
 	if sess, ok := sessions.Get(name); ok {
+		// Each ping to a remote server is a full HTTP round-trip, so skip
+		// it when the session just served a request. A failed request
+		// clears the mark, so the next call pings and renews.
+		if isRemoteMCP(m) && sess.recentlyOK() {
+			return sess, nil
+		}
 		if err := pingSession(ctx, sess, timeout); err == nil {
+			sess.markOK()
 			return sess, nil
 		}
 	}
@@ -876,6 +912,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	// waited for the lock. Reuse it if it is now healthy.
 	pingErr := pingSession(ctx, sess, timeout)
 	if pingErr == nil {
+		sess.markOK()
 		return sess, nil
 	}
 
@@ -954,6 +991,12 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	sessions.Set(name, newSess)
 	updateState(name, StateConnected, nil, newSess, counts, withConfig(m))
 	return newSess, nil
+}
+
+// isRemoteMCP reports whether the server is reached over the network, where
+// a ping costs a full round-trip rather than a local pipe exchange.
+func isRemoteMCP(m config.MCPConfig) bool {
+	return m.Type == config.MCPHttp || m.Type == config.MCPSSE
 }
 
 // pingSession pings a session with the server's configured timeout.

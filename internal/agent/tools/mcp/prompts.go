@@ -29,6 +29,7 @@ func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName,
 		Name:      promptName,
 		Arguments: args,
 	})
+	c.noteResult(err)
 	if err != nil {
 		return nil, err
 	}

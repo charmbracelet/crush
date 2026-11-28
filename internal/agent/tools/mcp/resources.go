@@ -31,6 +31,7 @@ func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([
 	}
 
 	resources, err := getResources(ctx, session)
+	session.noteResult(err)
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +50,7 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 		return nil, err
 	}
 	result, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: uri})
+	session.noteResult(err)
 	if err != nil {
 		return nil, err
 	}

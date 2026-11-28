@@ -54,6 +54,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		Name:      toolName,
 		Arguments: args,
 	})
+	c.noteResult(err)
 	if err != nil {
 		return ToolResult{}, err
 	}

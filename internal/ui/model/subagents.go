@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // subAgentSpinnerFrames animates the running marker. The sidebar is rebuilt
@@ -112,7 +113,7 @@ func (m *UI) subAgentsInfo(statuses []chat.DispatchStatus, width, maxItems int, 
 	}
 
 	t := m.com.Styles
-	title := t.Resource.Heading.Render("Subagents")
+	title := t.Resource.Heading.Render(ansi.Truncate("Subagents", width, "…"))
 	if isSection {
 		title = common.Section(t, title, width)
 	}
@@ -121,7 +122,7 @@ func (m *UI) subAgentsInfo(statuses []chat.DispatchStatus, width, maxItems int, 
 	for _, status := range statuses {
 		rows = append(rows, m.subAgentRow(status, width))
 	}
-	rows = truncateRows(rows, maxItems, t.Resource.AdditionalText)
+	rows = truncateRows(rows, maxItems, width, t.Resource.AdditionalText)
 
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf(
 		"%s\n\n%s", title, lipgloss.JoinVertical(lipgloss.Left, rows...),

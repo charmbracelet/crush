@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -121,7 +122,7 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 		}})
 	}
 
-	title := t.Resource.Heading.Render("LSPs")
+	title := t.Resource.Heading.Render(ansi.Truncate("LSPs", width, "…"))
 	if isSection {
 		title = common.Section(t, title, width)
 	}
@@ -193,5 +194,5 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		}, width))
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedLsps, maxItems, t.Resource.AdditionalText)...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedLsps, maxItems, width, t.Resource.AdditionalText)...)
 }

@@ -63,7 +63,9 @@ func queuePill(queue int, t *styles.Styles) string {
 }
 
 // todoPill renders the todo progress pill with optional spinner and task name.
-func todoPill(todos []session.Todo, spinnerView string, panelFocused bool, t *styles.Styles) string {
+// maxWidth bounds the whole pill, frame included, so the task text shrinks
+// (or drops) before it pushes the ctrl+t hint off the row.
+func todoPill(todos []session.Todo, spinnerView string, panelFocused bool, t *styles.Styles, maxWidth int) string {
 	if !hasIncompleteTodos(todos) {
 		return ""
 	}
@@ -94,11 +96,14 @@ func todoPill(todos []session.Todo, spinnerView string, panelFocused bool, t *st
 		if currentTodo.ActiveForm != "" {
 			taskText = currentTodo.ActiveForm
 		}
-		if ansi.StringWidth(taskText) > maxTaskDisplayLength {
-			taskText = ansi.Truncate(taskText, maxTaskDisplayLength-1, "…")
+		content = fmt.Sprintf("%s %s %s", spinnerView, label, progress)
+		taskWidth := min(maxTaskDisplayLength, maxWidth-t.Pills.Focused.GetHorizontalFrameSize()-lipgloss.Width(content)-2)
+		if taskWidth >= 4 {
+			if ansi.StringWidth(taskText) > taskWidth {
+				taskText = ansi.Truncate(taskText, taskWidth-1, "…")
+			}
+			content += "  " + t.Pills.TodoCurrentTask.Render(taskText)
 		}
-		task := t.Pills.TodoCurrentTask.Render(taskText)
-		content = fmt.Sprintf("%s %s %s  %s", spinnerView, label, progress, task)
 	} else {
 		content = fmt.Sprintf("%s %s", label, progress)
 	}
@@ -112,7 +117,7 @@ func todoList(sessionTodos []session.Todo, spinnerView string, t *styles.Styles,
 }
 
 // queueList renders the expanded queue items list.
-func queueList(queueItems []string, t *styles.Styles) string {
+func queueList(queueItems []string, t *styles.Styles, width int) string {
 	if len(queueItems) == 0 {
 		return ""
 	}
@@ -120,7 +125,7 @@ func queueList(queueItems []string, t *styles.Styles) string {
 	prefix := t.Pills.QueueItemPrefix.Render() + " "
 	lines := make([]string, 0, len(queueItems))
 	for _, item := range queueItems {
-		lines = append(lines, prefix+ansi.Truncate(queueItem(item, t), maxQueueDisplayLength, "…"))
+		lines = append(lines, prefix+ansi.Truncate(queueItem(item, t), max(0, min(maxQueueDisplayLength, width-lipgloss.Width(prefix))), "…"))
 	}
 
 	return strings.Join(lines, "\n")
@@ -353,12 +358,26 @@ func (m *UI) renderPills() {
 		inProgressIcon = m.todoSpinner.View()
 	}
 
+	helpDesc := "open"
+	if m.pillsExpanded {
+		helpDesc = "close"
+	}
+	helpKey := t.Pills.HelpKey.Render("ctrl+t")
+	helpText := t.Pills.HelpText.Render(helpDesc)
+	helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
+
+	var queue string
+	if hasQueue {
+		queue = queuePill(m.promptQueue.Shown(), t)
+	}
+
 	var pills []string
 	if hasIncomplete {
-		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
+		todoWidth := contentWidth - lipgloss.Width(queue) - lipgloss.Width(helpHint) - 1
+		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t, todoWidth))
 	}
 	if hasQueue {
-		pills = append(pills, queuePill(m.promptQueue.Shown(), t))
+		pills = append(pills, queue)
 	}
 
 	var expandedList string
@@ -370,7 +389,7 @@ func (m *UI) renderPills() {
 			// workspace_cache.go): renderPills runs on the Update/View
 			// path and must never block on a workspace round-trip.
 			if items := m.promptQueue.Items(); len(items) > 0 {
-				expandedList = queueList(items, t)
+				expandedList = queueList(items, t, contentWidth)
 			}
 		}
 	}
@@ -380,14 +399,6 @@ func (m *UI) renderPills() {
 	}
 
 	pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
-
-	helpDesc := "open"
-	if m.pillsExpanded {
-		helpDesc = "close"
-	}
-	helpKey := t.Pills.HelpKey.Render("ctrl+t")
-	helpText := t.Pills.HelpText.Render(helpDesc)
-	helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
 	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 
 	pillsArea := pillsRow

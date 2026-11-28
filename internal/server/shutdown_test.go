@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -214,9 +213,9 @@ func TestServe_ClosesUnattachedWorkspaceWhenIdleShutdownDisabled(t *testing.T) {
 	srv.DisableIdleShutdown()
 	srv.Backend().SetCreateGrace(100 * time.Millisecond)
 
-	var tornDown atomic.Int32
+	tornDown := make(chan struct{}, 2)
 	ws := &backend.Workspace{ID: uuid.New().String(), Path: t.TempDir()}
-	backend.SetWorkspaceShutdownFnForTest(ws, func() { tornDown.Add(1) })
+	backend.SetWorkspaceShutdownFnForTest(ws, func() { tornDown <- struct{}{} })
 	backend.InsertWorkspaceForTest(srv.backend, ws)
 	cid := uuid.New().String()
 	require.NoError(t, backend.RegisterClientForTesting(srv.backend, ws, cid))
@@ -224,21 +223,20 @@ func TestServe_ClosesUnattachedWorkspaceWhenIdleShutdownDisabled(t *testing.T) {
 	_, served := serveOnLoopback(t, srv)
 	t.Cleanup(func() { _ = srv.Close() })
 
+	select {
+	case <-tornDown:
+	case <-time.After(5 * time.Second):
+		t.Fatal("an unattached workspace must expire while idle shutdown is disabled")
+	}
 	_, err := srv.backend.GetWorkspace(ws.ID)
-	require.NoError(t, err)
-
-	require.Eventually(t, func() bool {
-		_, err := srv.backend.GetWorkspace(ws.ID)
-		return errors.Is(err, backend.ErrWorkspaceNotFound)
-	}, 5*time.Second, 10*time.Millisecond,
-		"an unattached workspace must expire while idle shutdown is disabled")
-	require.Equal(t, int32(1), tornDown.Load())
+	require.ErrorIs(t, err, backend.ErrWorkspaceNotFound)
 
 	select {
 	case err := <-served:
 		t.Fatalf("Serve returned after the last workspace expired (%v)", err)
 	case <-time.After(250 * time.Millisecond):
 	}
+	require.Empty(t, tornDown, "the workspace was torn down twice")
 }
 
 // TestServe_KeepsUnattachedWorkspaceWhenAutoCloseDisabled guards headless

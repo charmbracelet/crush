@@ -157,7 +157,7 @@ func TestProcessIsolation_WaitsForEscalation(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, RunOptions{
-			Command: `sh -c 'trap "exit 130" INT; (trap "" INT; exec sleep 12) </dev/null >/dev/null 2>&1 & echo "$$" > ready; wait'`,
+			Command: `sh -c 'trap "exit 130" INT; (trap "" INT; echo "$$" > ready; exec sleep 12) </dev/null >/dev/null 2>&1 & wait'`,
 			Cwd:     cwd,
 			Env:     os.Environ(),
 		})

@@ -112,7 +112,6 @@ func newOAuth(
 	)
 	m.keyMap.Submit = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "copy & open"),
 	)
 	m.keyMap.FocusCode = key.NewBinding(
 		key.WithKeys("tab"),
@@ -314,22 +313,19 @@ func (m *OAuth) body(innerWidth int) (string, *tea.Cursor) {
 		return lipgloss.JoinVertical(lipgloss.Left, "", status, ""), nil
 
 	case OAuthStateDisplay:
+		flow := m.flowCopy()
 		// Render each text segment with its own style. Wrapping the
 		// whole concatenation in a single style would lose the text
 		// color after the enter key's reset code.
-		action := " to open the browser and authenticate."
-		if m.userCode != "" {
-			action = " to copy the code below and open the browser."
-		}
 		instructions := lipgloss.NewStyle().
 			Width(innerWidth).
 			Padding(0, 1).
 			Render(t.Dialog.OAuth.Instructions.Render("Press ") +
 				t.Dialog.OAuth.Enter.Render("enter") +
-				t.Dialog.OAuth.Instructions.Render(action))
+				t.Dialog.OAuth.Instructions.Render(" to "+flow.enterHint+"."))
 
 		elements := []string{"", instructions, ""}
-		if m.userCode != "" {
+		if m.deviceFlow() {
 			codeBox := lipgloss.NewStyle().
 				Width(innerWidth).
 				Height(7).
@@ -347,11 +343,7 @@ func (m *OAuth) body(innerWidth int) (string, *tea.Cursor) {
 			Padding(0, 1).
 			Render("Browser not opening? Pay a visit to:\n" + link)
 
-		waitingMsg := "Waiting for browser authentication..."
-		if m.userCode != "" {
-			waitingMsg = "Verifying..."
-		}
-		waiting := authSpinnerLine(t, m.spinner, innerWidth, waitingMsg)
+		waiting := authSpinnerLine(t, m.spinner, innerWidth, flow.waiting)
 
 		elements = append(elements, url, "", waiting, "")
 
@@ -428,23 +420,57 @@ func (m *OAuth) ShortHelp() []key.Binding {
 			}
 		}
 		submit := m.keyMap.Submit
-		if m.userCode == "" {
-			submit = key.NewBinding(
-				key.WithKeys("enter", "ctrl+y"),
-				key.WithHelp("enter", "open browser"),
-			)
-		}
+		submit.SetHelp("enter", m.flowCopy().enterHelp)
 		// The main action and esc come first so a narrow help bar
 		// truncates the optional hints rather than the way out.
 		h := []key.Binding{submit, authEscKey(false)}
 		if m.codeEntryActive() {
 			h = append(h, m.keyMap.FocusCode)
 		}
-		if m.userCode != "" {
+		if m.deviceFlow() {
 			h = append(h, m.keyMap.Copy)
 		}
 		return append(h, m.keyMap.CopyURL)
 	}
+}
+
+// oauthFlowCopy is the text that differs between the two sign-in flows,
+// kept together so the instructions and the help bar say the same thing.
+type oauthFlowCopy struct {
+	// enterHint finishes "Press enter to ..." in the instructions.
+	enterHint string
+	// enterHelp labels enter in the help bar.
+	enterHelp string
+	// waiting is shown beside the spinner while the sign-in completes.
+	waiting string
+}
+
+var (
+	browserFlowCopy = oauthFlowCopy{
+		enterHint: "open the browser and authenticate",
+		enterHelp: "open browser",
+		waiting:   "Waiting for browser authentication...",
+	}
+	deviceFlowCopy = oauthFlowCopy{
+		enterHint: "copy the code below and open the browser",
+		enterHelp: "copy & open",
+		waiting:   "Verifying...",
+	}
+)
+
+// deviceFlow reports whether the sign-in is a device flow: the user
+// copies a code out and enters it on the verification page, rather than
+// authorizing in a browser that calls back.
+func (m *OAuth) deviceFlow() bool {
+	return m.userCode != ""
+}
+
+// flowCopy returns the text for the current flow.
+func (m *OAuth) flowCopy() oauthFlowCopy {
+	if m.deviceFlow() {
+		return deviceFlowCopy
+	}
+	return browserFlowCopy
 }
 
 // codeEntryActive reports whether the paste field is shown: a browser
@@ -452,11 +478,11 @@ func (m *OAuth) ShortHelp() []key.Binding {
 // flow's code is only ever copied out, never pasted in).
 func (m *OAuth) codeEntryActive() bool {
 	return m.oAuthProvider.supportsCodeEntry() &&
-		m.State == OAuthStateDisplay && m.userCode == ""
+		m.State == OAuthStateDisplay && !m.deviceFlow()
 }
 
 func (m *OAuth) copyCode() tea.Cmd {
-	if m.State != OAuthStateDisplay || m.userCode == "" {
+	if m.State != OAuthStateDisplay || !m.deviceFlow() {
 		return nil
 	}
 	return common.CopyToClipboard(m.userCode, "Code copied to clipboard")
@@ -473,25 +499,17 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if m.State != OAuthStateDisplay {
 		return nil
 	}
-	if m.userCode == "" {
-		// Browser flows have no code to copy; just open the URL.
-		return func() tea.Msg {
-			if err := browser.OpenURL(m.verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
-			}
-			return nil
+	openURL := func() tea.Msg {
+		if err := browser.OpenURL(m.verificationURL); err != nil {
+			return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
 		}
+		return nil
 	}
-	return common.CopyToClipboardWithCallback(
-		m.userCode,
-		"Code copied and URL opened",
-		func() tea.Msg {
-			if err := browser.OpenURL(m.verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
-			}
-			return nil
-		},
-	)
+	if !m.deviceFlow() {
+		// Browser flows have no code to copy; just open the URL.
+		return openURL
+	}
+	return common.CopyToClipboardWithCallback(m.userCode, "Code copied and URL opened", openURL)
 }
 
 // saveCredential returns a command that persists the OAuth token and

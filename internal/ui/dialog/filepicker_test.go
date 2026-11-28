@@ -81,13 +81,12 @@ func writeTestPNG(t *testing.T) (dir, path string) {
 // Kitty encoding; with no cell size that skips the block rasterizer,
 // keeping the tests cheap.
 func newPreviewTestPicker(dir string) (*FilePicker, tea.Cmd) {
-	fp, initCmd := NewFilePicker(newPickerTestCommon())
+	// The constructor's command reads the original directory; return one
+	// reading the test directory instead.
+	fp, _ := NewFilePicker(newPickerTestCommon())
 	fp.imgEnc = fimage.EncodingKitty
 	fp.fp.CurrentDirectory = dir
-	// The constructor's command reads the original directory; read the
-	// test one instead.
-	initCmd = fp.fp.Init()
-	return fp, initCmd
+	return fp, fp.fp.Init()
 }
 
 // runCmds runs cmd the way Bubble Tea would, expanding batches and
